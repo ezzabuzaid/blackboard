@@ -1,0 +1,29 @@
+{
+  "name": "api",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node --env-file-if-exists=../../.env --import tsx --watch src/index.ts",
+    "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "test": "node --test dist/app.test.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.15",
+    "@deepagents/context": "5.0.0",
+    "@deepagents/experimental": "5.0.0",
+    "@electric-sql/pglite": "0.5.4",
+    "@hono/node-server": "1.19.14",
+    "ai": "7.0.30",
+    "hono": "4.12.31",
+    "just-bash": "3.1.0",
+    "pg-boss": "12.26.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.1",
+    "typescript": "^6"
+  }
+}

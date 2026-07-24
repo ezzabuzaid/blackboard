@@ -1,0 +1,33 @@
+{
+  "name": "web",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "test": "node --import tsx --test src/routes/ChatBot/index.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/react": "4.0.33",
+    "@workspace/ui": "*",
+    "ai": "7.0.30",
+    "lucide-react": "^1.26.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-router": "7.15.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "6.0.4",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.1",
+    "typescript": "^6",
+    "vite": "^8"
+  }
+}

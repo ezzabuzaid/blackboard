@@ -1,0 +1,26 @@
+{
+  "name": "self-delegate",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "build": "nx run-many -t build",
+    "dev": "nx run-many -t dev --parallel=2",
+    "format": "prettier --write .",
+    "test": "nx run-many -t test",
+    "typecheck": "nx run-many -t typecheck"
+  },
+  "devDependencies": {
+    "nx": "23.1.0",
+    "prettier": "^3.8.3",
+    "prettier-plugin-tailwindcss": "^0.8.0",
+    "typescript": "^6"
+  },
+  "packageManager": "npm@11.12.1",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
