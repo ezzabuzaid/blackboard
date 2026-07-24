@@ -1,23 +1,20 @@
-import { Bubble, BubbleContent } from "@workspace/ui/components/bubble"
 import {
+  Bubble,
+  BubbleContent,
   Marker,
   MarkerContent,
   MarkerIcon,
-} from "@workspace/ui/components/marker"
-import {
   Message,
   MessageContent,
   MessageHeader,
-} from "@workspace/ui/components/message"
-import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-} from "@workspace/ui/components/message-scroller"
-import { Spinner } from "@workspace/ui/components/spinner"
+  Spinner,
+} from "@stdlib/shadcn"
 import { Streamdown } from "streamdown"
 
 import { useChatSession } from "./ChatSession"

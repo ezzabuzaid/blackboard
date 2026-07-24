@@ -9,7 +9,7 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": ["./src/*"],
-      "@workspace/ui/*": ["../../packages/ui/src/*"]
+      "@stdlib/shadcn": ["../../packages/ui/src/index.ts"]
     },
     "esModuleInterop": true,
     "verbatimModuleSyntax": true,

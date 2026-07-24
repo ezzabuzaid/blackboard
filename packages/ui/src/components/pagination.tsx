@@ -1,7 +1,7 @@
 import * as React from "react"
 
-import { cn } from "@workspace/ui/lib/utils"
-import { Button } from "@workspace/ui/components/button"
+import { cn } from "../lib/utils"
+import { Button } from "./button"
 import {
   ChevronLeftIcon,
   ChevronRightIcon,

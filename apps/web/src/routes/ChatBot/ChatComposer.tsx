@@ -5,14 +5,12 @@ import {
   FieldDescription,
   FieldError,
   FieldLabel,
-} from "@workspace/ui/components/field"
-import {
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupTextarea,
-} from "@workspace/ui/components/input-group"
-import { Kbd } from "@workspace/ui/components/kbd"
+  Kbd,
+} from "@stdlib/shadcn"
 
 import { useChatSession } from "./ChatSession"
 

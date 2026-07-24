@@ -1,7 +1,6 @@
 import { useLoaderData } from "react-router"
 
-import { Avatar, AvatarFallback } from "@workspace/ui/components/avatar"
-import { Badge } from "@workspace/ui/components/badge"
+import { Avatar, AvatarFallback, Badge } from "@stdlib/shadcn"
 
 import type { loader } from "./loader"
 

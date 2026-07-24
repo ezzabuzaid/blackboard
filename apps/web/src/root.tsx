@@ -6,7 +6,7 @@ import {
   useRouteError,
 } from "react-router"
 
-import { TooltipProvider } from "@workspace/ui/components/tooltip"
+import { TooltipProvider } from "@stdlib/shadcn"
 
 export function Root() {
   const navigation = useNavigation()

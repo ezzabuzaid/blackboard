@@ -1,4 +1,4 @@
-import { cn } from "@workspace/ui/lib/utils"
+import { cn } from "@stdlib/shadcn"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import type { ReactNode } from "react"
 

@@ -1,15 +1,14 @@
 import { useEffect, useState } from "react"
 
-import { Alert, AlertDescription } from "@workspace/ui/components/alert"
-import { Badge } from "@workspace/ui/components/badge"
 import {
+  Alert,
+  AlertDescription,
+  Badge,
   Empty,
   EmptyDescription,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "@workspace/ui/components/empty"
-import {
   Item,
   ItemActions,
   ItemContent,
@@ -17,9 +16,9 @@ import {
   ItemGroup,
   ItemMedia,
   ItemTitle,
-} from "@workspace/ui/components/item"
-import { ScrollArea } from "@workspace/ui/components/scroll-area"
-import { Separator } from "@workspace/ui/components/separator"
+  ScrollArea,
+  Separator,
+} from "@stdlib/shadcn"
 import { InfoOverlay } from "../../components/InfoOverlay"
 import { CircleAlert, ListTodo } from "lucide-react"
 
