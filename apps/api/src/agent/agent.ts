@@ -6,12 +6,16 @@ import { defineAgent } from "@deepagents/experimental/zukhruf"
 
 import instructions from "./instructions.js"
 import sandbox from "./sandbox.js"
+import { scheduleTask } from "./tools/schedule-task.js"
 
 export const assistant = defineAgent({
   name: "LocalAssistant",
   model: openai("gpt-5.6-luna"),
   sandbox,
   instructions,
+  tools: {
+    schedule_task: scheduleTask,
+  },
   telemetry: {
     integrations: createFileTelemetry({
       path: resolve(

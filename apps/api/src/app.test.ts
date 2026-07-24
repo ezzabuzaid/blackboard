@@ -3,6 +3,7 @@ import test from "node:test"
 
 import type { AgentRuntime } from "@deepagents/experimental/zukhruf"
 
+import { scheduleTask } from "./agent/tools/schedule-task.js"
 import { createApp } from "./app.js"
 
 const unusedRuntime: Pick<AgentRuntime, "enqueue"> = {
@@ -93,4 +94,45 @@ test("development CORS accepts a local fallback port", async () => {
     response.headers.get("Access-Control-Allow-Origin"),
     "http://localhost:5174"
   )
+})
+
+test("schedule_task enqueues work for the same conversation", async () => {
+  let received:
+    | [{ chatId: string; userId: string }, { id: string; input: string }]
+    | undefined
+  const executeOptions = {
+    toolCallId: "tool-call-1",
+    messages: [],
+    abortSignal: new AbortController().signal,
+    context: {
+      actor: {
+        thread: {
+          conversation: { chatId: "chat-1", userId: "local-user" },
+        },
+      },
+      controlPlane: {
+        async enqueue(
+          conversation: { chatId: string; userId: string },
+          turn: { id: string; input: string }
+        ) {
+          received = [conversation, turn]
+          return "turn-2"
+        },
+      },
+    },
+  } as Parameters<typeof scheduleTask.execute>[1]
+
+  const result = await scheduleTask.execute(
+    { task: " Research the side lead. " },
+    executeOptions
+  )
+
+  assert.deepEqual(received, [
+    { chatId: "chat-1", userId: "local-user" },
+    {
+      id: "tool-call-1",
+      input: "Self-scheduled task:\nResearch the side lead.",
+    },
+  ])
+  assert.deepEqual(result, { turnId: "turn-2" })
 })
