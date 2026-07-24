@@ -18,13 +18,15 @@ import {
   MessageScrollerViewport,
 } from "@workspace/ui/components/message-scroller"
 import { Spinner } from "@workspace/ui/components/spinner"
+import { Streamdown } from "streamdown"
 
 import { useChatSession } from "./ChatSession"
 
 export function Conversation() {
   const { messages, status } = useChatSession()
+  const latestMessage = messages.at(-1)
   const pending = status === "submitted" || status === "streaming"
-  const waitingForAssistant = pending && messages.at(-1)?.role === "user"
+  const waitingForAssistant = pending && latestMessage?.role === "user"
 
   return (
     <section aria-label="Conversation" className="min-h-0 flex-1">
@@ -56,10 +58,32 @@ export function Conversation() {
                       <Bubble
                         variant={message.role === "user" ? "default" : "ghost"}
                       >
-                        <BubbleContent className="whitespace-pre-wrap">
+                        <BubbleContent
+                          className={
+                            message.role === "user"
+                              ? "whitespace-pre-wrap"
+                              : undefined
+                          }
+                        >
                           {message.parts.map((part, index) =>
                             part.type === "text" ? (
-                              <p key={`${message.id}-${index}`}>{part.text}</p>
+                              message.role === "assistant" ? (
+                                <Streamdown
+                                  key={`${message.id}-${index}`}
+                                  mode={
+                                    status === "streaming" &&
+                                    message.id === latestMessage?.id
+                                      ? "streaming"
+                                      : "static"
+                                  }
+                                >
+                                  {part.text}
+                                </Streamdown>
+                              ) : (
+                                <p key={`${message.id}-${index}`}>
+                                  {part.text}
+                                </p>
+                              )
                             ) : null
                           )}
                         </BubbleContent>

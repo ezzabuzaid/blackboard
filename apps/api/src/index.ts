@@ -1,27 +1,96 @@
-import { serve } from "@hono/node-server"
+import { mkdir } from "node:fs/promises"
+import { join, resolve } from "node:path"
 
-import { createZukhrufHost } from "./agent/runtime.js"
+import { SqliteContextStore, SqliteStreamStore } from "@deepagents/context"
+import {
+  AgentRuntime,
+  PgBossTurnQueue,
+  SqliteMailboxStore,
+  type ConversationId,
+  type TurnRef,
+} from "@deepagents/experimental/zukhruf"
+import { PGlite } from "@electric-sql/pglite"
+import { serve } from "@hono/node-server"
+import { PgBoss, fromPglite } from "pg-boss"
+
+import { assistant } from "./agent/agent.js"
+import { disposeSandboxes } from "./agent/sandbox.js"
 import { createApp } from "./app.js"
 
-const port = Number(process.env.PORT ?? 3001)
-const host = await createZukhrufHost()
-const app = createApp(host.runtime)
+await using resources = new AsyncDisposableStack()
 
-const server = serve({ fetch: app.fetch, port }, ({ port: listeningPort }) => {
-  console.log(`API listening on http://localhost:${listeningPort}`)
+const dataDir = resolve(process.env.ZUKHRUF_DATA_DIR ?? ".data/zukhruf")
+await mkdir(dataDir, { recursive: true })
+
+const database = new PGlite(join(dataDir, "queue"))
+resources.defer(() => database.close())
+
+const streamStore = new SqliteStreamStore(join(dataDir, "streams.sqlite"))
+resources.defer(() => streamStore.close())
+
+const mailboxStore = new SqliteMailboxStore(join(dataDir, "mailbox.sqlite"))
+resources.defer(() => mailboxStore.close())
+
+const boss = new PgBoss({
+  db: fromPglite(database),
+  backend: "pglite",
+})
+boss.on("error", (error) => console.error("[queue error]", error))
+await boss.start()
+resources.defer(() => boss.stop({ graceful: false }))
+
+const queue = new PgBossTurnQueue(boss, { schema: "pgboss" })
+await queue.initialize()
+
+const runtime = new AgentRuntime(assistant, {
+  store: new SqliteContextStore(join(dataDir, "context.sqlite")),
+  streamStore,
+  queue,
+  mailboxStore,
+})
+resources.defer(disposeSandboxes)
+resources.use(await runtime.work())
+
+const app = createApp({
+  runtime,
+  streams: streamStore,
+  listQueuedTurns: async (conversation: ConversationId) => {
+    const jobs = await boss.findJobs<TurnRef>(queue.queue, {
+      key: conversation.chatId,
+      queued: true,
+    })
+
+    return jobs
+      .filter((job) => job.data.userId === conversation.userId)
+      .sort(
+        (left, right) =>
+          right.priority - left.priority ||
+          +new Date(left.createdOn) - +new Date(right.createdOn) ||
+          left.id.localeCompare(right.id)
+      )
+      .map((job) => ({
+        id: job.data.streamId,
+        kind: job.data.kind,
+        input: job.data.kind === "ask" ? job.data.input : null,
+      }))
+  },
 })
 
-let stopping: Promise<void> | undefined
-function stop() {
-  stopping ??= (async () => {
-    await server[Symbol.asyncDispose]()
-    await host.close()
-  })()
-  void stopping.catch((error) => {
-    console.error(error)
-    process.exitCode = 1
-  })
-}
+await using server = serve(
+  {
+    fetch: app.fetch,
+    port: Number(process.env.PORT ?? 3001),
+  },
+  ({ port }) => console.log(`API listening on http://localhost:${port}`)
+)
 
-process.once("SIGINT", stop)
-process.once("SIGTERM", stop)
+await new Promise<void>((resolve) => {
+  function stop() {
+    process.off("SIGINT", stop)
+    process.off("SIGTERM", stop)
+    resolve()
+  }
+
+  process.once("SIGINT", stop)
+  process.once("SIGTERM", stop)
+})

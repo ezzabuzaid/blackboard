@@ -1,29 +1,27 @@
-import type { LoaderFunctionArgs } from "react-router"
+import { useLoaderData } from "react-router"
 
 import { ChatComposer } from "./ChatComposer"
 import { ChatHeader } from "./ChatHeader"
-import { apiUrl, ChatSessionProvider } from "./ChatSession"
+import { ChatSessionProvider } from "./ChatSession"
 import { Conversation } from "./Conversation"
+import { loader } from "./loader"
+import { QueuedTurnsOverlay } from "./QueuedTurnsOverlay"
 
-export async function loader({ request }: LoaderFunctionArgs) {
-  try {
-    const response = await fetch(`${apiUrl}/api/health`, {
-      signal: request.signal,
-    })
-    return {
-      apiStatus: response.ok ? ("ready" as const) : ("offline" as const),
-    }
-  } catch (error) {
-    if (request.signal.aborted) throw error
-    return { apiStatus: "offline" as const }
-  }
-}
+export { loader }
 
 export default function ChatBot() {
+  const { chatId, initialMessages, resume } =
+    useLoaderData<typeof loader>()
+
   return (
-    <ChatSessionProvider>
-      <main className="flex h-svh flex-col bg-background">
+    <ChatSessionProvider
+      chatId={chatId}
+      initialMessages={initialMessages}
+      resume={resume}
+    >
+      <main className="relative flex h-svh flex-col bg-background">
         <ChatHeader />
+        <QueuedTurnsOverlay />
         <Conversation />
         <ChatComposer />
       </main>

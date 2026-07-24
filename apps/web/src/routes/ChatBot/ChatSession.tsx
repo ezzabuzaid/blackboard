@@ -1,10 +1,14 @@
 import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport } from "ai"
-import { createContext, type PropsWithChildren, useContext } from "react"
+import type { UIMessage } from "ai"
+import {
+  createContext,
+  type PropsWithChildren,
+  useContext,
+  useEffect,
+  useRef,
+} from "react"
 
-export const apiUrl = import.meta.env?.VITE_API_URL ?? "http://localhost:3001"
-
-const transport = new DefaultChatTransport({ api: `${apiUrl}/api/chat` })
+import { chatTransport } from "./chatTransport"
 
 type ChatSession = ReturnType<typeof useChat>
 
@@ -16,8 +20,30 @@ export function useChatSession() {
   return session
 }
 
-export function ChatSessionProvider({ children }: PropsWithChildren) {
-  const session = useChat({ transport })
+interface ChatSessionProviderProps extends PropsWithChildren {
+  chatId: string
+  initialMessages: UIMessage[]
+  resume: boolean
+}
+
+export function ChatSessionProvider({
+  chatId,
+  initialMessages,
+  resume,
+  children,
+}: ChatSessionProviderProps) {
+  const resumedChatId = useRef<string | null>(null)
+  const session = useChat({
+    id: chatId,
+    messages: initialMessages,
+    transport: chatTransport,
+  })
+
+  useEffect(() => {
+    if (!resume || resumedChatId.current === chatId) return
+    resumedChatId.current = chatId
+    void session.resumeStream()
+  }, [chatId, resume, session.resumeStream])
 
   return (
     <ChatSessionContext.Provider value={session}>

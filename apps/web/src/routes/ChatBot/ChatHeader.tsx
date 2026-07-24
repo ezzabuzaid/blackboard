@@ -3,7 +3,7 @@ import { useLoaderData } from "react-router"
 import { Avatar, AvatarFallback } from "@workspace/ui/components/avatar"
 import { Badge } from "@workspace/ui/components/badge"
 
-import type { loader } from "./index"
+import type { loader } from "./loader"
 
 export function ChatHeader() {
   const { apiStatus } = useLoaderData<typeof loader>()

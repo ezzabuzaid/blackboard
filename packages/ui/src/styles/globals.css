@@ -3,10 +3,12 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/outfit";
 @import "@fontsource-variable/geist";
+@import "streamdown/styles.css";
 
 @custom-variant dark (&:is(.dark *));
 @source "../../../apps/**/*.{ts,tsx}";
 @source "../../../components/**/*.{ts,tsx}";
+@source "../../../node_modules/streamdown/dist/*.js";
 @source "../**/*.{ts,tsx}";
 
 :root {
