@@ -10,6 +10,7 @@ import {
   type TurnRef,
 } from "@deepagents/experimental/zukhruf"
 import { PGlite } from "@electric-sql/pglite"
+import { createTerminus } from "@godaddy/terminus"
 import { serve } from "@hono/node-server"
 import { PgBoss, fromPglite } from "pg-boss"
 
@@ -84,13 +85,11 @@ await using server = serve(
   ({ port }) => console.log(`API listening on http://localhost:${port}`)
 )
 
-await new Promise<void>((resolve) => {
-  function stop() {
-    process.off("SIGINT", stop)
-    process.off("SIGTERM", stop)
-    resolve()
-  }
-
-  process.once("SIGINT", stop)
-  process.once("SIGTERM", stop)
+createTerminus(server, {
+  signals: ["SIGINT", "SIGTERM"],
+  useExit0: true,
+  onSignal: () => resources.disposeAsync(),
+  logger: (message, error) => console.error(message, error),
 })
+
+await new Promise<never>(() => {})
