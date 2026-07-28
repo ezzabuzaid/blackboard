@@ -4,13 +4,13 @@ import test from "node:test"
 import type { AgentRuntime } from "@deepagents/experimental/zukhruf"
 import type { UIMessage } from "ai"
 
-import agentSandbox, { disposeSandboxes } from "./agent/sandbox.js"
+import agentSandbox, {
+  disposeSandboxes,
+  removeSandbox,
+} from "./agent/sandbox.js"
 import { scheduleTask } from "./agent/tools/schedule-task.js"
 import { createApp } from "./app.js"
-import type {
-  ChatRuntime,
-  ChatStreamStore,
-} from "./chat/chat-service.js"
+import type { ChatRuntime, ChatStreamStore } from "./chat/chat-service.js"
 import type { ListQueuedTurns, QueuedTurn } from "./chat/routes.js"
 
 const unusedRuntime: ChatRuntime = {
@@ -28,7 +28,6 @@ const noStreams: ChatStreamStore = {
     return null
   },
 }
-
 function testApp({
   runtime = unusedRuntime,
   streams = noStreams,
@@ -92,19 +91,19 @@ test("chat enqueues the latest UI message as a Zukhruf turn", async () => {
     observe: unusedRuntime.observe,
   }
   const response = await testApp({ runtime }).request("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: "chat-1",
-        messages: [
-          {
-            id: "message-1",
-            role: "user",
-            parts: [{ type: "text", text: " Hello " }],
-          },
-        ],
-      }),
-    })
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: "chat-1",
+      messages: [
+        {
+          id: "message-1",
+          role: "user",
+          parts: [{ type: "text", text: " Hello " }],
+        },
+      ],
+    }),
+  })
 
   assert.equal(response.status, 200)
   assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/)
@@ -228,9 +227,7 @@ test("chat stream endpoint replays the durable head stream", async () => {
     },
   }
 
-  const response = await testApp({ runtime }).request(
-    "/api/chat/chat-1/stream"
-  )
+  const response = await testApp({ runtime }).request("/api/chat/chat-1/stream")
 
   assert.equal(response.status, 200)
   assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/)
@@ -257,9 +254,7 @@ test("chat stream endpoint returns no content before a turn exists", async () =>
     },
   }
 
-  const response = await testApp({ runtime }).request(
-    "/api/chat/chat-1/stream"
-  )
+  const response = await testApp({ runtime }).request("/api/chat/chat-1/stream")
 
   assert.equal(response.status, 204)
 })
@@ -316,26 +311,55 @@ test("schedule_task enqueues work for the same conversation", async () => {
   assert.deepEqual(result, { turnId: "turn-2" })
 })
 
-test("Agent OS sandbox persists files across turns in one chat", async () => {
+test("sandbox exposes a persistent workspace to Bash across turns", async () => {
   const conversation = { chatId: "chat-1", userId: "local-user" }
 
   try {
     const firstTurn = await agentSandbox(conversation)
     await firstTurn.sandbox.writeFiles([
-      { path: "/workspace/probe.txt", content: "agent-os" },
+      { path: "/workspace/probe.txt", content: "sandbox" },
+      { path: "/workspace/output/sample.pdf", content: "%PDF-sample" },
     ])
 
     const secondTurn = await agentSandbox(conversation)
     assert.equal(
       await secondTurn.sandbox.readFile("/workspace/probe.txt"),
-      "agent-os"
+      "sandbox"
     )
-    const result = await secondTurn.sandbox.executeCommand(
-      "printf sandbox-ready"
+    const workingDirectory = await secondTurn.sandbox.executeCommand("pwd")
+    assert.deepEqual(workingDirectory, {
+      stdout: "/workspace\n",
+      stderr: "",
+      exitCode: 0,
+    })
+
+    const inventory = await secondTurn.sandbox.executeCommand(
+      "find /workspace -maxdepth 1 -type f -print | sort"
     )
-    assert.equal(result.exitCode, 0)
-    assert.equal(result.stdout, "sandbox-ready")
+    assert.deepEqual(inventory, {
+      stdout: "/workspace/probe.txt\n",
+      stderr: "",
+      exitCode: 0,
+    })
+
+    const artifact = await app.request("/api/chat/chat-1/artifacts/sample.pdf")
+    assert.equal(artifact.status, 200)
+    assert.equal(artifact.headers.get("content-type"), "application/pdf")
+    assert.equal(
+      artifact.headers.get("content-disposition"),
+      "inline; filename*=UTF-8''sample.pdf"
+    )
+    assert.equal(await artifact.text(), "%PDF-sample")
+
+    const missing = await app.request("/api/chat/chat-1/artifacts/missing.pdf")
+    assert.equal(missing.status, 404)
+
+    const traversal = await app.request(
+      "/api/chat/chat-1/artifacts/%2E%2E%2Fprobe.txt"
+    )
+    assert.equal(traversal.status, 400)
   } finally {
     await disposeSandboxes()
+    await removeSandbox(conversation)
   }
 })

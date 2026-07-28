@@ -1,0 +1,28 @@
+#!/bin/sh
+set -eu
+
+if wget -qO- http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
+  exit 0
+fi
+
+rm -rf /tmp/agent-browser-chromium
+nohup /usr/local/bin/browser \
+  --headless=new \
+  --no-sandbox \
+  --disable-dev-shm-usage \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222 \
+  --user-data-dir=/tmp/agent-browser-chromium \
+  --allow-file-access-from-files \
+  --allow-file-access \
+  about:blank >/tmp/agent-browser-chromium.log 2>&1 </dev/null &
+
+attempt=0
+until wget -qO- http://127.0.0.1:9222/json/version >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -eq 50 ]; then
+    cat /tmp/agent-browser-chromium.log >&2
+    exit 1
+  fi
+  sleep 0.1
+done

@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --env-file-if-exists=../../.env --import tsx --watch src/index.ts",
+    "sandbox-image": "sh sandbox/build-image.sh",
     "start": "node --env-file-if-exists=../../.env dist/index.js",
     "test": "node --test dist/app.test.js",
     "typecheck": "tsc --noEmit"
@@ -17,10 +18,9 @@
     "@electric-sql/pglite": "0.5.4",
     "@godaddy/terminus": "^4.12.1",
     "@hono/node-server": "1.19.14",
-    "@rivet-dev/agent-os-common": "^0.0.260331072558",
-    "@rivet-dev/agent-os-core": "^0.1.1",
     "ai": "7.0.30",
     "hono": "4.12.31",
+    "microsandbox": "^0.6.7",
     "pg-boss": "12.26.1"
   },
   "devDependencies": {

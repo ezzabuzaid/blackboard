@@ -10,7 +10,7 @@ import { scheduleTask } from "./tools/schedule-task.js"
 
 export const assistant = defineAgent({
   name: "LocalAssistant",
-  model: openai("gpt-5.6-luna"),
+  model: openai("gpt-5.6-terra"),
   sandbox,
   instructions,
   tools: {

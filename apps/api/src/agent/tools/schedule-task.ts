@@ -30,7 +30,7 @@ export const scheduleTask = defineTool<
   ScheduleTaskContext
 >({
   description:
-    "Schedule one concrete follow-up task for your next turn. Use this when you discover useful work that is not required to finish the current task. The scheduled task cannot run until this turn finishes, so keep working on the current task after scheduling it.",
+    "Queue one concrete phase for your next turn. For a substantial request, use this after completing the current phase when required work remains. Schedule only the single highest-priority, self-contained next phase. It cannot run until this turn finishes, so do not assume its result.",
   inputSchema: jsonSchema<ScheduleTaskInput>({
     type: "object",
     properties: {
@@ -39,7 +39,8 @@ export const scheduleTask = defineTool<
         minLength: 1,
         maxLength: 8000,
         pattern: "\\S",
-        description: "A self-contained task for your next turn.",
+        description:
+          "The single highest-priority, self-contained phase for your next turn.",
       },
     },
     required: ["task"],

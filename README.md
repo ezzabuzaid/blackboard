@@ -17,10 +17,13 @@ cd ../experimental
 npm link
 cd /Users/ezzabuzaid/Desktop/experiments/self-delegate
 npm link @deepagents/context @deepagents/experimental --workspace api --save=false
+npm run sandbox-image --workspace api
 npm run dev
 ```
 
-Set `OPENAI_API_KEY` in `.env` before sending a message.
+The sandbox image command loads Chromium, `agent-browser`, and its
+version-matched skills into Microsandbox's local OCI cache. Set `OPENAI_API_KEY`
+in `.env` before sending a message.
 
 ## Checks
 

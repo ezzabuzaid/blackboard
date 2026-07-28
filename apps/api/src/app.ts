@@ -6,10 +6,7 @@ import {
   type ChatRuntime,
   type ChatStreamStore,
 } from "./chat/chat-service.js"
-import {
-  createChatRoutes,
-  type ListQueuedTurns,
-} from "./chat/routes.js"
+import { createChatRoutes, type ListQueuedTurns } from "./chat/routes.js"
 
 const configuredOrigin = process.env.WEB_ORIGIN
 

@@ -15,12 +15,15 @@ import {
   MessageScrollerViewport,
   Spinner,
 } from "@stdlib/shadcn"
+import { useMemo } from "react"
 import { Streamdown } from "streamdown"
 
+import { AgentTrajectory } from "./AgentTrajectory"
 import { useChatSession } from "./ChatSession"
+import { artifactBaseUrl, artifactRemarkPlugins } from "./artifactLinks"
 
 export function Conversation() {
-  const { messages, status } = useChatSession()
+  const { id: chatId, messages, status } = useChatSession()
   const latestMessage = messages.at(-1)
   const pending = status === "submitted" || status === "streaming"
   const waitingForAssistant = pending && latestMessage?.role === "user"
@@ -52,6 +55,15 @@ export function Conversation() {
                       {message.role === "assistant" && (
                         <MessageHeader>Assistant</MessageHeader>
                       )}
+                      {message.role === "assistant" && (
+                        <AgentTrajectory
+                          active={
+                            status === "streaming" &&
+                            message.id === latestMessage?.id
+                          }
+                          parts={message.parts}
+                        />
+                      )}
                       <Bubble
                         variant={message.role === "user" ? "default" : "ghost"}
                       >
@@ -65,17 +77,15 @@ export function Conversation() {
                           {message.parts.map((part, index) =>
                             part.type === "text" ? (
                               message.role === "assistant" ? (
-                                <Streamdown
-                                  key={`${message.id}-${index}`}
-                                  mode={
+                                <AssistantMarkdown
+                                  active={
                                     status === "streaming" &&
                                     message.id === latestMessage?.id
-                                      ? "streaming"
-                                      : "static"
                                   }
-                                >
-                                  {part.text}
-                                </Streamdown>
+                                  chatId={chatId}
+                                  key={`${message.id}-${index}`}
+                                  text={part.text}
+                                />
                               ) : (
                                 <p key={`${message.id}-${index}`}>
                                   {part.text}
@@ -109,6 +119,38 @@ export function Conversation() {
         </MessageScroller>
       </MessageScrollerProvider>
     </section>
+  )
+}
+
+interface AssistantMarkdownProps {
+  active: boolean
+  chatId: string
+  text: string
+}
+
+export function AssistantMarkdown({
+  active,
+  chatId,
+  text,
+}: AssistantMarkdownProps) {
+  const remarkPlugins = useMemo(() => artifactRemarkPlugins(chatId), [chatId])
+  const trustedArtifactBaseUrl = artifactBaseUrl(chatId)
+  const linkSafety = useMemo(
+    () => ({
+      enabled: true,
+      onLinkCheck: (url: string) => url.startsWith(trustedArtifactBaseUrl),
+    }),
+    [trustedArtifactBaseUrl]
+  )
+
+  return (
+    <Streamdown
+      linkSafety={linkSafety}
+      mode={active ? "streaming" : "static"}
+      remarkPlugins={remarkPlugins}
+    >
+      {text}
+    </Streamdown>
   )
 }
 

@@ -1,4 +1,4 @@
-import { useChat } from "@ai-sdk/react"
+import { useChat, type UseChatHelpers } from "@ai-sdk/react"
 import type { UIMessage } from "ai"
 import {
   createContext,
@@ -10,7 +10,7 @@ import {
 
 import { chatTransport } from "./chatTransport"
 
-type ChatSession = ReturnType<typeof useChat>
+type ChatSession = UseChatHelpers<UIMessage>
 
 const ChatSessionContext = createContext<ChatSession | null>(null)
 

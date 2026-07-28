@@ -1,8 +1,14 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import type { UIMessage } from "ai"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import type { LoaderFunctionArgs } from "react-router"
+import { Streamdown } from "streamdown"
 
+import { AgentTrajectory } from "./AgentTrajectory"
+import { artifactRemarkPlugins, sandboxArtifactUrl } from "./artifactLinks"
 import { loader } from "./loader"
 
 test("loader adds a chat id to the URL", async () => {
@@ -83,4 +89,66 @@ test("loader hydrates the selected chat and reports API state", async () => {
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test("agent trajectory renders AI SDK message parts", () => {
+  const parts: UIMessage["parts"] = [
+    { type: "step-start" },
+    {
+      type: "dynamic-tool",
+      toolCallId: "tool-1",
+      toolName: "writeFile",
+      state: "output-available",
+      input: { path: "/workspace/sample.pdf" },
+      output: { success: true },
+    },
+    { type: "step-start" },
+  ]
+  const html = renderToStaticMarkup(
+    AgentTrajectory({
+      active: false,
+      parts,
+    })
+  )
+
+  assert.match(html, /Activity/)
+  assert.match(html, /2 steps · 1 tool/)
+  assert.doesNotMatch(html, /Step 1/)
+  assert.doesNotMatch(html, /Step 2/)
+  assert.match(html, /Write file/)
+  assert.match(html, /Completed/)
+  assert.match(html, /sample\.pdf/)
+  assert.match(html, /success/)
+})
+
+test("assistant artifact links resolve through the chat API", () => {
+  assert.equal(
+    sandboxArtifactUrl(
+      "sandbox:/workspace/output/reports/sample%20report.pdf",
+      "chat/1"
+    ),
+    "http://localhost:3001/api/chat/chat%2F1/artifacts/reports/sample%20report.pdf"
+  )
+  assert.equal(
+    sandboxArtifactUrl("file:///workspace/output/index.html", "chat-1"),
+    "http://localhost:3001/api/chat/chat-1/artifacts/index.html"
+  )
+  assert.equal(
+    sandboxArtifactUrl("sandbox:/workspace/private.txt", "chat-1"),
+    null
+  )
+
+  const html = renderToStaticMarkup(
+    createElement(
+      Streamdown,
+      {
+        mode: "static",
+        remarkPlugins: artifactRemarkPlugins("chat-1"),
+      },
+      "[**VANTAGE // Arena Protocol**](file:///workspace/output/index.html)"
+    )
+  )
+
+  assert.match(html, /data-streamdown="link"/)
+  assert.doesNotMatch(html, /\[blocked\]/)
 })
