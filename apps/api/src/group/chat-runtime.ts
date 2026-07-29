@@ -6,17 +6,35 @@ import type { ConversationId } from "@deepagents/experimental/zukhruf"
 
 import {
   WhatsAppGroup,
+  type WhatsAppGroupLimits,
   type WhatsAppParticipant,
   type WhatsAppRoomEvent,
 } from "./whatsapp.js"
+import { WhatsAppRoomStore } from "./room-store.js"
 
 export class WhatsAppChatRuntime implements AsyncDisposable {
   readonly #participants: WhatsAppParticipant[]
   readonly #chats = new Map<string, Promise<WhatsAppGroup>>()
   readonly #resources = new AsyncDisposableStack()
+  readonly #store: WhatsAppRoomStore
+  readonly #limits?: Partial<WhatsAppGroupLimits>
 
-  constructor(participants = defaultParticipants()) {
+  constructor(
+    participants = defaultParticipants(),
+    {
+      storagePath = resolve(
+        process.env.ZUKHRUF_DATA_DIR ?? ".data/zukhruf",
+        "group-rooms.sqlite"
+      ),
+      limits,
+    }: {
+      storagePath?: string
+      limits?: Partial<WhatsAppGroupLimits>
+    } = {}
+  ) {
     this.#participants = participants
+    this.#limits = limits
+    this.#store = this.#resources.use(new WhatsAppRoomStore(storagePath))
   }
 
   async post(
@@ -41,6 +59,11 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     return group.subscribe({ after, onEvent })
   }
 
+  async stop(conversation: ConversationId) {
+    const group = await this.#chat(conversation)
+    return group.stop()
+  }
+
   async [Symbol.asyncDispose]() {
     await Promise.allSettled(this.#chats.values())
     await this.#resources.disposeAsync()
@@ -51,23 +74,51 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     const existing = this.#chats.get(key)
     if (existing) return existing
 
-    const chat = WhatsAppGroup.create({
-      userId: conversation.userId,
-      participants: this.#participants.map((participant) =>
-        participant.telemetry
-          ? {
-              ...participant,
-              telemetry: {
-                ...participant.telemetry,
-                functionId: `${conversation.chatId}:${participant.name}`,
-              },
-            }
-          : participant
-      ),
-    }).then((group) => this.#resources.use(group))
+    const chat = this.#createChat(conversation)
     this.#chats.set(key, chat)
     void chat.catch(() => this.#chats.delete(key))
     return chat
+  }
+
+  async #createChat(conversation: ConversationId) {
+    const hydration = this.#store.load(conversation)
+    const participants = (
+      hydration
+        ? hydration.snapshot.participants.map(({ name, specialty }) => {
+            const participant = this.#participants.find(
+              (candidate) => candidate.name === name
+            )
+            if (!participant) {
+              throw new Error(
+                `Stored participant "${name}" is not configured in this runtime`
+              )
+            }
+            return { ...participant, specialty }
+          })
+        : this.#participants
+    ).map((participant) =>
+      participant.telemetry
+        ? {
+            ...participant,
+            telemetry: {
+              ...participant.telemetry,
+              functionId: `${conversation.chatId}:${participant.name}`,
+            },
+          }
+        : participant
+    )
+    const group = await WhatsAppGroup.create({
+      userId: conversation.userId,
+      participants,
+      hydration: hydration ?? undefined,
+      limits: this.#limits,
+      persist: (snapshot, event) =>
+        this.#store.save(conversation, snapshot, event),
+    })
+    this.#resources.use(group)
+    await group.recoverInterrupted()
+    this.#store.save(conversation, group.snapshot())
+    return group
   }
 }
 

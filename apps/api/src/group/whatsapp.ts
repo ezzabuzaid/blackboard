@@ -57,15 +57,27 @@ export type WhatsAppGroupActivity =
       replies?: number
     }
   | { type: "settled"; notifications: number }
+  | {
+      type: "stopped"
+      notifications: number
+      reason: "user" | "limit" | "interrupted"
+    }
 
 export interface WhatsAppGroupActivityState {
-  phase: "idle" | "active" | "settled"
+  phase: "idle" | "active" | "settled" | "stopped"
+  stopReason?: "user" | "limit" | "interrupted"
   notification: number
   messageCount: number
   participants: {
     name: string
     state:
-      "notified" | "considering" | "replied" | "passed" | "caught-up" | "failed"
+      | "notified"
+      | "considering"
+      | "replied"
+      | "passed"
+      | "caught-up"
+      | "failed"
+      | "stopped"
     replies: number
   }[]
 }
@@ -78,12 +90,43 @@ export type WhatsAppRoomEvent =
       activity: WhatsAppGroupActivity
     }
 
+export interface WhatsAppGroupSnapshot {
+  messages: WhatsAppMessage[]
+  participants: { name: string; specialty: string }[]
+  activity: WhatsAppGroupActivityState
+  cursor: number
+}
+
+export interface WhatsAppGroupHydration {
+  snapshot: WhatsAppGroupSnapshot
+  events: WhatsAppRoomEvent[]
+}
+
+export interface WhatsAppGroupLimits {
+  notifications: number
+  agentMessages: number
+  transcriptMessages: number
+}
+
 export interface WhatsAppGroupOptions {
   userId: string
   participants: WhatsAppParticipant[]
+  hydration?: WhatsAppGroupHydration
+  limits?: Partial<WhatsAppGroupLimits>
+  persist?: (
+    snapshot: WhatsAppGroupSnapshot,
+    event: WhatsAppRoomEvent
+  ) => void | Promise<void>
   onMessage?: (message: WhatsAppMessage) => void | Promise<void>
   onActivity?: (activity: WhatsAppGroupActivity) => void | Promise<void>
   onEvent?: (event: WhatsAppRoomEvent) => void | Promise<void>
+}
+
+export class WhatsAppGroupLimitError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "WhatsAppGroupLimitError"
+  }
 }
 
 interface RunningParticipant {
@@ -91,6 +134,7 @@ interface RunningParticipant {
   conversation: ConversationId
   runtime: AgentRuntime
   active: boolean
+  turnId?: string
 }
 
 interface GroupSubscriber extends Pick<
@@ -112,6 +156,8 @@ export class WhatsAppGroup implements AsyncDisposable {
   readonly #pending: WhatsAppMessage[] = []
   readonly #mailboxRecipients = new Map<string, Set<string>>()
   readonly #replyCounts = new Map<string, number>()
+  readonly #limits: WhatsAppGroupLimits
+  readonly #persist?: WhatsAppGroupOptions["persist"]
   #activity: WhatsAppGroupActivityState = {
     phase: "idle",
     notification: 0,
@@ -121,6 +167,8 @@ export class WhatsAppGroup implements AsyncDisposable {
   #pump: Promise<void> | null = null
   #sequence = 0
   #cursor = 0
+  #agentMessages = 0
+  #stopRequested: "user" | "limit" | "interrupted" | null = null
   #closed = false
 
   private constructor(
@@ -133,10 +181,34 @@ export class WhatsAppGroup implements AsyncDisposable {
     this.#resources = resources.disposables
     this.#participants = resources.participants
     this.#user = { chatId: "user", userId: options.userId }
-    this.#profiles = options.participants.map(({ name, specialty }) => ({
-      name,
-      specialty,
-    }))
+    this.#profiles =
+      options.hydration?.snapshot.participants ??
+      options.participants.map(({ name, specialty }) => ({
+        name,
+        specialty,
+      }))
+    this.#limits = {
+      notifications: 25,
+      agentMessages: 100,
+      transcriptMessages: 500,
+      ...options.limits,
+    }
+    this.#persist = options.persist
+    if (options.hydration) {
+      this.#messages.push(
+        ...structuredClone(options.hydration.snapshot.messages)
+      )
+      for (const message of this.#messages) {
+        this.#messagesById.set(message.id, message)
+      }
+      this.#events.push(...structuredClone(options.hydration.events))
+      this.#activity = structuredClone(options.hydration.snapshot.activity)
+      this.#sequence = this.#messages.at(-1)?.sequence ?? 0
+      this.#cursor = options.hydration.snapshot.cursor
+      for (const participant of this.#activity.participants) {
+        this.#replyCounts.set(participant.name, participant.replies)
+      }
+    }
     if (options.onMessage || options.onActivity || options.onEvent) {
       this.#subscribers.add({
         onMessage: options.onMessage,
@@ -161,10 +233,10 @@ export class WhatsAppGroup implements AsyncDisposable {
     resources.defer(() => approvalMutex.close())
     const boss = new PgBoss({ db: fromPglite(database), backend: "pglite" })
     boss.on("error", (error) => console.error("[queue error]", error))
-    resources.defer(() => boss.stop({ graceful: false }))
+    resources.defer(() => boss.stop({ close: false, graceful: false }))
     const store = new InMemoryContextStore()
     const participants: RunningParticipant[] = []
-    let publishReply: (author: string, content: string) => Promise<void>
+    let publishReply: (author: string, content: string) => Promise<boolean>
 
     await boss.start()
     for (const [index, participant] of options.participants.entries()) {
@@ -208,6 +280,7 @@ export class WhatsAppGroup implements AsyncDisposable {
                   message: {
                     type: "string",
                     minLength: 1,
+                    maxLength: 8_000,
                     pattern: "\\S",
                   },
                 },
@@ -215,8 +288,9 @@ export class WhatsAppGroup implements AsyncDisposable {
                 additionalProperties: false,
               }),
               execute: async ({ message }) => {
-                await publishReply(participant.name, message.trim())
-                return { posted: true }
+                return {
+                  posted: await publishReply(participant.name, message.trim()),
+                }
               },
             }),
           },
@@ -247,7 +321,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       participants,
     })
     publishReply = async (author, content) => {
-      await group.#post(author, content)
+      return group.#postParticipant(author, content)
     }
     return group
   }
@@ -267,15 +341,47 @@ export class WhatsAppGroup implements AsyncDisposable {
     if (this.#closed) throw new Error("WhatsAppGroup is closed")
     const message = content.trim()
     if (!message) throw new Error("WhatsAppGroup message cannot be empty")
+    if (!this.#pump) {
+      this.#stopRequested = null
+      this.#agentMessages = 0
+    }
     return this.#post("user", message, id)
   }
 
-  snapshot() {
+  snapshot(): WhatsAppGroupSnapshot {
     return {
       messages: [...this.#messages],
       participants: [...this.#profiles],
       activity: structuredClone(this.#activity),
       cursor: this.#cursor,
+    }
+  }
+
+  async stop(reason: "user" | "limit" | "interrupted" = "user") {
+    if (this.#closed) throw new Error("WhatsAppGroup is closed")
+    if (!this.#pump && this.#activity.phase !== "active") {
+      return this.snapshot()
+    }
+
+    this.#stopRequested = reason
+    this.#pending.length = 0
+    await Promise.allSettled(
+      this.#participants
+        .filter(({ active }) => active)
+        .map((participant) =>
+          participant.runtime
+            .observe(participant.conversation)
+            .cancel(participant.turnId)
+        )
+    )
+    await this.#pump?.catch(() => undefined)
+    await this.#emitStopped(reason)
+    return this.snapshot()
+  }
+
+  async recoverInterrupted() {
+    if (this.#activity.phase === "active") {
+      await this.#emitStopped("interrupted")
     }
   }
 
@@ -307,6 +413,7 @@ export class WhatsAppGroup implements AsyncDisposable {
 
   async [Symbol.asyncDispose]() {
     if (this.#closed) return
+    if (this.#pump) await this.stop("interrupted")
     this.#closed = true
     await this.#resources.disposeAsync()
   }
@@ -314,6 +421,11 @@ export class WhatsAppGroup implements AsyncDisposable {
   async #post(author: string, content: string, id: string = randomUUID()) {
     const existing = this.#messagesById.get(id)
     if (existing) return existing
+    if (this.#messages.length >= this.#limits.transcriptMessages) {
+      throw new WhatsAppGroupLimitError(
+        "WhatsApp room transcript limit reached"
+      )
+    }
 
     const message = {
       id,
@@ -331,6 +443,21 @@ export class WhatsAppGroup implements AsyncDisposable {
     await this.#deliverToActiveParticipants(message)
     this.#ensurePump()
     return message
+  }
+
+  async #postParticipant(author: string, content: string) {
+    if (this.#stopRequested) return false
+    if (
+      this.#agentMessages >= this.#limits.agentMessages ||
+      this.#messages.length >= this.#limits.transcriptMessages
+    ) {
+      this.#stopRequested = "limit"
+      return false
+    }
+
+    this.#agentMessages++
+    await this.#post(author, content)
+    return true
   }
 
   #ensurePump() {
@@ -356,6 +483,17 @@ export class WhatsAppGroup implements AsyncDisposable {
     })
 
     while (this.#pending.length > 0) {
+      if (
+        this.#stopRequested ||
+        notification >= this.#limits.notifications ||
+        this.#agentMessages >= this.#limits.agentMessages
+      ) {
+        const reason = this.#stopRequested ?? "limit"
+        this.#pending.length = 0
+        await this.#emitStopped(reason)
+        return
+      }
+
       const pending = this.#pending.splice(0)
       const batches = this.#participants.map((participant) => ({
         participant,
@@ -401,7 +539,17 @@ export class WhatsAppGroup implements AsyncDisposable {
                 input: WhatsAppGroup.#notification(notifications),
               }
             )
-            await turn.stream.pipeTo(new WritableStream())
+            participant.turnId = turn.id
+            let failure: string | undefined
+            await turn.stream.pipeTo(
+              new WritableStream({
+                write(part) {
+                  if (part.type === "error") failure = part.errorText
+                },
+              })
+            )
+            if (failure) throw new Error(failure)
+            if (this.#stopRequested) return
             const replies =
               (this.#replyCounts.get(participant.name) ?? 0) - repliesBefore
             await this.#emitActivity({
@@ -412,19 +560,30 @@ export class WhatsAppGroup implements AsyncDisposable {
               ...(replies > 0 ? { replies } : {}),
             })
           } catch (error) {
-            await this.#emitActivity({
-              type: "participant",
-              notification,
-              participant: participant.name,
-              state: "failed",
-            })
-            throw error
+            if (!this.#stopRequested) {
+              await this.#emitActivity({
+                type: "participant",
+                notification,
+                participant: participant.name,
+                state: "failed",
+              })
+              console.error(
+                `[group participant failed] ${participant.name}`,
+                error
+              )
+            }
           } finally {
             participant.active = false
+            participant.turnId = undefined
           }
         })
       )
       for (const { id } of pending) this.#mailboxRecipients.delete(id)
+      if (this.#stopRequested) {
+        this.#pending.length = 0
+        await this.#emitStopped(this.#stopRequested)
+        return
+      }
     }
 
     await this.#emitActivity({ type: "settled", notifications: notification })
@@ -441,6 +600,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       message,
     }
     this.#events.push(event)
+    await this.#persist?.(this.snapshot(), event)
     await Promise.all(
       [...this.#subscribers].map((subscriber) =>
         this.#deliver(subscriber, event, () => subscriber.onMessage?.(message))
@@ -456,6 +616,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       activity,
     }
     this.#events.push(event)
+    await this.#persist?.(this.snapshot(), event)
     await Promise.all(
       [...this.#subscribers].map((subscriber) =>
         this.#deliver(subscriber, event, () =>
@@ -463,6 +624,20 @@ export class WhatsAppGroup implements AsyncDisposable {
         )
       )
     )
+  }
+
+  async #emitStopped(reason: "user" | "limit" | "interrupted") {
+    if (
+      this.#activity.phase === "stopped" &&
+      this.#activity.stopReason === reason
+    ) {
+      return
+    }
+    await this.#emitActivity({
+      type: "stopped",
+      notifications: this.#activity.notification,
+      reason,
+    })
   }
 
   #deliver(
@@ -541,18 +716,45 @@ export class WhatsAppGroup implements AsyncDisposable {
     for (const participant of options.participants) {
       if (
         !participant.name.trim() ||
-        participant.name !== participant.name.trim()
+        participant.name !== participant.name.trim() ||
+        participant.name.length > 100 ||
+        /[\u0000-\u001f\u007f]/u.test(participant.name)
       ) {
         throw new Error(
-          "WhatsAppGroup participant names must be non-empty and unpadded"
+          "WhatsAppGroup participant names must be valid, unpadded text"
         )
       }
-      if (names.has(participant.name)) {
+      if (
+        !participant.specialty.trim() ||
+        participant.specialty !== participant.specialty.trim() ||
+        participant.specialty.length > 200
+      ) {
+        throw new Error(
+          "WhatsAppGroup participant specialties must be valid, unpadded text"
+        )
+      }
+      if (participant.name.toLowerCase() === "user") {
+        throw new Error(
+          'WhatsAppGroup participant name "user" is reserved for the human author'
+        )
+      }
+      const normalizedName = participant.name.toLowerCase()
+      if (names.has(normalizedName)) {
         throw new Error(
           `WhatsAppGroup participant name "${participant.name}" is duplicated`
         )
       }
-      names.add(participant.name)
+      names.add(normalizedName)
+    }
+    for (const [name, limit] of Object.entries({
+      notifications: 25,
+      agentMessages: 100,
+      transcriptMessages: 500,
+      ...options.limits,
+    })) {
+      if (!Number.isSafeInteger(limit) || limit <= 0) {
+        throw new Error(`WhatsAppGroup ${name} limit must be positive`)
+      }
     }
   }
 }
@@ -596,6 +798,18 @@ function reduceActivity(
         ...participant,
         state:
           participant.state === "failed" ? "failed" : ("caught-up" as const),
+      })),
+    }
+  }
+  if (event.type === "stopped") {
+    return {
+      ...state,
+      phase: "stopped",
+      stopReason: event.reason,
+      notification: event.notifications,
+      participants: state.participants.map((participant) => ({
+        ...participant,
+        state: participant.state === "failed" ? "failed" : ("stopped" as const),
       })),
     }
   }

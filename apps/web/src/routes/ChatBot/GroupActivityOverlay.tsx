@@ -30,9 +30,14 @@ import type { GroupParticipant } from "./groupMessages"
 export function GroupActivityOverlay() {
   const { activity, participants } = useGroupChat()
   const settled = activity.phase === "settled"
+  const stopped = activity.phase === "stopped"
 
   return (
-    <InfoOverlay open={activity.phase !== "idle"} aria-label="Group activity">
+    <InfoOverlay
+      open={activity.phase !== "idle"}
+      aria-label="Group activity"
+      className="top-16 max-h-[calc(100%-4.75rem)]"
+    >
       <div className="flex items-start justify-between gap-3 p-4">
         <div>
           <h2 className="font-heading text-sm font-semibold">Group activity</h2>
@@ -40,8 +45,8 @@ export function GroupActivityOverlay() {
             {activitySummary(activity)}
           </p>
         </div>
-        <Badge variant={settled ? "secondary" : "default"}>
-          {settled ? "Settled" : "Live"}
+        <Badge variant={settled || stopped ? "secondary" : "default"}>
+          {settled ? "Settled" : stopped ? "Stopped" : "Live"}
         </Badge>
       </div>
       <Separator />
@@ -76,15 +81,21 @@ export function GroupActivityOverlay() {
   )
 }
 
-function activitySummary({
-  phase,
-  notification,
-  messageCount,
-}: GroupActivityState) {
+function activitySummary(state: GroupActivityState) {
+  const { phase, notification, messageCount } = state
   if (phase === "settled") {
     return `Everyone is caught up with ${notification} ${
       notification === 1 ? "update" : "updates"
     }`
+  }
+  if (phase === "stopped") {
+    if (state.stopReason === "limit") {
+      return "Stopped at the room safety limit"
+    }
+    if (state.stopReason === "interrupted") {
+      return "Stopped because the API restarted"
+    }
+    return "Stopped by you"
   }
   if (notification === 0) return "Starting the group…"
   return `Update ${notification}: ${messageCount} new ${
@@ -105,6 +116,7 @@ function stateLabel(state: ParticipantActivityState) {
   if (state === "replied") return "Replied"
   if (state === "passed") return "Passed this update"
   if (state === "failed") return "Failed"
+  if (state === "stopped") return "Stopped"
   return "Notified"
 }
 
@@ -116,5 +128,7 @@ function ActivityIcon({ state }: { state: ParticipantActivityState }) {
   if (state === "replied") return <MessageCircle />
   if (state === "passed") return <MinusCircle />
   if (state === "failed") return <CircleAlert className="text-destructive" />
+  if (state === "stopped")
+    return <MinusCircle className="text-muted-foreground" />
   return <BellRing />
 }

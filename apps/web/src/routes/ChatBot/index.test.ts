@@ -327,6 +327,33 @@ test("group activity preserves failures and cumulative reply counts", () => {
   )
 })
 
+test("group activity explains user, limit, and restart stops", () => {
+  const active = reduceGroupActivity(initialGroupActivity, {
+    type: "started",
+    participants: ["Maya", "Omar"],
+  })
+
+  for (const stopReason of ["user", "limit", "interrupted"] as const) {
+    assert.deepEqual(
+      reduceGroupActivity(active, {
+        type: "stopped",
+        notifications: 2,
+        reason: stopReason,
+      }),
+      {
+        phase: "stopped",
+        stopReason,
+        notification: 2,
+        messageCount: 0,
+        participants: [
+          { name: "Maya", state: "stopped", replies: 0 },
+          { name: "Omar", state: "stopped", replies: 0 },
+        ],
+      }
+    )
+  }
+})
+
 test("assistant artifact links resolve through the chat API", () => {
   assert.equal(
     sandboxArtifactUrl(

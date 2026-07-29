@@ -17,7 +17,7 @@
   },
   "packageManager": "npm@11.12.1",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.5.0"
   },
   "workspaces": [
     "apps/*",

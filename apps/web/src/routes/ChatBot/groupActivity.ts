@@ -14,12 +14,24 @@ export type GroupActivityEvent =
       replies?: number
     }
   | { type: "settled"; notifications: number }
+  | {
+      type: "stopped"
+      notifications: number
+      reason: "user" | "limit" | "interrupted"
+    }
 
 export type ParticipantActivityState =
-  "notified" | "considering" | "replied" | "passed" | "caught-up" | "failed"
+  | "notified"
+  | "considering"
+  | "replied"
+  | "passed"
+  | "caught-up"
+  | "failed"
+  | "stopped"
 
 export interface GroupActivityState {
-  phase: "idle" | "active" | "settled"
+  phase: "idle" | "active" | "settled" | "stopped"
+  stopReason?: "user" | "limit" | "interrupted"
   notification: number
   messageCount: number
   participants: {
@@ -80,6 +92,18 @@ export function reduceGroupActivity(
       })),
     }
   }
+  if (event.type === "stopped") {
+    return {
+      ...state,
+      phase: "stopped",
+      stopReason: event.reason,
+      notification: event.notifications,
+      participants: state.participants.map((participant) => ({
+        ...participant,
+        state: participant.state === "failed" ? "failed" : ("stopped" as const),
+      })),
+    }
+  }
 
   return {
     ...state,
@@ -113,6 +137,12 @@ export function isGroupActivityEvent(
   if (value.type === "settled") {
     return positiveInteger(value.notifications)
   }
+  if (value.type === "stopped") {
+    return (
+      nonNegativeInteger(value.notifications) &&
+      ["user", "limit", "interrupted"].includes(String(value.reason))
+    )
+  }
   if (value.type !== "participant") return false
 
   return (
@@ -130,7 +160,10 @@ export function isGroupActivityState(
 ): value is GroupActivityState {
   return (
     isRecord(value) &&
-    ["idle", "active", "settled"].includes(String(value.phase)) &&
+    ["idle", "active", "settled", "stopped"].includes(String(value.phase)) &&
+    (value.stopReason === undefined ||
+      ["user", "limit", "interrupted"].includes(String(value.stopReason))) &&
+    (value.phase !== "stopped" || value.stopReason !== undefined) &&
     nonNegativeInteger(value.notification) &&
     nonNegativeInteger(value.messageCount) &&
     Array.isArray(value.participants) &&
@@ -145,6 +178,7 @@ export function isGroupActivityState(
           "passed",
           "caught-up",
           "failed",
+          "stopped",
         ].includes(String(participant.state)) &&
         nonNegativeInteger(participant.replies)
     )

@@ -11,6 +11,7 @@ import {
   addGroupMessage,
   isGroupMessage,
   isGroupRoomEvent,
+  isGroupRoomState,
   reduceGroupRoom,
   type GroupRoomState,
 } from "./groupMessages"
@@ -18,9 +19,11 @@ import {
 interface GroupChat extends GroupRoomState {
   chatId: string
   posting: boolean
+  stopping: boolean
   error: Error | null
   clearError(): void
   postMessage(content: string): Promise<void>
+  stop(): Promise<void>
 }
 
 const GroupChatContext = createContext<GroupChat | null>(null)
@@ -43,6 +46,7 @@ export function GroupChatProvider({
 }: GroupChatProviderProps) {
   const [room, setRoom] = useState(initialState)
   const [posting, setPosting] = useState(false)
+  const [stopping, setStopping] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
@@ -98,15 +102,42 @@ export function GroupChatProvider({
     }
   }
 
+  async function stop() {
+    setStopping(true)
+    setError(null)
+    try {
+      const response = await fetch(
+        `${apiUrl}/api/chat/${encodeURIComponent(chatId)}/stop`,
+        { method: "POST" }
+      )
+      const state: unknown = await response.json()
+      if (!response.ok || !isGroupRoomState(state)) {
+        throw new Error("The group could not be stopped.")
+      }
+      setRoom(state)
+    } catch (cause) {
+      const nextError =
+        cause instanceof Error
+          ? cause
+          : new Error("The group could not be stopped.")
+      setError(nextError)
+      throw nextError
+    } finally {
+      setStopping(false)
+    }
+  }
+
   return (
     <GroupChatContext.Provider
       value={{
         ...room,
         chatId,
         posting,
+        stopping,
         error,
         clearError: () => setError(null),
         postMessage,
+        stop,
       }}
     >
       {children}

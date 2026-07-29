@@ -7,7 +7,7 @@ import type { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 const configuredOrigin = process.env.WEB_ORIGIN
 
 export interface AppDependencies {
-  runtime: Pick<WhatsAppChatRuntime, "post" | "snapshot" | "subscribe">
+  runtime: Pick<WhatsAppChatRuntime, "post" | "snapshot" | "stop" | "subscribe">
   listQueuedTurns: ListQueuedTurns
 }
 
