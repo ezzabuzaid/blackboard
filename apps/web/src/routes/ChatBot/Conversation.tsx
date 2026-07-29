@@ -14,29 +14,20 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@stdlib/shadcn"
-import type { UIMessage } from "ai"
 import { useMemo } from "react"
 import { Streamdown } from "streamdown"
 
-import { AgentTrajectory } from "./AgentTrajectory"
-import { useChatSession } from "./ChatSession"
 import { artifactBaseUrl, artifactRemarkPlugins } from "./artifactLinks"
 import {
   GroupAvatar,
   GroupAvatarStack,
   groupMemberNameClass,
 } from "./GroupAvatar"
-import {
-  groupReplies,
-  groupReplyClusters,
-  type GroupMessageCluster,
-} from "./groupMessages"
+import { useGroupChat } from "./GroupChat"
+import { groupMessageClusters, type GroupMessageCluster } from "./groupMessages"
 
 export function Conversation() {
-  const { id: chatId, messages, status } = useChatSession()
-  const latestMessage = messages.at(-1)
-  const pending = status === "submitted" || status === "streaming"
-  const waitingForAssistant = pending && latestMessage?.role === "user"
+  const { activity, chatId, messages } = useGroupChat()
 
   return (
     <section aria-label="Conversation" className="min-h-0 flex-1 bg-muted/60">
@@ -44,7 +35,7 @@ export function Conversation() {
         <MessageScroller>
           <MessageScrollerViewport>
             <MessageScrollerContent
-              aria-busy={status === "streaming"}
+              aria-busy={activity.phase === "active"}
               className="mx-auto w-full max-w-3xl justify-end gap-3 px-3 py-4 sm:px-5 sm:py-6"
             >
               {messages.length === 0 && (
@@ -53,26 +44,21 @@ export function Conversation() {
                 </MessageScrollerItem>
               )}
 
-              {messages
-                .filter((message) => message.parts.length > 0)
-                .map((message) => (
-                  <MessageScrollerItem
-                    key={message.id}
-                    messageId={message.id}
-                    className="animate-in duration-300 fade-in slide-in-from-bottom-2"
-                  >
-                    <ConversationMessage
-                      active={
-                        status === "streaming" &&
-                        message.id === latestMessage?.id
-                      }
-                      chatId={chatId}
-                      message={message}
-                    />
-                  </MessageScrollerItem>
-                ))}
+              {groupMessageClusters(messages).map((cluster) => (
+                <MessageScrollerItem
+                  key={cluster.messages[0].id}
+                  messageId={cluster.messages[0].id}
+                  className="animate-in duration-300 fade-in slide-in-from-bottom-2"
+                >
+                  {cluster.author === "user" ? (
+                    <UserMessageCluster cluster={cluster} />
+                  ) : (
+                    <GroupReplyCluster chatId={chatId} cluster={cluster} />
+                  )}
+                </MessageScrollerItem>
+              ))}
 
-              {waitingForAssistant && (
+              {activity.phase === "active" && (
                 <MessageScrollerItem>
                   <Marker
                     role="status"
@@ -80,7 +66,7 @@ export function Conversation() {
                   >
                     <GroupAvatarStack />
                     <MarkerContent>
-                      The group is considering your message
+                      The group is considering new messages
                     </MarkerContent>
                   </Marker>
                 </MessageScrollerItem>
@@ -94,63 +80,25 @@ export function Conversation() {
   )
 }
 
-function ConversationMessage({
-  active,
-  chatId,
-  message,
-}: {
-  active: boolean
-  chatId: string
-  message: UIMessage
-}) {
-  const replies = groupReplies(message)
-  if (replies.length > 0) {
-    return (
-      <div className="flex flex-col gap-3">
-        {groupReplyClusters(replies).map((cluster) => (
-          <GroupReplyCluster
-            chatId={chatId}
-            cluster={cluster}
-            key={cluster.messages[0].id}
-          />
-        ))}
-      </div>
-    )
-  }
-
+function UserMessageCluster({ cluster }: { cluster: GroupMessageCluster }) {
   return (
-    <Message align={message.role === "user" ? "end" : "start"}>
+    <Message align="end" aria-label="Your messages">
       <MessageContent>
-        {message.role === "assistant" && (
-          <>
-            <MessageHeader>DeepAgents Group</MessageHeader>
-            <AgentTrajectory active={active} parts={message.parts} />
-          </>
-        )}
-        <Bubble variant={message.role === "user" ? "tinted" : "ghost"}>
-          <BubbleContent
-            className={
-              message.role === "user"
-                ? "relative !overflow-visible rounded-[8px] rounded-tr-none px-[9px] py-1.5 text-sm leading-5 whitespace-pre-wrap before:absolute before:top-0 before:-right-2 before:size-2 before:bg-inherit before:[clip-path:polygon(0_0,100%_0,0_100%)] before:content-['']"
-                : "max-w-[65ch] text-base leading-tight"
-            }
-          >
-            {message.parts.map((part, index) =>
-              part.type === "text" ? (
-                message.role === "assistant" ? (
-                  <AssistantMarkdown
-                    active={active}
-                    chatId={chatId}
-                    key={`${message.id}-${index}`}
-                    text={part.text}
-                  />
-                ) : (
-                  <p key={`${message.id}-${index}`}>{part.text}</p>
-                )
-              ) : null
-            )}
-          </BubbleContent>
-        </Bubble>
+        <BubbleGroup className="items-end gap-0.5">
+          {cluster.messages.map((message, index) => (
+            <Bubble variant="tinted" key={message.id}>
+              <BubbleContent
+                className={`relative !overflow-visible rounded-[8px] px-[9px] py-1.5 text-sm leading-5 whitespace-pre-wrap ${
+                  index === 0
+                    ? "rounded-tr-none before:absolute before:top-0 before:-right-2 before:size-2 before:bg-inherit before:content-[''] before:[clip-path:polygon(0_0,100%_0,0_100%)]"
+                    : ""
+                }`}
+              >
+                {message.content}
+              </BubbleContent>
+            </Bubble>
+          ))}
+        </BubbleGroup>
       </MessageContent>
     </Message>
   )
@@ -173,9 +121,9 @@ function GroupReplyCluster({
         {cluster.messages.map((message, index) => (
           <Bubble variant="outline" key={message.id}>
             <BubbleContent
-              className={`relative max-w-[65ch] !overflow-visible !border-transparent !bg-card rounded-[8px] px-[9px] py-1.5 text-sm leading-5 ${
+              className={`relative max-w-[65ch] !overflow-visible rounded-[8px] !border-transparent !bg-card px-[9px] py-1.5 text-sm leading-5 ${
                 index === 0
-                  ? "rounded-tl-none before:absolute before:top-0 before:-left-2 before:size-2 before:bg-inherit before:[clip-path:polygon(100%_0,100%_100%,0_0)] before:content-['']"
+                  ? "rounded-tl-none before:absolute before:top-0 before:-left-2 before:size-2 before:bg-inherit before:content-[''] before:[clip-path:polygon(100%_0,100%_100%,0_0)]"
                   : ""
               }`}
             >

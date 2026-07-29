@@ -22,8 +22,8 @@ import {
 import { InfoOverlay } from "../../components/InfoOverlay"
 import { CircleAlert, ListTodo } from "lucide-react"
 
-import { useChatSession } from "./ChatSession"
-import { apiUrl } from "./chatTransport"
+import { apiUrl } from "./api"
+import { useGroupChat } from "./GroupChat"
 
 interface QueuedTurn {
   id: string
@@ -32,7 +32,7 @@ interface QueuedTurn {
 }
 
 export function QueuedTurnsOverlay() {
-  const { id: chatId } = useChatSession()
+  const { chatId } = useGroupChat()
   const [turns, setTurns] = useState<QueuedTurn[]>([])
   const [error, setError] = useState(false)
 

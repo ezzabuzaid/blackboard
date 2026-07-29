@@ -10,11 +10,6 @@ const runtime = resources.use(new WhatsAppChatRuntime())
 
 const app = createApp({
   runtime,
-  streams: {
-    async getStreamStatus() {
-      return null
-    },
-  },
   listQueuedTurns: async () => [],
 })
 

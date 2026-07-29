@@ -9,10 +9,13 @@ import {
 } from "@deepagents/context"
 import {
   AgentRuntime,
+  MessageDeliveryMode,
   PgBossTurnQueue,
   SqliteApprovalMutex,
   SqliteMailboxStore,
   type AgentDeclaration,
+  type ConversationId,
+  createInterAgentCommunication,
   defineAgent,
   defineSandbox,
   defineTool,
@@ -25,6 +28,7 @@ import { PgBoss, fromPglite } from "pg-boss"
 export interface WhatsAppParticipant {
   name: string
   specialty: string
+  instructions?: string
   model: AgentModel
   tools?: ToolSet
   telemetry?: AgentDeclaration["telemetry"]
@@ -54,60 +58,91 @@ export type WhatsAppGroupActivity =
     }
   | { type: "settled"; notifications: number }
 
+export interface WhatsAppGroupActivityState {
+  phase: "idle" | "active" | "settled"
+  notification: number
+  messageCount: number
+  participants: {
+    name: string
+    state:
+      "notified" | "considering" | "replied" | "passed" | "caught-up" | "failed"
+    replies: number
+  }[]
+}
+
+export type WhatsAppRoomEvent =
+  | { cursor: number; type: "message"; message: WhatsAppMessage }
+  | {
+      cursor: number
+      type: "activity"
+      activity: WhatsAppGroupActivity
+    }
+
 export interface WhatsAppGroupOptions {
   userId: string
   participants: WhatsAppParticipant[]
   onMessage?: (message: WhatsAppMessage) => void | Promise<void>
   onActivity?: (activity: WhatsAppGroupActivity) => void | Promise<void>
+  onEvent?: (event: WhatsAppRoomEvent) => void | Promise<void>
 }
 
 interface RunningParticipant {
   name: string
-  conversation: { chatId: string; userId: string }
+  conversation: ConversationId
   runtime: AgentRuntime
+  active: boolean
+}
+
+interface GroupSubscriber extends Pick<
+  WhatsAppGroupOptions,
+  "onMessage" | "onActivity" | "onEvent"
+> {
+  delivery: Promise<void>
 }
 
 export class WhatsAppGroup implements AsyncDisposable {
-  readonly #boss: PgBoss
-  readonly #database: PGlite
-  readonly #streamStore: SqliteStreamStore
-  readonly #mailboxStore: SqliteMailboxStore
-  readonly #approvalMutex: SqliteApprovalMutex
+  readonly #resources: AsyncDisposableStack
   readonly #participants: RunningParticipant[]
-  readonly #workers: AsyncDisposable[]
-  readonly #subscribers = new Set<
-    Pick<WhatsAppGroupOptions, "onMessage" | "onActivity">
-  >()
+  readonly #profiles: { name: string; specialty: string }[]
+  readonly #user: ConversationId
+  readonly #subscribers = new Set<GroupSubscriber>()
   readonly #messages: WhatsAppMessage[] = []
+  readonly #messagesById = new Map<string, WhatsAppMessage>()
+  readonly #events: WhatsAppRoomEvent[] = []
   readonly #pending: WhatsAppMessage[] = []
+  readonly #mailboxRecipients = new Map<string, Set<string>>()
   readonly #replyCounts = new Map<string, number>()
+  #activity: WhatsAppGroupActivityState = {
+    phase: "idle",
+    notification: 0,
+    messageCount: 0,
+    participants: [],
+  }
   #pump: Promise<void> | null = null
   #sequence = 0
+  #cursor = 0
   #closed = false
 
   private constructor(
     options: WhatsAppGroupOptions,
     resources: {
-      boss: PgBoss
-      database: PGlite
-      streamStore: SqliteStreamStore
-      mailboxStore: SqliteMailboxStore
-      approvalMutex: SqliteApprovalMutex
+      disposables: AsyncDisposableStack
       participants: RunningParticipant[]
-      workers: AsyncDisposable[]
     }
   ) {
-    this.#boss = resources.boss
-    this.#database = resources.database
-    this.#streamStore = resources.streamStore
-    this.#mailboxStore = resources.mailboxStore
-    this.#approvalMutex = resources.approvalMutex
+    this.#resources = resources.disposables
     this.#participants = resources.participants
-    this.#workers = resources.workers
-    if (options.onMessage || options.onActivity) {
+    this.#user = { chatId: "user", userId: options.userId }
+    this.#profiles = options.participants.map(({ name, specialty }) => ({
+      name,
+      specialty,
+    }))
+    if (options.onMessage || options.onActivity || options.onEvent) {
       this.#subscribers.add({
         onMessage: options.onMessage,
         onActivity: options.onActivity,
+        onEvent: options.onEvent,
+        delivery: Promise.resolve(),
       })
     }
   }
@@ -115,116 +150,106 @@ export class WhatsAppGroup implements AsyncDisposable {
   static async create(options: WhatsAppGroupOptions) {
     WhatsAppGroup.#validate(options)
 
+    await using resources = new AsyncDisposableStack()
     const database = new PGlite()
+    resources.defer(() => database.close())
+    const streamStore = new SqliteStreamStore(":memory:")
+    resources.defer(() => streamStore.close())
+    const mailboxStore = new SqliteMailboxStore(":memory:")
+    resources.defer(() => mailboxStore.close())
+    const approvalMutex = new SqliteApprovalMutex(":memory:")
+    resources.defer(() => approvalMutex.close())
     const boss = new PgBoss({ db: fromPglite(database), backend: "pglite" })
     boss.on("error", (error) => console.error("[queue error]", error))
-    const streamStore = new SqliteStreamStore(":memory:")
-    const mailboxStore = new SqliteMailboxStore(":memory:")
-    const approvalMutex = new SqliteApprovalMutex(":memory:")
+    resources.defer(() => boss.stop({ graceful: false }))
     const store = new InMemoryContextStore()
     const participants: RunningParticipant[] = []
-    const workers: AsyncDisposable[] = []
     let publishReply: (author: string, content: string) => Promise<void>
 
-    try {
-      await boss.start()
-      for (const [index, participant] of options.participants.entries()) {
-        const queue = new PgBossTurnQueue(boss, {
-          queue: `zukhruf-whatsapp-${index}`,
-          pollingIntervalSeconds: 0.5,
-        })
-        await queue.initialize()
+    await boss.start()
+    for (const [index, participant] of options.participants.entries()) {
+      const queue = new PgBossTurnQueue(boss, {
+        queue: `zukhruf-whatsapp-${index}`,
+        pollingIntervalSeconds: 0.5,
+      })
+      await queue.initialize()
 
-        const runtime = new AgentRuntime(
-          defineAgent({
-            name: participant.name,
-            model: participant.model,
-            telemetry: participant.telemetry,
-            sandbox: defineSandbox(() =>
-              createVirtualSandbox({ fs: new InMemoryFs() })
-            ),
-            instructions: [
-              role(
-                [
-                  `You are ${participant.name} in a WhatsApp-style group chat. ${participant.specialty}`,
-                  "Every turn is a notification containing new public group messages.",
-                  "Read them and decide autonomously whether to participate.",
-                  "For casual or social messages, you may respond briefly when it fits your personality; silence is also natural, and the group should not answer in chorus.",
-                  "For substantive messages, reply only when your specialty gives you something useful and non-duplicative to add.",
-                  "If yes, call reply_to_group with the concise message you want everyone to see.",
-                  "If no, do not call reply_to_group. Do not reply merely to agree, repeat, or announce silence.",
-                  "Your ordinary assistant text is private and never appears in the group.",
-                ].join(" ")
-              ),
-            ],
-            tools: {
-              ...participant.tools,
-              reply_to_group: defineTool({
-                description:
-                  "Post one useful contribution to the public group chat.",
-                inputSchema: jsonSchema<{ message: string }>({
-                  type: "object",
-                  properties: {
-                    message: {
-                      type: "string",
-                      minLength: 1,
-                      pattern: "\\S",
-                    },
-                  },
-                  required: ["message"],
-                  additionalProperties: false,
-                }),
-                execute: async ({ message }) => {
-                  await publishReply(participant.name, message.trim())
-                  return { posted: true }
-                },
-              }),
-            },
-          }),
-          {
-            store,
-            streamStore,
-            queue,
-            mailboxStore,
-            approvalMutex,
-          }
-        )
-
-        participants.push({
+      const runtime = new AgentRuntime(
+        defineAgent({
           name: participant.name,
-          conversation: {
-            chatId: `whatsapp-${index}`,
-            userId: options.userId,
+          model: participant.model,
+          telemetry: participant.telemetry,
+          sandbox: defineSandbox(() =>
+            createVirtualSandbox({ fs: new InMemoryFs() })
+          ),
+          instructions: [
+            role(
+              [
+                `You are ${participant.name} in a WhatsApp-style group chat. Your specialty is ${participant.specialty}. ${participant.instructions ?? ""}`,
+                "Every turn is a notification containing new public group messages.",
+                "New public messages may also arrive as mailbox communications between model steps; reconsider your planned contribution when they do.",
+                "Read them and decide autonomously whether to participate.",
+                "For casual or social messages, you may respond briefly when it fits your personality; silence is also natural, and the group should not answer in chorus.",
+                "For substantive messages, reply only when your specialty gives you something useful and non-duplicative to add.",
+                "If yes, call reply_to_group with the concise message you want everyone to see.",
+                "If no, do not call reply_to_group. Do not reply merely to agree, repeat, or announce silence.",
+                "Your ordinary assistant text is private and never appears in the group.",
+              ].join(" ")
+            ),
+          ],
+          tools: {
+            ...participant.tools,
+            reply_to_group: defineTool({
+              description:
+                "Post one useful contribution to the public group chat.",
+              inputSchema: jsonSchema<{ message: string }>({
+                type: "object",
+                properties: {
+                  message: {
+                    type: "string",
+                    minLength: 1,
+                    pattern: "\\S",
+                  },
+                },
+                required: ["message"],
+                additionalProperties: false,
+              }),
+              execute: async ({ message }) => {
+                await publishReply(participant.name, message.trim())
+                return { posted: true }
+              },
+            }),
           },
-          runtime,
-        })
-        workers.push(await runtime.work())
-      }
+        }),
+        {
+          store,
+          streamStore,
+          queue,
+          mailboxStore,
+          approvalMutex,
+        }
+      )
 
-      const group = new WhatsAppGroup(options, {
-        boss,
-        database,
-        streamStore,
-        mailboxStore,
-        approvalMutex,
-        participants,
-        workers,
+      participants.push({
+        name: participant.name,
+        conversation: {
+          chatId: `whatsapp-${index}`,
+          userId: options.userId,
+        },
+        runtime,
+        active: false,
       })
-      publishReply = async (author, content) => {
-        await group.#post(author, content)
-      }
-      return group
-    } catch (error) {
-      await WhatsAppGroup.#disposeResources({
-        boss,
-        database,
-        streamStore,
-        mailboxStore,
-        approvalMutex,
-        workers,
-      })
-      throw error
+      resources.use(await runtime.work())
     }
+
+    const group = new WhatsAppGroup(options, {
+      disposables: resources.move(),
+      participants,
+    })
+    publishReply = async (author, content) => {
+      await group.#post(author, content)
+    }
+    return group
   }
 
   async send(
@@ -238,20 +263,41 @@ export class WhatsAppGroup implements AsyncDisposable {
     return this.#messages
   }
 
-  async post(content: string, id = randomUUID()) {
+  async post(content: string, id: string = randomUUID()) {
     if (this.#closed) throw new Error("WhatsAppGroup is closed")
     const message = content.trim()
     if (!message) throw new Error("WhatsAppGroup message cannot be empty")
     return this.#post("user", message, id)
   }
 
+  snapshot() {
+    return {
+      messages: [...this.#messages],
+      participants: [...this.#profiles],
+      activity: structuredClone(this.#activity),
+      cursor: this.#cursor,
+    }
+  }
+
   subscribe({
     onMessage,
     onActivity,
-  }: Pick<WhatsAppGroupOptions, "onMessage" | "onActivity">) {
+    onEvent,
+    after = this.#cursor,
+  }: Pick<WhatsAppGroupOptions, "onMessage" | "onActivity" | "onEvent"> & {
+    after?: number
+  }) {
     if (this.#closed) throw new Error("WhatsAppGroup is closed")
-    const subscriber = { onMessage, onActivity }
+    const subscriber: GroupSubscriber = {
+      onMessage,
+      onActivity,
+      onEvent,
+      delivery: Promise.resolve(),
+    }
     this.#subscribers.add(subscriber)
+    for (const event of this.#events) {
+      if (event.cursor > after) this.#deliver(subscriber, event)
+    }
     return {
       [Symbol.dispose]: () => {
         this.#subscribers.delete(subscriber)
@@ -262,17 +308,13 @@ export class WhatsAppGroup implements AsyncDisposable {
   async [Symbol.asyncDispose]() {
     if (this.#closed) return
     this.#closed = true
-    await WhatsAppGroup.#disposeResources({
-      boss: this.#boss,
-      database: this.#database,
-      streamStore: this.#streamStore,
-      mailboxStore: this.#mailboxStore,
-      approvalMutex: this.#approvalMutex,
-      workers: this.#workers,
-    })
+    await this.#resources.disposeAsync()
   }
 
-  async #post(author: string, content: string, id = randomUUID()) {
+  async #post(author: string, content: string, id: string = randomUUID()) {
+    const existing = this.#messagesById.get(id)
+    if (existing) return existing
+
     const message = {
       id,
       sequence: ++this.#sequence,
@@ -280,11 +322,13 @@ export class WhatsAppGroup implements AsyncDisposable {
       content,
     }
     this.#messages.push(message)
+    this.#messagesById.set(id, message)
     this.#pending.push(message)
     if (author !== "user") {
       this.#replyCounts.set(author, (this.#replyCounts.get(author) ?? 0) + 1)
     }
     await this.#emitMessage(message)
+    await this.#deliverToActiveParticipants(message)
     this.#ensurePump()
     return message
   }
@@ -313,12 +357,23 @@ export class WhatsAppGroup implements AsyncDisposable {
 
     while (this.#pending.length > 0) {
       const pending = this.#pending.splice(0)
+      const batches = this.#participants.map((participant) => ({
+        participant,
+        notifications: pending.filter(
+          ({ id, author }) =>
+            author !== participant.name &&
+            !this.#mailboxRecipients.get(id)?.has(participant.name)
+        ),
+      }))
+      const recipients = batches
+        .filter(({ notifications }) => notifications.length > 0)
+        .map(({ participant }) => participant.name)
+      if (recipients.length === 0) {
+        for (const { id } of pending) this.#mailboxRecipients.delete(id)
+        continue
+      }
+
       notification++
-      const recipients = this.#participants
-        .filter((participant) =>
-          pending.some(({ author }) => author !== participant.name)
-        )
-        .map(({ name }) => name)
       await this.#emitActivity({
         type: "notification",
         notification,
@@ -327,20 +382,18 @@ export class WhatsAppGroup implements AsyncDisposable {
       })
 
       await Promise.all(
-        this.#participants.map(async (participant) => {
-          const notifications = pending.filter(
-            ({ author }) => author !== participant.name
-          )
+        batches.map(async ({ participant, notifications }) => {
           if (notifications.length === 0) return
 
-          await this.#emitActivity({
-            type: "participant",
-            notification,
-            participant: participant.name,
-            state: "considering",
-          })
-          const repliesBefore = this.#replyCounts.get(participant.name) ?? 0
+          participant.active = true
           try {
+            await this.#emitActivity({
+              type: "participant",
+              notification,
+              participant: participant.name,
+              state: "considering",
+            })
+            const repliesBefore = this.#replyCounts.get(participant.name) ?? 0
             const turn = await participant.runtime.enqueue(
               participant.conversation,
               {
@@ -366,9 +419,12 @@ export class WhatsAppGroup implements AsyncDisposable {
               state: "failed",
             })
             throw error
+          } finally {
+            participant.active = false
           }
         })
       )
+      for (const { id } of pending) this.#mailboxRecipients.delete(id)
     }
 
     await this.#emitActivity({ type: "settled", notifications: notification })
@@ -379,15 +435,47 @@ export class WhatsAppGroup implements AsyncDisposable {
   }
 
   async #emitMessage(message: WhatsAppMessage) {
+    const event = {
+      cursor: ++this.#cursor,
+      type: "message" as const,
+      message,
+    }
+    this.#events.push(event)
     await Promise.all(
-      [...this.#subscribers].map(({ onMessage }) => onMessage?.(message))
+      [...this.#subscribers].map((subscriber) =>
+        this.#deliver(subscriber, event, () => subscriber.onMessage?.(message))
+      )
     )
   }
 
   async #emitActivity(activity: WhatsAppGroupActivity) {
+    this.#activity = reduceActivity(this.#activity, activity)
+    const event = {
+      cursor: ++this.#cursor,
+      type: "activity" as const,
+      activity,
+    }
+    this.#events.push(event)
     await Promise.all(
-      [...this.#subscribers].map(({ onActivity }) => onActivity?.(activity))
+      [...this.#subscribers].map((subscriber) =>
+        this.#deliver(subscriber, event, () =>
+          subscriber.onActivity?.(activity)
+        )
+      )
     )
+  }
+
+  #deliver(
+    subscriber: GroupSubscriber,
+    event: WhatsAppRoomEvent,
+    legacyCallback?: () => void | Promise<void>
+  ) {
+    const delivery = subscriber.delivery.then(async () => {
+      await subscriber.onEvent?.(event)
+      await legacyCallback?.()
+    })
+    subscriber.delivery = delivery.catch(() => undefined)
+    return delivery
   }
 
   static #notification(messages: WhatsAppMessage[]) {
@@ -397,6 +485,49 @@ export class WhatsAppGroup implements AsyncDisposable {
       ...messages.flatMap(({ author, content }) => [`${author}:`, content, ""]),
       "Reply only through reply_to_group when you have something useful to add.",
     ].join("\n")
+  }
+
+  async #deliverToActiveParticipants(message: WhatsAppMessage) {
+    const recipients = this.#participants.filter(
+      ({ active, name }) => active && name !== message.author
+    )
+    if (recipients.length === 0) return
+
+    const eligibleRecipients = this.#participants.filter(
+      ({ name }) => name !== message.author
+    )
+    const author =
+      this.#participants.find(({ name }) => name === message.author)
+        ?.conversation ?? this.#user
+    const delivered = new Set<string>()
+    this.#mailboxRecipients.set(message.id, delivered)
+
+    await Promise.all(
+      recipients.map(async (participant) => {
+        await participant.runtime.deliver(
+          createInterAgentCommunication({
+            id: `${message.id}:${participant.conversation.chatId}`,
+            author,
+            recipient: participant.conversation,
+            otherRecipients: eligibleRecipients
+              .filter(({ name }) => name !== participant.name)
+              .map(({ conversation }) => conversation),
+            content: message.content,
+            metadata: {
+              roomMessageId: message.id,
+              roomSequence: message.sequence,
+              authorPath: message.author,
+              recipientPath: participant.name,
+              otherRecipientNames: eligibleRecipients
+                .filter(({ name }) => name !== participant.name)
+                .map(({ name }) => name),
+            },
+          }),
+          MessageDeliveryMode.QueueOnly
+        )
+        delivered.add(participant.name)
+      })
+    )
   }
 
   static #validate(options: WhatsAppGroupOptions) {
@@ -424,22 +555,60 @@ export class WhatsAppGroup implements AsyncDisposable {
       names.add(participant.name)
     }
   }
+}
 
-  static async #disposeResources(resources: {
-    boss: PgBoss
-    database: PGlite
-    streamStore: SqliteStreamStore
-    mailboxStore: SqliteMailboxStore
-    approvalMutex: SqliteApprovalMutex
-    workers: AsyncDisposable[]
-  }) {
-    for (const worker of resources.workers.toReversed()) {
-      await worker[Symbol.asyncDispose]()
+function reduceActivity(
+  state: WhatsAppGroupActivityState,
+  event: WhatsAppGroupActivity
+): WhatsAppGroupActivityState {
+  if (event.type === "started") {
+    return {
+      phase: "active",
+      notification: 0,
+      messageCount: 0,
+      participants: event.participants.map((name) => ({
+        name,
+        state: "notified",
+        replies: 0,
+      })),
     }
-    await resources.boss.stop({ graceful: false })
-    await resources.database.close()
-    resources.streamStore.close()
-    resources.mailboxStore.close()
-    resources.approvalMutex.close()
+  }
+  if (event.type === "notification") {
+    const recipients = new Set(event.recipients)
+    return {
+      ...state,
+      phase: "active",
+      notification: event.notification,
+      messageCount: event.messageCount,
+      participants: state.participants.map((participant) =>
+        recipients.has(participant.name)
+          ? { ...participant, state: "notified" }
+          : participant
+      ),
+    }
+  }
+  if (event.type === "settled") {
+    return {
+      ...state,
+      phase: "settled",
+      notification: event.notifications,
+      participants: state.participants.map((participant) => ({
+        ...participant,
+        state:
+          participant.state === "failed" ? "failed" : ("caught-up" as const),
+      })),
+    }
+  }
+  return {
+    ...state,
+    participants: state.participants.map((participant) =>
+      participant.name === event.participant
+        ? {
+            ...participant,
+            state: event.state,
+            replies: participant.replies + (event.replies ?? 0),
+          }
+        : participant
+    ),
   }
 }

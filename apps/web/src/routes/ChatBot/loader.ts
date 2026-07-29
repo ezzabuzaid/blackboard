@@ -1,8 +1,8 @@
-import { safeValidateUIMessages } from "ai"
 import { redirect, type LoaderFunctionArgs } from "react-router"
 
-import { apiUrl } from "./chatTransport"
-import type { GroupUIMessage } from "./groupMessages"
+import { apiUrl } from "./api"
+import { initialGroupActivity } from "./groupActivity"
+import { isGroupRoomState } from "./groupMessages"
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
@@ -24,40 +24,26 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const state: unknown = await stateResponse.json()
-    if (
-      !state ||
-      typeof state !== "object" ||
-      !("messages" in state) ||
-      !Array.isArray(state.messages) ||
-      !("resume" in state) ||
-      typeof state.resume !== "boolean"
-    ) {
+    if (!isGroupRoomState(state)) {
       throw new Error("Invalid chat state")
-    }
-
-    const messages =
-      state.messages.length === 0
-        ? { success: true as const, data: [] }
-        : await safeValidateUIMessages<GroupUIMessage>({
-            messages: state.messages,
-          })
-    if (!messages.success) {
-      throw messages.error
     }
 
     return {
       apiStatus: "ready" as const,
       chatId,
-      initialMessages: messages.data,
-      resume: state.resume,
+      initialState: state,
     }
   } catch (error) {
     if (request.signal.aborted) throw error
     return {
       apiStatus: "offline" as const,
       chatId,
-      initialMessages: [],
-      resume: false,
+      initialState: {
+        messages: [],
+        participants: [],
+        activity: initialGroupActivity,
+        cursor: 0,
+      },
     }
   }
 }

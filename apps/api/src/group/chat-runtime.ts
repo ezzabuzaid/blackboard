@@ -1,104 +1,49 @@
-import { randomUUID } from "node:crypto"
 import { resolve } from "node:path"
 
 import { openai } from "@ai-sdk/openai"
 import { createFileTelemetry } from "@deepagents/context/telemetry/file"
-import type {
-  ConversationId,
-  TurnInput,
-} from "@deepagents/experimental/zukhruf"
-import { createUIMessageStream, type UIMessage, type UIMessageChunk } from "ai"
+import type { ConversationId } from "@deepagents/experimental/zukhruf"
 
 import {
   WhatsAppGroup,
-  type WhatsAppGroupActivity,
-  type WhatsAppMessage,
   type WhatsAppParticipant,
+  type WhatsAppRoomEvent,
 } from "./whatsapp.js"
-
-type GroupMessageData = {
-  groupActivity: WhatsAppGroupActivity
-  groupMessage: WhatsAppMessage
-}
-
-export type GroupUIMessage = UIMessage<unknown, GroupMessageData>
-
-interface GroupChat {
-  group: WhatsAppGroup
-  messages: GroupUIMessage[]
-}
 
 export class WhatsAppChatRuntime implements AsyncDisposable {
   readonly #participants: WhatsAppParticipant[]
-  readonly #chats = new Map<string, Promise<GroupChat>>()
+  readonly #chats = new Map<string, Promise<WhatsAppGroup>>()
+  readonly #resources = new AsyncDisposableStack()
 
   constructor(participants = defaultParticipants()) {
     this.#participants = participants
   }
 
-  async enqueue(conversation: ConversationId, turn: TurnInput) {
-    const chat = await this.#chat(conversation)
-    const streamId = randomUUID()
-    chat.messages = [
-      ...chat.messages,
-      {
-        id: turn.id,
-        role: "user",
-        parts: [{ type: "text", text: turn.input }],
-      },
-    ]
-
-    const stream = createUIMessageStream<GroupUIMessage>({
-      originalMessages: chat.messages,
-      execute: async ({ writer }) => {
-        writer.write({ type: "start", messageId: streamId })
-        await chat.group.send(
-          turn.input,
-          (message) => {
-            if (message.author === "user") return
-            writer.write({
-              type: "data-groupMessage",
-              id: message.id,
-              data: message,
-            })
-          },
-          (activity) => {
-            writer.write({
-              type: "data-groupActivity",
-              data: activity,
-              transient: true,
-            })
-          }
-        )
-        writer.write({ type: "finish", finishReason: "stop" })
-      },
-      onEnd: ({ messages }) => {
-        chat.messages = messages
-      },
-    })
-
-    return { id: streamId, stream }
+  async post(
+    conversation: ConversationId,
+    message: { id: string; content: string }
+  ) {
+    const group = await this.#chat(conversation)
+    return group.post(message.content, message.id)
   }
 
-  observe(conversation: ConversationId) {
-    const key = JSON.stringify([conversation.userId, conversation.chatId])
-    return {
-      engine: {
-        getMessages: async () => {
-          const chat = this.#chats.get(key)
-          return chat ? (await chat).messages : []
-        },
-        headMessage: async () => undefined,
-      },
-      resume: async (): Promise<ReadableStream<UIMessageChunk> | null> => null,
-    }
+  async snapshot(conversation: ConversationId) {
+    const group = await this.#chat(conversation)
+    return group.snapshot()
+  }
+
+  async subscribe(
+    conversation: ConversationId,
+    after: number,
+    onEvent: (event: WhatsAppRoomEvent) => void | Promise<void>
+  ) {
+    const group = await this.#chat(conversation)
+    return group.subscribe({ after, onEvent })
   }
 
   async [Symbol.asyncDispose]() {
-    for (const chat of this.#chats.values()) {
-      const resolved = await chat.catch(() => null)
-      await resolved?.group[Symbol.asyncDispose]()
-    }
+    await Promise.allSettled(this.#chats.values())
+    await this.#resources.disposeAsync()
   }
 
   #chat(conversation: ConversationId) {
@@ -119,7 +64,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
             }
           : participant
       ),
-    }).then((group) => ({ group, messages: [] }))
+    }).then((group) => this.#resources.use(group))
     this.#chats.set(key, chat)
     void chat.catch(() => this.#chats.delete(key))
     return chat
@@ -131,7 +76,8 @@ function defaultParticipants(): WhatsAppParticipant[] {
   return [
     {
       name: "Maya",
-      specialty:
+      specialty: "Research",
+      instructions:
         "You contribute evidence, concrete facts, and questions that need research. You are curious but socially reserved and sometimes respond to greetings.",
       model: model(),
       tools: {
@@ -140,25 +86,29 @@ function defaultParticipants(): WhatsAppParticipant[] {
     },
     {
       name: "Omar",
-      specialty:
+      specialty: "Engineering",
+      instructions:
         "You contribute technical feasibility, architecture, and implementation consequences. You are quiet in casual conversation and usually let others answer greetings.",
       model: model(),
     },
     {
       name: "Lina",
-      specialty:
+      specialty: "Product",
+      instructions:
         "You contribute user needs, product scope, adoption, and business value. You are warm and welcoming and often respond to greetings.",
       model: model(),
     },
     {
       name: "Rami",
-      specialty:
+      specialty: "Critic",
+      instructions:
         "You contribute contradictions, risks, missing assumptions, and failure modes. You are reserved and rarely respond to greetings.",
       model: model(),
     },
     {
       name: "Noor",
-      specialty:
+      specialty: "Creative alternatives",
+      instructions:
         "You contribute useful alternatives and ideas that the others are unlikely to surface. You are playful and sociable and often respond briefly to casual messages.",
       model: model(),
     },

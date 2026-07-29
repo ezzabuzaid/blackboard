@@ -1,36 +1,40 @@
-import { isDataUIPart, type UIMessage } from "ai"
-
-import type { GroupActivityEvent } from "./groupActivity"
+import {
+  isGroupActivityEvent,
+  isGroupActivityState,
+  reduceGroupActivity,
+  type GroupActivityEvent,
+  type GroupActivityState,
+} from "./groupActivity"
 
 export interface GroupMessage {
   id: string
+  sequence: number
   author: string
   content: string
 }
+
+export interface GroupParticipant {
+  name: string
+  specialty: string
+}
+
+export interface GroupRoomState {
+  messages: GroupMessage[]
+  participants: GroupParticipant[]
+  activity: GroupActivityState
+  cursor: number
+}
+
+export type GroupRoomEvent =
+  | { cursor: number; type: "message"; message: GroupMessage }
+  | { cursor: number; type: "activity"; activity: GroupActivityEvent }
 
 export interface GroupMessageCluster {
   author: string
   messages: GroupMessage[]
 }
 
-type GroupMessageData = {
-  groupActivity: GroupActivityEvent
-  groupMessage: GroupMessage
-}
-
-export type GroupUIMessage = UIMessage<unknown, GroupMessageData>
-
-export function groupReplies(message: UIMessage) {
-  return message.parts.flatMap((part) =>
-    isDataUIPart(part) &&
-    part.type === "data-groupMessage" &&
-    isGroupMessage(part.data)
-      ? [part.data]
-      : []
-  )
-}
-
-export function groupReplyClusters(messages: readonly GroupMessage[]) {
+export function groupMessageClusters(messages: readonly GroupMessage[]) {
   return messages.reduce<GroupMessageCluster[]>((clusters, message) => {
     const current = clusters.at(-1)
     if (current?.author === message.author) {
@@ -42,15 +46,92 @@ export function groupReplyClusters(messages: readonly GroupMessage[]) {
   }, [])
 }
 
-function isGroupMessage(value: unknown): value is GroupMessage {
+export function reduceGroupRoom(
+  state: GroupRoomState,
+  event: GroupRoomEvent
+): GroupRoomState {
+  if (event.cursor <= state.cursor) return state
+
+  if (event.type === "activity") {
+    return {
+      ...state,
+      activity: reduceGroupActivity(state.activity, event.activity),
+      cursor: event.cursor,
+    }
+  }
+
+  return {
+    ...state,
+    messages: addGroupMessage(state.messages, event.message),
+    cursor: event.cursor,
+  }
+}
+
+export function addGroupMessage(
+  messages: readonly GroupMessage[],
+  message: GroupMessage
+) {
+  if (messages.some(({ id }) => id === message.id)) return [...messages]
+  return [...messages, message].sort((left, right) => {
+    return left.sequence - right.sequence
+  })
+}
+
+export function isGroupMessage(value: unknown): value is GroupMessage {
   return (
-    typeof value === "object" &&
-    value !== null &&
+    isRecord(value) &&
     "id" in value &&
     typeof value.id === "string" &&
+    Number.isSafeInteger(value.sequence) &&
+    Number(value.sequence) > 0 &&
     "author" in value &&
     typeof value.author === "string" &&
     "content" in value &&
     typeof value.content === "string"
   )
+}
+
+export function isGroupRoomState(value: unknown): value is GroupRoomState {
+  if (!isRecord(value) || !Array.isArray(value.messages)) return false
+  const messages = value.messages
+
+  return (
+    messages.every(isGroupMessage) &&
+    messages.every(
+      (message, index) =>
+        index === 0 ||
+        message.sequence > (messages[index - 1] as GroupMessage).sequence
+    ) &&
+    Array.isArray(value.participants) &&
+    value.participants.every(isGroupParticipant) &&
+    isGroupActivityState(value.activity) &&
+    Number.isSafeInteger(value.cursor) &&
+    Number(value.cursor) >= 0
+  )
+}
+
+export function isGroupRoomEvent(value: unknown): value is GroupRoomEvent {
+  if (
+    !isRecord(value) ||
+    !Number.isSafeInteger(value.cursor) ||
+    Number(value.cursor) <= 0
+  ) {
+    return false
+  }
+  if (value.type === "message") return isGroupMessage(value.message)
+  return value.type === "activity" && isGroupActivityEvent(value.activity)
+}
+
+function isGroupParticipant(value: unknown): value is GroupParticipant {
+  return (
+    isRecord(value) &&
+    typeof value.name === "string" &&
+    !!value.name &&
+    typeof value.specialty === "string" &&
+    !!value.specialty
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }

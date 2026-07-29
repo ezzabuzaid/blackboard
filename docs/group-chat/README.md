@@ -18,15 +18,12 @@ Each phase has its own executable checklist and acceptance criteria.
 
 ## Phases
 
-1. [Activity overlay](./phase-0-activity-overlay.md) - already in progress by
-   another agent; preserve the UI and reducer, then replace its temporary
-   `useChat.onData` source in Phase 2.
-2. [Room pump](./phase-1-room-pump.md) - immediate publication, one pending
-   inbox, concurrent participant notification, and human intervention.
-3. [Room HTTP and client](./phase-2-room-http-client.md) - hard cutover from
-   request-response chat to state, SSE events, and message POSTs.
-4. [Mailbox awareness](./phase-3-mailbox-awareness.md) - let active agents
-   observe peer and human messages between model steps.
+1. [Activity overlay](./phase-0-activity-overlay.md) - complete.
+2. [Room pump](./phase-1-room-pump.md) - complete.
+3. [Room HTTP and client](./phase-2-room-http-client.md) - complete.
+4. [Mailbox awareness](./phase-3-mailbox-awareness.md) - complete for
+   between-step delivery; #429 remains open for simultaneous first-step
+   replies.
 5. [Durability and controls](./phase-4-durability-controls.md) - restart-safe
    history, reconnect, new-group UX, cancellation, limits, and failure
    isolation.

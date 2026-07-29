@@ -125,6 +125,32 @@ export function isGroupActivityEvent(
   )
 }
 
+export function isGroupActivityState(
+  value: unknown
+): value is GroupActivityState {
+  return (
+    isRecord(value) &&
+    ["idle", "active", "settled"].includes(String(value.phase)) &&
+    nonNegativeInteger(value.notification) &&
+    nonNegativeInteger(value.messageCount) &&
+    Array.isArray(value.participants) &&
+    value.participants.every(
+      (participant) =>
+        isRecord(participant) &&
+        typeof participant.name === "string" &&
+        [
+          "notified",
+          "considering",
+          "replied",
+          "passed",
+          "caught-up",
+          "failed",
+        ].includes(String(participant.state)) &&
+        nonNegativeInteger(participant.replies)
+    )
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
 }
@@ -135,4 +161,8 @@ function stringArray(value: unknown): value is string[] {
 
 function positiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0
 }

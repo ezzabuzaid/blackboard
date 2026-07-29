@@ -19,24 +19,25 @@ import {
 } from "lucide-react"
 
 import { InfoOverlay } from "../../components/InfoOverlay"
-import { useChatSession } from "./ChatSession"
 import { GroupAvatar } from "./GroupAvatar"
-import type { ParticipantActivityState } from "./groupActivity"
+import { useGroupChat } from "./GroupChat"
+import type {
+  GroupActivityState,
+  ParticipantActivityState,
+} from "./groupActivity"
+import type { GroupParticipant } from "./groupMessages"
 
 export function GroupActivityOverlay() {
-  const { groupActivity } = useChatSession()
-  const settled = groupActivity.phase === "settled"
+  const { activity, participants } = useGroupChat()
+  const settled = activity.phase === "settled"
 
   return (
-    <InfoOverlay
-      open={groupActivity.phase !== "idle"}
-      aria-label="Group activity"
-    >
+    <InfoOverlay open={activity.phase !== "idle"} aria-label="Group activity">
       <div className="flex items-start justify-between gap-3 p-4">
         <div>
           <h2 className="font-heading text-sm font-semibold">Group activity</h2>
           <p className="mt-1 text-xs text-muted-foreground" aria-live="polite">
-            {activitySummary(groupActivity)}
+            {activitySummary(activity)}
           </p>
         </div>
         <Badge variant={settled ? "secondary" : "default"}>
@@ -45,14 +46,17 @@ export function GroupActivityOverlay() {
       </div>
       <Separator />
       <ItemGroup className="gap-2 p-3">
-        {groupActivity.participants.map((participant) => (
+        {activity.participants.map((participant) => (
           <Item key={participant.name} variant="muted" size="sm">
             <ItemMedia>
               <GroupAvatar name={participant.name} size="sm" />
             </ItemMedia>
             <ItemContent>
               <ItemTitle className="capitalize">{participant.name}</ItemTitle>
-              <ItemDescription>{stateLabel(participant.state)}</ItemDescription>
+              <ItemDescription>
+                {stateLabel(participant.state)}
+                {participantSpecialty(participants, participant.name)}
+              </ItemDescription>
             </ItemContent>
             <ItemActions>
               <ActivityIcon state={participant.state} />
@@ -76,7 +80,7 @@ function activitySummary({
   phase,
   notification,
   messageCount,
-}: ReturnType<typeof useChatSession>["groupActivity"]) {
+}: GroupActivityState) {
   if (phase === "settled") {
     return `Everyone is caught up with ${notification} ${
       notification === 1 ? "update" : "updates"
@@ -86,6 +90,13 @@ function activitySummary({
   return `Update ${notification}: ${messageCount} new ${
     messageCount === 1 ? "message" : "messages"
   }`
+}
+
+function participantSpecialty(participants: GroupParticipant[], name: string) {
+  const specialty = participants.find(
+    (participant) => participant.name === name
+  )?.specialty
+  return specialty ? ` · ${specialty}` : ""
 }
 
 function stateLabel(state: ParticipantActivityState) {

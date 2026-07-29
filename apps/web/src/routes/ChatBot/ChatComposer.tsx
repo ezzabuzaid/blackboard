@@ -11,25 +11,23 @@ import {
 } from "@stdlib/shadcn"
 import { SendIcon } from "lucide-react"
 
-import { useChatSession } from "./ChatSession"
+import { useGroupChat } from "./GroupChat"
 
 export function ChatComposer() {
-  const {
-    clearError,
-    error,
-    sendMessage: submitChatMessage,
-    status,
-  } = useChatSession()
+  const { clearError, error, postMessage, posting } = useGroupChat()
   const [draft, setDraft] = useState("")
-  const pending = status === "submitted" || status === "streaming"
 
   async function sendMessage() {
     const text = draft.trim()
-    if (!text || pending) return
+    if (!text || posting) return
 
     clearError()
-    setDraft("")
-    await submitChatMessage({ text })
+    try {
+      await postMessage(text)
+      setDraft("")
+    } catch {
+      // The provider exposes the send failure beside the composer.
+    }
   }
 
   return (
@@ -57,7 +55,7 @@ export function ChatComposer() {
                 }
               }}
               placeholder="Message the group…"
-              disabled={pending}
+              disabled={posting}
               aria-invalid={!!error}
               rows={1}
               className="max-h-40 min-h-10 px-4 py-[9px] text-[15px] leading-[22px]"
@@ -67,8 +65,8 @@ export function ChatComposer() {
                 type="submit"
                 variant="default"
                 size="icon-sm"
-                disabled={pending || !draft.trim()}
-                aria-label={pending ? "Sending" : "Send"}
+                disabled={posting || !draft.trim()}
+                aria-label={posting ? "Sending" : "Send"}
                 className="size-10 rounded-full"
               >
                 <SendIcon aria-hidden="true" />

@@ -1,21 +1,23 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import type { UIMessage } from "ai"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { LoaderFunctionArgs } from "react-router"
 import { Streamdown } from "streamdown"
 
-import { AgentTrajectory } from "./AgentTrajectory"
 import { artifactRemarkPlugins, sandboxArtifactUrl } from "./artifactLinks"
-import { scheduledTurnId, waitForStream } from "./ChatSession"
 import {
   initialGroupActivity,
   reduceGroupActivity,
   type GroupActivityEvent,
 } from "./groupActivity"
-import { groupReplies, groupReplyClusters } from "./groupMessages"
+import {
+  addGroupMessage,
+  groupMessageClusters,
+  reduceGroupRoom,
+  type GroupRoomState,
+} from "./groupMessages"
 import { loader } from "./loader"
 
 test("loader adds a chat id to the URL", async () => {
@@ -51,27 +53,21 @@ test("loader hydrates the selected chat and reports API state", async () => {
           ? [
               {
                 id: "message-1",
-                role: "user",
-                parts: [{ type: "text", text: "Hello" }],
+                sequence: 1,
+                author: "user",
+                content: "Hello",
               },
               {
-                id: "response-1",
-                role: "assistant",
-                parts: [
-                  {
-                    type: "data-groupMessage",
-                    id: "reply-1",
-                    data: {
-                      id: "reply-1",
-                      author: "researcher",
-                      content: "Hello back",
-                    },
-                  },
-                ],
+                id: "reply-1",
+                sequence: 2,
+                author: "Maya",
+                content: "Hello back",
               },
             ]
           : [],
-        resume: hasHistory,
+        participants: [{ name: "Maya", specialty: "Finds evidence." }],
+        activity: initialGroupActivity,
+        cursor: hasHistory ? 2 : 0,
       })
     }
     return new Response(null, { status: 404 })
@@ -85,180 +81,131 @@ test("loader hydrates the selected chat and reports API state", async () => {
     assert.deepEqual(await loader(args), {
       apiStatus: "ready",
       chatId: "test-chat",
-      initialMessages: [
-        {
-          id: "message-1",
-          role: "user",
-          parts: [{ type: "text", text: "Hello" }],
-        },
-        {
-          id: "response-1",
-          role: "assistant",
-          parts: [
-            {
-              type: "data-groupMessage",
-              id: "reply-1",
-              data: {
-                id: "reply-1",
-                author: "researcher",
-                content: "Hello back",
-              },
-            },
-          ],
-        },
-      ],
-      resume: true,
+      initialState: {
+        messages: [
+          {
+            id: "message-1",
+            sequence: 1,
+            author: "user",
+            content: "Hello",
+          },
+          {
+            id: "reply-1",
+            sequence: 2,
+            author: "Maya",
+            content: "Hello back",
+          },
+        ],
+        participants: [{ name: "Maya", specialty: "Finds evidence." }],
+        activity: initialGroupActivity,
+        cursor: 2,
+      },
     })
     hasHistory = false
     assert.deepEqual(await loader(args), {
       apiStatus: "ready",
       chatId: "test-chat",
-      initialMessages: [],
-      resume: false,
+      initialState: {
+        messages: [],
+        participants: [{ name: "Maya", specialty: "Finds evidence." }],
+        activity: initialGroupActivity,
+        cursor: 0,
+      },
     })
     online = false
     assert.deepEqual(await loader(args), {
       apiStatus: "offline",
       chatId: "test-chat",
-      initialMessages: [],
-      resume: false,
-    })
-  } finally {
-    globalThis.fetch = originalFetch
-  }
-})
-
-test("scheduled turns hydrate history before resuming their stream", async () => {
-  const originalFetch = globalThis.fetch
-  let requests = 0
-  const messages: UIMessage[] = [
-    {
-      id: "scheduled-user",
-      role: "user",
-      parts: [{ type: "text", text: "Self-scheduled task:\nContinue" }],
-    },
-  ]
-  globalThis.fetch = async () =>
-    Response.json({
-      streamId: ++requests === 1 ? "stream-1" : "stream-2",
-      messages,
-    })
-
-  try {
-    assert.equal(
-      scheduledTurnId({
-        id: "stream-1",
-        role: "assistant",
-        parts: [
-          {
-            type: "tool-schedule_task",
-            toolCallId: "call-1",
-            state: "output-available",
-            input: { task: "Continue" },
-            output: { turnId: "stream-2" },
-          },
-        ],
-      }),
-      "stream-2"
-    )
-    assert.deepEqual(
-      await waitForStream(
-        "test-chat",
-        "stream-2",
-        new AbortController().signal
-      ),
-      { streamId: "stream-2", messages }
-    )
-    assert.equal(requests, 2)
-  } finally {
-    globalThis.fetch = originalFetch
-  }
-})
-
-test("agent trajectory renders AI SDK message parts", () => {
-  const parts: UIMessage["parts"] = [
-    { type: "step-start" },
-    {
-      type: "dynamic-tool",
-      toolCallId: "tool-1",
-      toolName: "writeFile",
-      state: "output-available",
-      input: { path: "/workspace/sample.pdf" },
-      output: { success: true },
-    },
-    { type: "step-start" },
-  ]
-  const html = renderToStaticMarkup(
-    AgentTrajectory({
-      active: false,
-      parts,
-    })
-  )
-
-  assert.match(html, /Activity/)
-  assert.match(html, /2 steps · 1 tool/)
-  assert.doesNotMatch(html, /Step 1/)
-  assert.doesNotMatch(html, /Step 2/)
-  assert.match(html, /Write file/)
-  assert.match(html, /Completed/)
-  assert.match(html, /sample\.pdf/)
-  assert.match(html, /success/)
-})
-
-test("group replies project typed AI SDK data parts", () => {
-  assert.deepEqual(
-    groupReplies({
-      id: "response-1",
-      role: "assistant",
-      parts: [
-        {
-          type: "data-groupMessage",
-          id: "reply-1",
-          data: {
-            id: "reply-1",
-            author: "researcher",
-            content: "Start with one real customer workflow.",
-          },
-        },
-      ],
-    }),
-    [
-      {
-        id: "reply-1",
-        author: "researcher",
-        content: "Start with one real customer workflow.",
+      initialState: {
+        messages: [],
+        participants: [],
+        activity: initialGroupActivity,
+        cursor: 0,
       },
-    ]
-  )
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
-test("group replies cluster only consecutive messages from one author", () => {
+test("group messages cluster only consecutive messages from one author", () => {
   const maya = {
     id: "maya-1",
+    sequence: 1,
     author: "Maya",
     content: "First thought",
   }
   const mayaFollowUp = {
     id: "maya-2",
+    sequence: 2,
     author: "Maya",
     content: "One more thing",
   }
   const omar = {
     id: "omar-1",
+    sequence: 3,
     author: "Omar",
     content: "Technical consequence",
   }
   const mayaLater = {
     id: "maya-3",
+    sequence: 4,
     author: "Maya",
     content: "Returning later",
   }
 
-  assert.deepEqual(groupReplyClusters([maya, mayaFollowUp, omar, mayaLater]), [
-    { author: "Maya", messages: [maya, mayaFollowUp] },
-    { author: "Omar", messages: [omar] },
-    { author: "Maya", messages: [mayaLater] },
-  ])
+  assert.deepEqual(
+    groupMessageClusters([maya, mayaFollowUp, omar, mayaLater]),
+    [
+      { author: "Maya", messages: [maya, mayaFollowUp] },
+      { author: "Omar", messages: [omar] },
+      { author: "Maya", messages: [mayaLater] },
+    ]
+  )
+})
+
+test("room events append in order and ignore reconnect duplicates", () => {
+  const hydrated: GroupRoomState = {
+    messages: [
+      {
+        id: "message-1",
+        sequence: 1,
+        author: "user",
+        content: "First",
+      },
+    ],
+    participants: [{ name: "Maya", specialty: "Finds evidence." }],
+    activity: {
+      phase: "active",
+      notification: 1,
+      messageCount: 1,
+      participants: [{ name: "Maya", state: "considering", replies: 0 }],
+    },
+    cursor: 4,
+  }
+  const reply = {
+    cursor: 5,
+    type: "message" as const,
+    message: {
+      id: "reply-1",
+      sequence: 2,
+      author: "Maya",
+      content: "Start with the evidence.",
+    },
+  }
+  const withReply = reduceGroupRoom(hydrated, reply)
+
+  assert.deepEqual(withReply.messages, [...hydrated.messages, reply.message])
+  assert.strictEqual(reduceGroupRoom(withReply, reply), withReply)
+  assert.deepEqual(
+    addGroupMessage(withReply.messages, {
+      id: "message-2",
+      sequence: 3,
+      author: "user",
+      content: "What if we narrow it?",
+    }).map(({ id }) => id),
+    ["message-1", "reply-1", "message-2"]
+  )
 })
 
 test("group activity tracks decisions, replies, and settlement", () => {

@@ -1,6 +1,6 @@
 import { defaultRemarkPlugins } from "streamdown"
 
-import { apiUrl } from "./chatTransport"
+import { apiUrl } from "./api"
 
 interface MarkdownNode {
   children?: MarkdownNode[]

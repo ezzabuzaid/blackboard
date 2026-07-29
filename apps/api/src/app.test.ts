@@ -3,8 +3,7 @@ import test from "node:test"
 import { setTimeout as sleep } from "node:timers/promises"
 
 import { openai } from "@ai-sdk/openai"
-import type { AgentRuntime } from "@deepagents/experimental/zukhruf"
-import { simulateReadableStream, type UIMessage } from "ai"
+import { simulateReadableStream } from "ai"
 import { MockLanguageModelV4 } from "ai/test"
 
 import agentSandbox, {
@@ -12,37 +11,34 @@ import agentSandbox, {
   removeSandbox,
 } from "./agent/sandbox.js"
 import { scheduleTask } from "./agent/tools/schedule-task.js"
-import { createApp } from "./app.js"
-import type { ChatRuntime, ChatStreamStore } from "./chat/chat-service.js"
+import { createApp, type AppDependencies } from "./app.js"
 import type { ListQueuedTurns, QueuedTurn } from "./chat/routes.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import { WhatsAppGroup } from "./group/whatsapp.js"
 
+type ChatRuntime = AppDependencies["runtime"]
+
 const unusedRuntime: ChatRuntime = {
-  async enqueue() {
-    throw new Error("Unexpected enqueue")
+  async post() {
+    throw new Error("Unexpected post")
   },
-  observe() {
-    throw new Error("Unexpected observe")
+  async snapshot() {
+    throw new Error("Unexpected snapshot")
+  },
+  async subscribe() {
+    throw new Error("Unexpected subscribe")
   },
 }
 
 const noQueuedTurns = async (): Promise<QueuedTurn[]> => []
-const noStreams: ChatStreamStore = {
-  async getStreamStatus() {
-    return null
-  },
-}
 function testApp({
   runtime = unusedRuntime,
-  streams = noStreams,
   listQueuedTurns = noQueuedTurns,
 }: {
   runtime?: ChatRuntime
-  streams?: ChatStreamStore
   listQueuedTurns?: ListQueuedTurns
 } = {}) {
-  return createApp({ runtime, streams, listQueuedTurns })
+  return createApp({ runtime, listQueuedTurns })
 }
 
 const app = testApp()
@@ -57,131 +53,166 @@ test("health reports the linked agent", async () => {
   })
 })
 
-test("chat rejects an invalid UI message", async () => {
-  const response = await app.request("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id: "chat-1",
-      messages: [{ role: "user", content: "not a UI message" }],
-    }),
-  })
-
-  assert.equal(response.status, 400)
-})
-
-test("chat enqueues the latest UI message as a Zukhruf turn", async () => {
-  let received: Parameters<AgentRuntime["enqueue"]> | undefined
-  const runtime: ChatRuntime = {
-    async enqueue(...input) {
-      received = input
-      return {
-        id: "stream-1",
-        stream: new ReadableStream({
-          start(controller) {
-            controller.enqueue({ type: "start", messageId: "stream-1" })
-            controller.enqueue({ type: "text-start", id: "text-1" })
-            controller.enqueue({
-              type: "text-delta",
-              id: "text-1",
-              delta: "Hello",
-            })
-            controller.enqueue({ type: "text-end", id: "text-1" })
-            controller.enqueue({ type: "finish", finishReason: "stop" })
-            controller.close()
-          },
-        }),
-      }
-    },
-    observe: unusedRuntime.observe,
-  }
-  const response = await testApp({ runtime }).request("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id: "chat-1",
-      messages: [
-        {
-          id: "message-1",
-          role: "user",
-          parts: [{ type: "text", text: " Hello " }],
-        },
-      ],
-    }),
-  })
-
-  assert.equal(response.status, 200)
-  assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/)
-  assert.deepEqual(received, [
-    { chatId: "chat-1", userId: "local-user" },
-    { id: "message-1", input: "Hello" },
-  ])
-  assert.match(await response.text(), /"type":"text-delta"/)
-})
-
-test("chat streams group activity and volunteered replies as AI SDK data parts", async () => {
-  let researcherCalls = 0
-  const researcher = new MockLanguageModelV4({
+test("room message POST returns before active participants settle", async () => {
+  const participantStarted = Promise.withResolvers<void>()
+  const releaseParticipant = Promise.withResolvers<void>()
+  const participant = new MockLanguageModelV4({
     doStream: async () => {
-      researcherCalls++
-      return researcherCalls === 1
-        ? groupToolResponse("reply_to_group", "research-reply", {
-            message: "Start with one real customer workflow.",
-          })
-        : groupTextResponse("Reply posted.")
+      participantStarted.resolve()
+      await releaseParticipant.promise
+      return groupTextResponse("Nothing distinct to add.")
     },
-  })
-  const critic = new MockLanguageModelV4({
-    doStream: async () => groupTextResponse("Nothing distinct to add."),
   })
   await using runtime = new WhatsAppChatRuntime([
     {
-      name: "researcher",
+      name: "Maya",
       specialty: "Finds evidence.",
-      model: researcher,
-    },
-    {
-      name: "critic",
-      specialty: "Finds missing assumptions.",
-      model: critic,
+      model: participant,
     },
   ])
 
-  const groupApp = testApp({ runtime })
-  const response = await groupApp.request("/api/chat", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      id: "chat-1",
+  try {
+    const groupApp = testApp({ runtime })
+    const request = () =>
+      groupApp.request("/api/chat/chat-1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: "message-1",
+          content: "What should we do first?",
+        }),
+      })
+    const response = await Promise.race([
+      request(),
+      sleep(2_000).then(() => {
+        throw new Error("message POST waited for the participant")
+      }),
+    ])
+
+    assert.equal(response.status, 201)
+    assert.deepEqual(await response.json(), {
+      message: {
+        id: "message-1",
+        sequence: 1,
+        author: "user",
+        content: "What should we do first?",
+      },
+    })
+    assert.deepEqual(await (await request()).json(), {
+      message: {
+        id: "message-1",
+        sequence: 1,
+        author: "user",
+        content: "What should we do first?",
+      },
+    })
+    await participantStarted.promise
+
+    const state = (await (
+      await groupApp.request("/api/chat/chat-1/state")
+    ).json()) as ReturnType<WhatsAppGroup["snapshot"]>
+    assert.deepEqual(state, {
       messages: [
         {
           id: "message-1",
-          role: "user",
-          parts: [{ type: "text", text: "What should we do first?" }],
+          sequence: 1,
+          author: "user",
+          content: "What should we do first?",
         },
       ],
-    }),
-  })
+      participants: [{ name: "Maya", specialty: "Finds evidence." }],
+      activity: {
+        phase: "active",
+        notification: 1,
+        messageCount: 1,
+        participants: [{ name: "Maya", state: "considering", replies: 0 }],
+      },
+      cursor: 4,
+    })
 
-  assert.equal(response.status, 200)
-  const body = await response.text()
-  assert.match(body, /"type":"data-groupActivity"/)
-  assert.match(body, /"transient":true/)
-  assert.match(body, /"type":"started"/)
-  assert.match(body, /"type":"notification"/)
-  assert.match(body, /"state":"considering"/)
-  assert.match(body, /"state":"replied"/)
-  assert.match(body, /"state":"passed"/)
-  assert.match(body, /"type":"settled"/)
-  assert.match(body, /"type":"data-groupMessage"/)
-  assert.match(body, /"author":"researcher"/)
-  assert.match(body, /Start with one real customer workflow\./)
+    const settled = Promise.withResolvers<void>()
+    using settlement = await runtime.subscribe(
+      { chatId: "chat-1", userId: "local-user" },
+      state.cursor,
+      (event) => {
+        if (event.type === "activity" && event.activity.type === "settled") {
+          settled.resolve()
+        }
+      }
+    )
+    releaseParticipant.resolve()
+    await settled.promise
 
-  const state = await groupApp.request("/api/chat/chat-1/state")
-  assert.equal(state.status, 200)
-  assert.match(
-    JSON.stringify(await state.json()),
-    /Start with one real customer workflow\./
+    async function readEvents(headers?: Record<string, string>) {
+      const controller = new AbortController()
+      const response = await groupApp.request(
+        `/api/chat/chat-1/events?after=${state.cursor}`,
+        { headers, signal: controller.signal }
+      )
+      assert.equal(response.status, 200)
+      assert.match(
+        response.headers.get("content-type") ?? "",
+        /text\/event-stream/
+      )
+      const reader = response.body!.getReader()
+      let events = ""
+      while (!events.includes("id: 6")) {
+        const chunk = await reader.read()
+        if (chunk.done) break
+        events += new TextDecoder().decode(chunk.value, { stream: true })
+      }
+      controller.abort()
+      await reader.cancel().catch(() => undefined)
+      return events
+    }
+
+    const events = await readEvents()
+    assert.doesNotMatch(events, /id: 4\n/)
+    assert.match(events, /event: activity/)
+    assert.match(events, /id: 5/)
+    assert.match(events, /id: 6/)
+    assert.match(events, /"type":"settled"/)
+
+    const reconnected = await readEvents({ "Last-Event-ID": "4" })
+    assert.doesNotMatch(reconnected, /id: 4\n/)
+    assert.match(reconnected, /id: 5/)
+    assert.match(reconnected, /id: 6/)
+  } finally {
+    releaseParticipant.resolve()
+  }
+})
+
+test("room message and event cursors are validated at the boundary", async () => {
+  for (const body of [
+    null,
+    {},
+    { id: "", content: "Hello" },
+    { id: "message-1", content: "   " },
+  ]) {
+    const response = await app.request("/api/chat/chat-1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    assert.equal(response.status, 400)
+  }
+
+  assert.equal(
+    (await app.request("/api/chat/chat-1/events?after=-1")).status,
+    400
+  )
+  assert.equal(
+    (await app.request("/api/chat/chat-1/events?after=invalid")).status,
+    400
+  )
+  assert.equal((await app.request("/api/chat/chat-1/stream")).status, 404)
+  assert.equal(
+    (
+      await app.request("/api/chat", {
+        method: "POST",
+      })
+    ).status,
+    404
   )
 })
 
@@ -211,124 +242,6 @@ test("queued turns endpoint uses the requested chat", async () => {
       },
     ],
   })
-})
-
-test("chat state hydrates history without duplicating the replayable head", async () => {
-  const messages: UIMessage[] = [
-    {
-      id: "message-1",
-      role: "user",
-      parts: [{ type: "text", text: "Hello" }],
-    },
-    {
-      id: "stream-1",
-      role: "assistant",
-      parts: [{ type: "text", text: "Hello back" }],
-    },
-  ]
-  let received: { chatId: string; userId: string } | undefined
-  const runtime: ChatRuntime = {
-    enqueue: unusedRuntime.enqueue,
-    observe(conversation) {
-      received = conversation
-      return {
-        engine: {
-          async getMessages() {
-            return messages
-          },
-          async headMessage() {
-            return { id: "stream-1", name: "assistant" }
-          },
-        },
-        async resume() {
-          return null
-        },
-      }
-    },
-  }
-  const streams: ChatStreamStore = {
-    async getStreamStatus(id) {
-      assert.equal(id, "stream-1")
-      return "completed"
-    },
-  }
-
-  const response = await testApp({ runtime, streams }).request(
-    "/api/chat/chat-1/state"
-  )
-
-  assert.equal(response.status, 200)
-  assert.deepEqual(received, { chatId: "chat-1", userId: "local-user" })
-  assert.deepEqual(await response.json(), {
-    messages: [messages[0]],
-    resume: true,
-    streamId: "stream-1",
-  })
-})
-
-test("chat stream endpoint replays the durable head stream", async () => {
-  const runtime: ChatRuntime = {
-    enqueue: unusedRuntime.enqueue,
-    observe() {
-      return {
-        engine: {
-          async getMessages() {
-            return []
-          },
-          async headMessage() {
-            return undefined
-          },
-        },
-        async resume() {
-          return new ReadableStream({
-            start(controller) {
-              controller.enqueue({ type: "start", messageId: "stream-1" })
-              controller.enqueue({ type: "text-start", id: "text-1" })
-              controller.enqueue({
-                type: "text-delta",
-                id: "text-1",
-                delta: "Resumed",
-              })
-              controller.enqueue({ type: "text-end", id: "text-1" })
-              controller.enqueue({ type: "finish", finishReason: "stop" })
-              controller.close()
-            },
-          })
-        },
-      }
-    },
-  }
-
-  const response = await testApp({ runtime }).request("/api/chat/chat-1/stream")
-
-  assert.equal(response.status, 200)
-  assert.match(response.headers.get("content-type") ?? "", /text\/event-stream/)
-  assert.match(await response.text(), /"delta":"Resumed"/)
-})
-
-test("chat stream endpoint returns no content before a turn exists", async () => {
-  const runtime: ChatRuntime = {
-    enqueue: unusedRuntime.enqueue,
-    observe() {
-      return {
-        engine: {
-          async getMessages() {
-            return []
-          },
-          async headMessage() {
-            return undefined
-          },
-        },
-        async resume() {
-          return null
-        },
-      }
-    },
-  }
-
-  const response = await testApp({ runtime }).request("/api/chat/chat-1/stream")
-
-  assert.equal(response.status, 204)
 })
 
 test("development CORS accepts a local fallback port", async () => {
@@ -500,6 +413,73 @@ test("publishes a group reply before slower members finish", async () => {
   )
 })
 
+test("an active member sees a peer reply before its next model step", async () => {
+  const lateMemberStarted = Promise.withResolvers<void>()
+  const earlyReplyPublished = Promise.withResolvers<void>()
+  const latePrompts: unknown[] = []
+
+  let earlyCalls = 0
+  const early = new MockLanguageModelV4({
+    doStream: async () => {
+      earlyCalls++
+      if (earlyCalls === 1) {
+        await lateMemberStarted.promise
+        return groupToolResponse("reply_to_group", "early-reply", {
+          message: "The answer is already covered.",
+        })
+      }
+      return groupTextResponse("Reply posted.")
+    },
+  })
+
+  let lateCalls = 0
+  const late = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      lateCalls++
+      latePrompts.push(prompt)
+      if (lateCalls === 1) {
+        lateMemberStarted.resolve()
+        await earlyReplyPublished.promise
+        return groupToolResponse("bash", "late-boundary", {
+          command: "printf boundary",
+          reasoning: "Create a safe model-step boundary.",
+        })
+      }
+      if (JSON.stringify(prompt).includes("The answer is already covered.")) {
+        return groupTextResponse("Nothing non-duplicative to add.")
+      }
+      return groupToolResponse("reply_to_group", "late-duplicate", {
+        message: "The answer is already covered.",
+      })
+    },
+  })
+
+  await using group = await WhatsAppGroup.create({
+    userId: "user-1",
+    participants: [
+      { name: "early", specialty: "Answers quickly.", model: early },
+      { name: "late", specialty: "Checks answers carefully.", model: late },
+    ],
+  })
+
+  const messages = await group.send("What is the answer?", (message) => {
+    if (message.author === "early") earlyReplyPublished.resolve()
+  })
+
+  assert.equal(lateCalls, 2)
+  assert.match(JSON.stringify(latePrompts[1]), /Sender: early/)
+  assert.match(
+    JSON.stringify(latePrompts[1]),
+    /The answer is already covered\./
+  )
+  assert.deepEqual(
+    messages
+      .filter(({ author }) => author !== "user")
+      .map(({ author, content }) => ({ author, content })),
+    [{ author: "early", content: "The answer is already covered." }]
+  )
+})
+
 test("each group member uses its own telemetry", async () => {
   const firstStarts: unknown[] = []
   const secondStarts: unknown[] = []
@@ -543,7 +523,10 @@ test("each group member uses its own telemetry", async () => {
 
   assert.match(JSON.stringify(firstStarts), /"functionId":"parent-chat:first"/)
   assert.doesNotMatch(JSON.stringify(firstStarts), /parent-chat:second/)
-  assert.match(JSON.stringify(secondStarts), /"functionId":"parent-chat:second"/)
+  assert.match(
+    JSON.stringify(secondStarts),
+    /"functionId":"parent-chat:second"/
+  )
   assert.doesNotMatch(JSON.stringify(secondStarts), /parent-chat:first/)
 })
 

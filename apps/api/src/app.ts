@@ -1,28 +1,17 @@
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 
-import {
-  ChatService,
-  type ChatRuntime,
-  type ChatStreamStore,
-} from "./chat/chat-service.js"
 import { createChatRoutes, type ListQueuedTurns } from "./chat/routes.js"
+import type { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 
 const configuredOrigin = process.env.WEB_ORIGIN
 
 export interface AppDependencies {
-  runtime: ChatRuntime
-  streams: ChatStreamStore
+  runtime: Pick<WhatsAppChatRuntime, "post" | "snapshot" | "subscribe">
   listQueuedTurns: ListQueuedTurns
 }
 
-export function createApp({
-  runtime,
-  streams,
-  listQueuedTurns,
-}: AppDependencies) {
-  const chats = new ChatService(runtime, streams)
-
+export function createApp({ runtime, listQueuedTurns }: AppDependencies) {
   return new Hono()
     .use(
       "/api/*",
@@ -47,5 +36,5 @@ export function createApp({
     .get("/api/health", (context) =>
       context.json({ status: "ok", agent: "zukhruf" })
     )
-    .route("/api/chat", createChatRoutes(chats, listQueuedTurns))
+    .route("/api/chat", createChatRoutes(runtime, listQueuedTurns))
 }
