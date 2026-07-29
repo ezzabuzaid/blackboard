@@ -46,7 +46,7 @@ export function ChatComposer() {
           <FieldLabel htmlFor="message" className="sr-only">
             Message
           </FieldLabel>
-          <InputGroup className="min-h-14 rounded-2xl bg-card shadow-sm">
+          <InputGroup className="min-h-14 rounded-2xl bg-card">
             <InputGroupTextarea
               id="message"
               value={draft}

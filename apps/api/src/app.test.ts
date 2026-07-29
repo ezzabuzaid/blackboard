@@ -442,7 +442,184 @@ test("sandbox persists its workspace and exposes WebGL through agent-browser", a
   }
 })
 
-test("every group member receives notifications concurrently and only volunteers publish replies", async () => {
+test("publishes a group reply before slower members finish", async () => {
+  const releaseSlowMember = Promise.withResolvers<void>()
+  const fastMemberContinued = Promise.withResolvers<void>()
+
+  let fastCalls = 0
+  const fast = new MockLanguageModelV4({
+    doStream: async () => {
+      fastCalls++
+      if (fastCalls === 1) {
+        return groupToolResponse("reply_to_group", "fast-reply", {
+          message: "I can answer this now.",
+        })
+      }
+      fastMemberContinued.resolve()
+      return groupTextResponse("Reply posted.")
+    },
+  })
+
+  let slowCalls = 0
+  const slow = new MockLanguageModelV4({
+    doStream: async () => {
+      slowCalls++
+      if (slowCalls === 1) await releaseSlowMember.promise
+      return groupTextResponse("I have nothing useful to add.")
+    },
+  })
+
+  await using group = await WhatsAppGroup.create({
+    userId: "user-1",
+    participants: [
+      { name: "fast", specialty: "Answers quickly.", model: fast },
+      { name: "slow", specialty: "Checks carefully.", model: slow },
+    ],
+  })
+
+  const published: { author: string; content: string }[] = []
+  const sending = group.send("Can anyone answer?", ({ author, content }) => {
+    published.push({ author, content })
+  })
+  const fastFinished = await Promise.race([
+    fastMemberContinued.promise.then(() => true),
+    sleep(2_000).then(() => false),
+  ])
+  const replyWasAlreadyPublic = published.some(
+    ({ author }) => author === "fast"
+  )
+
+  releaseSlowMember.resolve()
+  await sending
+
+  assert.equal(fastFinished, true, "the fast member did not finish in time")
+  assert.equal(
+    replyWasAlreadyPublic,
+    true,
+    "the fast reply waited for the slower member"
+  )
+})
+
+test("each group member uses its own telemetry", async () => {
+  const firstStarts: unknown[] = []
+  const secondStarts: unknown[] = []
+  await using group = await WhatsAppGroup.create({
+    userId: "user-1",
+    participants: [
+      {
+        name: "first",
+        specialty: "Reviews the discussion.",
+        model: new MockLanguageModelV4({
+          doStream: groupTextResponse("Nothing to add."),
+        }),
+        telemetry: {
+          functionId: "parent-chat:first",
+          integrations: {
+            onStart(event) {
+              firstStarts.push(event)
+            },
+          },
+        },
+      },
+      {
+        name: "second",
+        specialty: "Challenges the discussion.",
+        model: new MockLanguageModelV4({
+          doStream: groupTextResponse("Nothing to add."),
+        }),
+        telemetry: {
+          functionId: "parent-chat:second",
+          integrations: {
+            onStart(event) {
+              secondStarts.push(event)
+            },
+          },
+        },
+      },
+    ],
+  })
+
+  await group.send("Review this.")
+
+  assert.match(JSON.stringify(firstStarts), /"functionId":"parent-chat:first"/)
+  assert.doesNotMatch(JSON.stringify(firstStarts), /parent-chat:second/)
+  assert.match(JSON.stringify(secondStarts), /"functionId":"parent-chat:second"/)
+  assert.doesNotMatch(JSON.stringify(secondStarts), /parent-chat:first/)
+})
+
+test("coalesces human interventions posted while a batch is running", async () => {
+  const firstNotificationStarted = Promise.withResolvers<void>()
+  const releaseFirstNotification = Promise.withResolvers<void>()
+  const prompts: unknown[] = []
+  let calls = 0
+  const member = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      calls++
+      prompts.push(prompt)
+      if (calls === 1) {
+        firstNotificationStarted.resolve()
+        await releaseFirstNotification.promise
+      }
+      return groupTextResponse("I have nothing useful to add.")
+    },
+  })
+
+  await using group = await WhatsAppGroup.create({
+    userId: "user-1",
+    participants: [
+      { name: "member", specialty: "Reviews the discussion.", model: member },
+    ],
+  })
+
+  const published: { author: string; content: string }[] = []
+  const sending = group.send(
+    "Review the launch plan.",
+    ({ author, content }) => {
+      published.push({ author, content })
+    }
+  )
+  const started = await Promise.race([
+    firstNotificationStarted.promise.then(() => true),
+    sleep(2_000).then(() => false),
+  ])
+
+  await Promise.all([
+    group.post("Also consider accessibility."),
+    group.post("Also consider offline use."),
+  ])
+  const interventionsWereAlreadyPublic = [
+    "Also consider accessibility.",
+    "Also consider offline use.",
+  ].every((expected) =>
+    published.some(
+      ({ author, content }) => author === "user" && content === expected
+    )
+  )
+
+  releaseFirstNotification.resolve()
+  await sending
+
+  assert.equal(started, true, "the first notification did not start in time")
+  assert.equal(
+    interventionsWereAlreadyPublic,
+    true,
+    "the interventions waited for the active member"
+  )
+  assert.equal(calls, 2, "overlapping interventions created multiple batches")
+  for (const intervention of [
+    "Also consider accessibility.",
+    "Also consider offline use.",
+  ]) {
+    assert.equal(
+      prompts.filter((prompt) => JSON.stringify(prompt).includes(intervention))
+        .length,
+      1,
+      `"${intervention}" was not delivered exactly once`
+    )
+  }
+})
+
+test("every group member receives greetings concurrently and social replies stay voluntary", async () => {
   const firstNotificationStarted = Promise.withResolvers<void>()
   const firstParticipants = new Set<string>()
   let activeParticipationChecks = 0
@@ -468,14 +645,16 @@ test("every group member receives notifications concurrently and only volunteers
   let researcherCalls = 0
   let researcherTools: unknown
   const researcher = new MockLanguageModelV4({
-    doStream: async ({ tools }) => {
+    doStream: async ({ prompt, tools }) => {
       researcherTools = tools
       researcherCalls++
       if (researcherCalls === 1) {
         await enterFirstNotification("researcher")
-        return groupToolResponse("reply_to_group", "research-reply", {
-          message: "The evidence supports a small pilot first.",
-        })
+        return JSON.stringify(prompt).includes("casual or social messages")
+          ? groupToolResponse("reply_to_group", "social-reply", {
+              message: "Hey! Good to see you.",
+            })
+          : groupTextResponse("Greetings are outside my specialty.")
       }
       return groupTextResponse("Reply posted.")
     },
@@ -497,7 +676,7 @@ test("every group member receives notifications concurrently and only volunteers
     participants: [
       {
         name: "researcher",
-        specialty: "Finds evidence.",
+        specialty: "Finds evidence and is socially curious.",
         model: researcher,
         tools: {
           web_search: openai.tools.webSearch(),
@@ -511,9 +690,7 @@ test("every group member receives notifications concurrently and only volunteers
     ],
   })
 
-  const messages = await group.send(
-    "Should we launch the proposed product immediately?"
-  )
+  const messages = await group.send("Hi everyone!")
 
   assert.equal(maxActiveParticipationChecks, 2)
   assert.match(JSON.stringify(researcherTools), /openai\.web_search/)
@@ -522,20 +699,18 @@ test("every group member receives notifications concurrently and only volunteers
     [
       {
         author: "user",
-        content: "Should we launch the proposed product immediately?",
+        content: "Hi everyone!",
       },
       {
         author: "researcher",
-        content: "The evidence supports a small pilot first.",
+        content: "Hey! Good to see you.",
       },
     ]
   )
   assert.equal(
-    JSON.stringify(criticPrompts.at(-1)).includes(
-      "The evidence supports a small pilot first."
-    ),
+    JSON.stringify(criticPrompts.at(-1)).includes("Hey! Good to see you."),
     true,
-    "the researcher reply is broadcast back to the other group member"
+    "the social reply is broadcast back to the other group member"
   )
 })
 

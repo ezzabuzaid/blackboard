@@ -15,7 +15,7 @@ import {
   reduceGroupActivity,
   type GroupActivityEvent,
 } from "./groupActivity"
-import { groupReplies } from "./groupMessages"
+import { groupReplies, groupReplyClusters } from "./groupMessages"
 import { loader } from "./loader"
 
 test("loader adds a chat id to the URL", async () => {
@@ -232,6 +232,35 @@ test("group replies project typed AI SDK data parts", () => {
   )
 })
 
+test("group replies cluster only consecutive messages from one author", () => {
+  const maya = {
+    id: "maya-1",
+    author: "Maya",
+    content: "First thought",
+  }
+  const mayaFollowUp = {
+    id: "maya-2",
+    author: "Maya",
+    content: "One more thing",
+  }
+  const omar = {
+    id: "omar-1",
+    author: "Omar",
+    content: "Technical consequence",
+  }
+  const mayaLater = {
+    id: "maya-3",
+    author: "Maya",
+    content: "Returning later",
+  }
+
+  assert.deepEqual(groupReplyClusters([maya, mayaFollowUp, omar, mayaLater]), [
+    { author: "Maya", messages: [maya, mayaFollowUp] },
+    { author: "Omar", messages: [omar] },
+    { author: "Maya", messages: [mayaLater] },
+  ])
+})
+
 test("group activity tracks decisions, replies, and settlement", () => {
   const events: GroupActivityEvent[] = [
     { type: "started", participants: ["researcher", "critic"] },
@@ -290,6 +319,65 @@ test("group activity tracks decisions, replies, and settlement", () => {
       { name: "critic", state: "caught-up", replies: 0 },
     ],
   })
+})
+
+test("group activity preserves failures and cumulative reply counts", () => {
+  const events: GroupActivityEvent[] = [
+    { type: "started", participants: ["Maya", "Omar"] },
+    {
+      type: "notification",
+      notification: 1,
+      messageCount: 1,
+      recipients: ["Maya", "Omar"],
+    },
+    {
+      type: "participant",
+      notification: 1,
+      participant: "Maya",
+      state: "replied",
+      replies: 1,
+    },
+    {
+      type: "participant",
+      notification: 1,
+      participant: "Omar",
+      state: "passed",
+    },
+    {
+      type: "notification",
+      notification: 2,
+      messageCount: 2,
+      recipients: ["Maya", "Omar"],
+    },
+    {
+      type: "participant",
+      notification: 2,
+      participant: "Maya",
+      state: "replied",
+      replies: 2,
+    },
+    {
+      type: "participant",
+      notification: 2,
+      participant: "Omar",
+      state: "failed",
+    },
+  ]
+
+  const active = events.reduce(reduceGroupActivity, initialGroupActivity)
+  assert.deepEqual(active.participants, [
+    { name: "Maya", state: "replied", replies: 3 },
+    { name: "Omar", state: "failed", replies: 0 },
+  ])
+
+  assert.deepEqual(
+    reduceGroupActivity(active, { type: "settled", notifications: 2 })
+      .participants,
+    [
+      { name: "Maya", state: "caught-up", replies: 3 },
+      { name: "Omar", state: "failed", replies: 0 },
+    ]
+  )
 })
 
 test("assistant artifact links resolve through the chat API", () => {

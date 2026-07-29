@@ -1,9 +1,9 @@
 import {
   Bubble,
   BubbleContent,
+  BubbleGroup,
   Marker,
   MarkerContent,
-  MarkerIcon,
   Message,
   MessageContent,
   MessageHeader,
@@ -13,7 +13,6 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-  Spinner,
 } from "@stdlib/shadcn"
 import type { UIMessage } from "ai"
 import { useMemo } from "react"
@@ -22,7 +21,16 @@ import { Streamdown } from "streamdown"
 import { AgentTrajectory } from "./AgentTrajectory"
 import { useChatSession } from "./ChatSession"
 import { artifactBaseUrl, artifactRemarkPlugins } from "./artifactLinks"
-import { groupReplies, type GroupMessage } from "./groupMessages"
+import {
+  GroupAvatar,
+  GroupAvatarStack,
+  groupMemberNameClass,
+} from "./GroupAvatar"
+import {
+  groupReplies,
+  groupReplyClusters,
+  type GroupMessageCluster,
+} from "./groupMessages"
 
 export function Conversation() {
   const { id: chatId, messages, status } = useChatSession()
@@ -31,13 +39,13 @@ export function Conversation() {
   const waitingForAssistant = pending && latestMessage?.role === "user"
 
   return (
-    <section aria-label="Conversation" className="min-h-0 flex-1">
+    <section aria-label="Conversation" className="min-h-0 flex-1 bg-muted/30">
       <MessageScrollerProvider autoScroll>
         <MessageScroller>
           <MessageScrollerViewport>
             <MessageScrollerContent
               aria-busy={status === "streaming"}
-              className="mx-auto w-full max-w-3xl justify-end gap-8 px-5 py-10"
+              className="mx-auto w-full max-w-3xl justify-end gap-6 px-4 py-6 sm:px-5 sm:py-8"
             >
               {messages.length === 0 && (
                 <MessageScrollerItem>
@@ -51,7 +59,6 @@ export function Conversation() {
                   <MessageScrollerItem
                     key={message.id}
                     messageId={message.id}
-                    scrollAnchor={message.role === "user"}
                     className="animate-in duration-300 fade-in slide-in-from-bottom-2"
                   >
                     <ConversationMessage
@@ -69,12 +76,12 @@ export function Conversation() {
                 <MessageScrollerItem>
                   <Marker
                     role="status"
-                    className="animate-in duration-200 fade-in"
+                    className="animate-in gap-3 duration-200 fade-in"
                   >
-                    <MarkerIcon>
-                      <Spinner />
-                    </MarkerIcon>
-                    <MarkerContent>Thinking</MarkerContent>
+                    <GroupAvatarStack />
+                    <MarkerContent>
+                      The group is considering your message
+                    </MarkerContent>
                   </Marker>
                 </MessageScrollerItem>
               )}
@@ -99,9 +106,13 @@ function ConversationMessage({
   const replies = groupReplies(message)
   if (replies.length > 0) {
     return (
-      <div className="flex flex-col gap-6">
-        {replies.map((reply) => (
-          <GroupReply chatId={chatId} key={reply.id} message={reply} />
+      <div className="flex flex-col gap-5">
+        {groupReplyClusters(replies).map((cluster) => (
+          <GroupReplyCluster
+            chatId={chatId}
+            cluster={cluster}
+            key={cluster.messages[0].id}
+          />
         ))}
       </div>
     )
@@ -112,16 +123,16 @@ function ConversationMessage({
       <MessageContent>
         {message.role === "assistant" && (
           <>
-            <MessageHeader>Assistant</MessageHeader>
+            <MessageHeader>DeepAgents Group</MessageHeader>
             <AgentTrajectory active={active} parts={message.parts} />
           </>
         )}
-        <Bubble variant={message.role === "user" ? "default" : "ghost"}>
+        <Bubble variant={message.role === "user" ? "tinted" : "ghost"}>
           <BubbleContent
             className={
               message.role === "user"
-                ? "whitespace-pre-wrap"
-                : "max-w-[65ch] text-base leading-relaxed"
+                ? "rounded-2xl rounded-br-md px-2.5 py-1.5 text-base leading-tight whitespace-pre-wrap"
+                : "max-w-[65ch] text-base leading-tight"
             }
           >
             {message.parts.map((part, index) =>
@@ -145,27 +156,45 @@ function ConversationMessage({
   )
 }
 
-function GroupReply({
+function GroupReplyCluster({
   chatId,
-  message,
+  cluster,
 }: {
   chatId: string
-  message: GroupMessage
+  cluster: GroupMessageCluster
 }) {
   return (
-    <Message>
-      <MessageContent>
-        <MessageHeader>{message.author}</MessageHeader>
-        <Bubble variant="ghost">
-          <BubbleContent className="max-w-[65ch] text-base leading-relaxed">
-            <AssistantMarkdown
-              active={false}
-              chatId={chatId}
-              text={message.content}
-            />
-          </BubbleContent>
-        </Bubble>
-      </MessageContent>
+    <Message
+      className="items-end gap-2"
+      aria-label={`${cluster.author} messages`}
+    >
+      <GroupAvatar name={cluster.author} className="mb-0.5" />
+      <BubbleGroup className="w-full gap-1">
+        {cluster.messages.map((message, index) => (
+          <Bubble variant="outline" key={message.id}>
+            <BubbleContent
+              className={`max-w-[65ch] rounded-2xl px-2.5 py-1.5 text-base leading-tight ${
+                index === cluster.messages.length - 1 ? "rounded-bl-md" : ""
+              }`}
+            >
+              {index === 0 && (
+                <MessageHeader
+                  className={`mb-0.5 px-0 text-[13px] font-semibold capitalize ${groupMemberNameClass(
+                    cluster.author
+                  )}`}
+                >
+                  {cluster.author}
+                </MessageHeader>
+              )}
+              <AssistantMarkdown
+                active={false}
+                chatId={chatId}
+                text={message.content}
+              />
+            </BubbleContent>
+          </Bubble>
+        ))}
+      </BubbleGroup>
     </Message>
   )
 }
@@ -204,9 +233,12 @@ export function AssistantMarkdown({
 
 function WelcomeMessage() {
   return (
-    <Message>
-      <MessageContent>
-        <MessageHeader>Assistant</MessageHeader>
+    <Message className="items-start gap-3 max-sm:flex-col">
+      <GroupAvatarStack className="mt-1 max-sm:mt-0" />
+      <MessageContent className="gap-1">
+        <MessageHeader className="text-foreground">
+          DeepAgents Group
+        </MessageHeader>
         <Bubble variant="ghost">
           <BubbleContent className="max-w-[65ch] text-base leading-relaxed whitespace-pre-wrap">
             Message the group. Specialists reply only when they have something

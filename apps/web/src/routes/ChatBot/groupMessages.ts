@@ -8,6 +8,11 @@ export interface GroupMessage {
   content: string
 }
 
+export interface GroupMessageCluster {
+  author: string
+  messages: GroupMessage[]
+}
+
 type GroupMessageData = {
   groupActivity: GroupActivityEvent
   groupMessage: GroupMessage
@@ -23,6 +28,18 @@ export function groupReplies(message: UIMessage) {
       ? [part.data]
       : []
   )
+}
+
+export function groupReplyClusters(messages: readonly GroupMessage[]) {
+  return messages.reduce<GroupMessageCluster[]>((clusters, message) => {
+    const current = clusters.at(-1)
+    if (current?.author === message.author) {
+      current.messages.push(message)
+    } else {
+      clusters.push({ author: message.author, messages: [message] })
+    }
+    return clusters
+  }, [])
 }
 
 function isGroupMessage(value: unknown): value is GroupMessage {

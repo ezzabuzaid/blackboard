@@ -20,6 +20,7 @@ import {
 
 import { InfoOverlay } from "../../components/InfoOverlay"
 import { useChatSession } from "./ChatSession"
+import { GroupAvatar } from "./GroupAvatar"
 import type { ParticipantActivityState } from "./groupActivity"
 
 export function GroupActivityOverlay() {
@@ -30,7 +31,6 @@ export function GroupActivityOverlay() {
     <InfoOverlay
       open={groupActivity.phase !== "idle"}
       aria-label="Group activity"
-      className="top-20"
     >
       <div className="flex items-start justify-between gap-3 p-4">
         <div>
@@ -47,14 +47,15 @@ export function GroupActivityOverlay() {
       <ItemGroup className="gap-2 p-3">
         {groupActivity.participants.map((participant) => (
           <Item key={participant.name} variant="muted" size="sm">
-            <ItemMedia variant="icon">
-              <ActivityIcon state={participant.state} />
+            <ItemMedia>
+              <GroupAvatar name={participant.name} size="sm" />
             </ItemMedia>
             <ItemContent>
               <ItemTitle className="capitalize">{participant.name}</ItemTitle>
               <ItemDescription>{stateLabel(participant.state)}</ItemDescription>
             </ItemContent>
             <ItemActions>
+              <ActivityIcon state={participant.state} />
               <Badge variant="outline">
                 {participant.replies}{" "}
                 {participant.replies === 1 ? "reply" : "replies"}
@@ -77,12 +78,12 @@ function activitySummary({
   messageCount,
 }: ReturnType<typeof useChatSession>["groupActivity"]) {
   if (phase === "settled") {
-    return `Everyone is caught up · ${notification} ${
+    return `Everyone is caught up with ${notification} ${
       notification === 1 ? "update" : "updates"
     }`
   }
   if (notification === 0) return "Starting the group…"
-  return `Update ${notification} · ${messageCount} new ${
+  return `Update ${notification}: ${messageCount} new ${
     messageCount === 1 ? "message" : "messages"
   }`
 }
@@ -99,7 +100,8 @@ function stateLabel(state: ParticipantActivityState) {
 function ActivityIcon({ state }: { state: ParticipantActivityState }) {
   if (state === "caught-up")
     return <CheckCircle2 className="text-emerald-600" />
-  if (state === "considering") return <LoaderCircle className="animate-spin" />
+  if (state === "considering")
+    return <LoaderCircle className="motion-safe:animate-spin" />
   if (state === "replied") return <MessageCircle />
   if (state === "passed") return <MinusCircle />
   if (state === "failed") return <CircleAlert className="text-destructive" />

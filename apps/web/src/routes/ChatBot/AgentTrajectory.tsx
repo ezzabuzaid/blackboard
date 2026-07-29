@@ -133,7 +133,7 @@ function Value({ label, value }: { label: string; value: unknown }) {
   return (
     <div>
       <p className="mb-1.5 text-xs font-medium text-muted-foreground">{label}</p>
-      <pre className="max-h-48 overflow-auto rounded-lg bg-background p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap text-foreground/80 shadow-[inset_0_0_0_1px_var(--border)]">
+      <pre className="max-h-48 overflow-auto rounded-lg border border-border bg-background p-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap text-foreground/80">
         {serialized ?? String(value)}
       </pre>
     </div>

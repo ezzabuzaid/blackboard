@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
+import { resolve } from "node:path"
 
 import { openai } from "@ai-sdk/openai"
+import { createFileTelemetry } from "@deepagents/context/telemetry/file"
 import type {
   ConversationId,
   TurnInput,
@@ -106,7 +108,17 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
 
     const chat = WhatsAppGroup.create({
       userId: conversation.userId,
-      participants: this.#participants,
+      participants: this.#participants.map((participant) =>
+        participant.telemetry
+          ? {
+              ...participant,
+              telemetry: {
+                ...participant.telemetry,
+                functionId: `${conversation.chatId}:${participant.name}`,
+              },
+            }
+          : participant
+      ),
     }).then((group) => ({ group, messages: [] }))
     this.#chats.set(key, chat)
     void chat.catch(() => this.#chats.delete(key))
@@ -115,40 +127,51 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
 }
 
 function defaultParticipants(): WhatsAppParticipant[] {
-  const model = () => openai("gpt-5.6-terra")
+  const model = () => openai("gpt-5.6-luna")
   return [
     {
-      name: "researcher",
+      name: "Maya",
       specialty:
-        "You contribute evidence, concrete facts, and questions that need research.",
+        "You contribute evidence, concrete facts, and questions that need research. You are curious but socially reserved and sometimes respond to greetings.",
       model: model(),
       tools: {
         web_search: openai.tools.webSearch(),
       },
     },
     {
-      name: "engineer",
+      name: "Omar",
       specialty:
-        "You contribute technical feasibility, architecture, and implementation consequences.",
+        "You contribute technical feasibility, architecture, and implementation consequences. You are quiet in casual conversation and usually let others answer greetings.",
       model: model(),
     },
     {
-      name: "product",
+      name: "Lina",
       specialty:
-        "You contribute user needs, product scope, adoption, and business value.",
+        "You contribute user needs, product scope, adoption, and business value. You are warm and welcoming and often respond to greetings.",
       model: model(),
     },
     {
-      name: "critic",
+      name: "Rami",
       specialty:
-        "You contribute contradictions, risks, missing assumptions, and failure modes.",
+        "You contribute contradictions, risks, missing assumptions, and failure modes. You are reserved and rarely respond to greetings.",
       model: model(),
     },
     {
-      name: "creative",
+      name: "Noor",
       specialty:
-        "You contribute useful alternatives and ideas that the others are unlikely to surface.",
+        "You contribute useful alternatives and ideas that the others are unlikely to surface. You are playful and sociable and often respond briefly to casual messages.",
       model: model(),
     },
-  ]
+  ].map((participant, index) => ({
+    ...participant,
+    telemetry: {
+      integrations: createFileTelemetry({
+        path: resolve(
+          process.env.ZUKHRUF_DATA_DIR ?? ".data/zukhruf",
+          "group-telemetry",
+          `${index}-${encodeURIComponent(participant.name).slice(0, 100)}.jsonl`
+        ),
+      }),
+    },
+  }))
 }

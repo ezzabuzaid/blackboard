@@ -1,7 +1,6 @@
 import { useLoaderData } from "react-router"
 
 import { ChatComposer } from "./ChatComposer"
-import { ChatHeader } from "./ChatHeader"
 import { ChatSessionProvider } from "./ChatSession"
 import { Conversation } from "./Conversation"
 import { GroupActivityOverlay } from "./GroupActivityOverlay"
@@ -19,7 +18,6 @@ export default function ChatBot() {
       resume={resume}
     >
       <main className="relative flex h-svh flex-col bg-background">
-        <ChatHeader />
         <GroupActivityOverlay />
         <Conversation />
         <ChatComposer />
