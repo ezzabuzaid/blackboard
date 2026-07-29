@@ -57,7 +57,7 @@ export function ChatComposer() {
                   event.currentTarget.form?.requestSubmit()
                 }
               }}
-              placeholder="Ask something…"
+              placeholder="Message the group…"
               disabled={pending}
               aria-invalid={!!error}
               rows={1}

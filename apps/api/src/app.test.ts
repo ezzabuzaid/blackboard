@@ -1,8 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { setTimeout as sleep } from "node:timers/promises"
 
+import { openai } from "@ai-sdk/openai"
 import type { AgentRuntime } from "@deepagents/experimental/zukhruf"
-import type { UIMessage } from "ai"
+import { simulateReadableStream, type UIMessage } from "ai"
+import { MockLanguageModelV4 } from "ai/test"
 
 import agentSandbox, {
   disposeSandboxes,
@@ -12,6 +15,8 @@ import { scheduleTask } from "./agent/tools/schedule-task.js"
 import { createApp } from "./app.js"
 import type { ChatRuntime, ChatStreamStore } from "./chat/chat-service.js"
 import type { ListQueuedTurns, QueuedTurn } from "./chat/routes.js"
+import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
+import { WhatsAppGroup } from "./group/whatsapp.js"
 
 const unusedRuntime: ChatRuntime = {
   async enqueue() {
@@ -112,6 +117,72 @@ test("chat enqueues the latest UI message as a Zukhruf turn", async () => {
     { id: "message-1", input: "Hello" },
   ])
   assert.match(await response.text(), /"type":"text-delta"/)
+})
+
+test("chat streams group activity and volunteered replies as AI SDK data parts", async () => {
+  let researcherCalls = 0
+  const researcher = new MockLanguageModelV4({
+    doStream: async () => {
+      researcherCalls++
+      return researcherCalls === 1
+        ? groupToolResponse("reply_to_group", "research-reply", {
+            message: "Start with one real customer workflow.",
+          })
+        : groupTextResponse("Reply posted.")
+    },
+  })
+  const critic = new MockLanguageModelV4({
+    doStream: async () => groupTextResponse("Nothing distinct to add."),
+  })
+  await using runtime = new WhatsAppChatRuntime([
+    {
+      name: "researcher",
+      specialty: "Finds evidence.",
+      model: researcher,
+    },
+    {
+      name: "critic",
+      specialty: "Finds missing assumptions.",
+      model: critic,
+    },
+  ])
+
+  const groupApp = testApp({ runtime })
+  const response = await groupApp.request("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: "chat-1",
+      messages: [
+        {
+          id: "message-1",
+          role: "user",
+          parts: [{ type: "text", text: "What should we do first?" }],
+        },
+      ],
+    }),
+  })
+
+  assert.equal(response.status, 200)
+  const body = await response.text()
+  assert.match(body, /"type":"data-groupActivity"/)
+  assert.match(body, /"transient":true/)
+  assert.match(body, /"type":"started"/)
+  assert.match(body, /"type":"notification"/)
+  assert.match(body, /"state":"considering"/)
+  assert.match(body, /"state":"replied"/)
+  assert.match(body, /"state":"passed"/)
+  assert.match(body, /"type":"settled"/)
+  assert.match(body, /"type":"data-groupMessage"/)
+  assert.match(body, /"author":"researcher"/)
+  assert.match(body, /Start with one real customer workflow\./)
+
+  const state = await groupApp.request("/api/chat/chat-1/state")
+  assert.equal(state.status, 200)
+  assert.match(
+    JSON.stringify(await state.json()),
+    /Start with one real customer workflow\./
+  )
 })
 
 test("queued turns endpoint uses the requested chat", async () => {
@@ -370,3 +441,151 @@ test("sandbox persists its workspace and exposes WebGL through agent-browser", a
     await removeSandbox(conversation)
   }
 })
+
+test("every group member receives notifications concurrently and only volunteers publish replies", async () => {
+  const firstNotificationStarted = Promise.withResolvers<void>()
+  const firstParticipants = new Set<string>()
+  let activeParticipationChecks = 0
+  let maxActiveParticipationChecks = 0
+
+  const enterFirstNotification = async (name: string) => {
+    firstParticipants.add(name)
+    activeParticipationChecks++
+    maxActiveParticipationChecks = Math.max(
+      maxActiveParticipationChecks,
+      activeParticipationChecks
+    )
+    if (firstParticipants.size === 2) firstNotificationStarted.resolve()
+    await Promise.race([
+      firstNotificationStarted.promise,
+      sleep(2_000).then(() => {
+        throw new Error("members did not receive the notification concurrently")
+      }),
+    ])
+    activeParticipationChecks--
+  }
+
+  let researcherCalls = 0
+  let researcherTools: unknown
+  const researcher = new MockLanguageModelV4({
+    doStream: async ({ tools }) => {
+      researcherTools = tools
+      researcherCalls++
+      if (researcherCalls === 1) {
+        await enterFirstNotification("researcher")
+        return groupToolResponse("reply_to_group", "research-reply", {
+          message: "The evidence supports a small pilot first.",
+        })
+      }
+      return groupTextResponse("Reply posted.")
+    },
+  })
+
+  let criticCalls = 0
+  const criticPrompts: unknown[] = []
+  const critic = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      criticCalls++
+      criticPrompts.push(prompt)
+      if (criticCalls === 1) await enterFirstNotification("critic")
+      return groupTextResponse("I have nothing useful to add.")
+    },
+  })
+
+  await using group = await WhatsAppGroup.create({
+    userId: "user-1",
+    participants: [
+      {
+        name: "researcher",
+        specialty: "Finds evidence.",
+        model: researcher,
+        tools: {
+          web_search: openai.tools.webSearch(),
+        },
+      },
+      {
+        name: "critic",
+        specialty: "Challenges unsupported claims.",
+        model: critic,
+      },
+    ],
+  })
+
+  const messages = await group.send(
+    "Should we launch the proposed product immediately?"
+  )
+
+  assert.equal(maxActiveParticipationChecks, 2)
+  assert.match(JSON.stringify(researcherTools), /openai\.web_search/)
+  assert.deepEqual(
+    messages.map(({ author, content }) => ({ author, content })),
+    [
+      {
+        author: "user",
+        content: "Should we launch the proposed product immediately?",
+      },
+      {
+        author: "researcher",
+        content: "The evidence supports a small pilot first.",
+      },
+    ]
+  )
+  assert.equal(
+    JSON.stringify(criticPrompts.at(-1)).includes(
+      "The evidence supports a small pilot first."
+    ),
+    true,
+    "the researcher reply is broadcast back to the other group member"
+  )
+})
+
+const groupUsage = {
+  inputTokens: {
+    total: 1,
+    noCache: 1,
+    cacheRead: undefined,
+    cacheWrite: undefined,
+  },
+  outputTokens: { total: 1, text: 1, reasoning: undefined },
+} as const
+
+function groupTextResponse(text: string) {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        { type: "text-start" as const, id: "text-1" },
+        { type: "text-delta" as const, id: "text-1", delta: text },
+        { type: "text-end" as const, id: "text-1" },
+        {
+          type: "finish" as const,
+          finishReason: { unified: "stop" as const, raw: "" },
+          usage: groupUsage,
+        },
+      ],
+    }),
+  }
+}
+
+function groupToolResponse(
+  toolName: string,
+  toolCallId: string,
+  input: Record<string, unknown>
+) {
+  return {
+    stream: simulateReadableStream({
+      chunks: [
+        {
+          type: "tool-call" as const,
+          toolCallId,
+          toolName,
+          input: JSON.stringify(input),
+        },
+        {
+          type: "finish" as const,
+          finishReason: { unified: "tool-calls" as const, raw: "" },
+          usage: groupUsage,
+        },
+      ],
+    }),
+  }
+}

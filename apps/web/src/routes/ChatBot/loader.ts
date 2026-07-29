@@ -2,6 +2,7 @@ import { safeValidateUIMessages } from "ai"
 import { redirect, type LoaderFunctionArgs } from "react-router"
 
 import { apiUrl } from "./chatTransport"
+import type { GroupUIMessage } from "./groupMessages"
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
@@ -37,7 +38,9 @@ export async function loader({ request }: LoaderFunctionArgs) {
     const messages =
       state.messages.length === 0
         ? { success: true as const, data: [] }
-        : await safeValidateUIMessages({ messages: state.messages })
+        : await safeValidateUIMessages<GroupUIMessage>({
+            messages: state.messages,
+          })
     if (!messages.success) {
       throw messages.error
     }

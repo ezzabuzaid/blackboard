@@ -10,6 +10,12 @@ import { Streamdown } from "streamdown"
 import { AgentTrajectory } from "./AgentTrajectory"
 import { artifactRemarkPlugins, sandboxArtifactUrl } from "./artifactLinks"
 import { scheduledTurnId, waitForStream } from "./ChatSession"
+import {
+  initialGroupActivity,
+  reduceGroupActivity,
+  type GroupActivityEvent,
+} from "./groupActivity"
+import { groupReplies } from "./groupMessages"
 import { loader } from "./loader"
 
 test("loader adds a chat id to the URL", async () => {
@@ -48,6 +54,21 @@ test("loader hydrates the selected chat and reports API state", async () => {
                 role: "user",
                 parts: [{ type: "text", text: "Hello" }],
               },
+              {
+                id: "response-1",
+                role: "assistant",
+                parts: [
+                  {
+                    type: "data-groupMessage",
+                    id: "reply-1",
+                    data: {
+                      id: "reply-1",
+                      author: "researcher",
+                      content: "Hello back",
+                    },
+                  },
+                ],
+              },
             ]
           : [],
         resume: hasHistory,
@@ -69,6 +90,21 @@ test("loader hydrates the selected chat and reports API state", async () => {
           id: "message-1",
           role: "user",
           parts: [{ type: "text", text: "Hello" }],
+        },
+        {
+          id: "response-1",
+          role: "assistant",
+          parts: [
+            {
+              type: "data-groupMessage",
+              id: "reply-1",
+              data: {
+                id: "reply-1",
+                author: "researcher",
+                content: "Hello back",
+              },
+            },
+          ],
         },
       ],
       resume: true,
@@ -167,6 +203,93 @@ test("agent trajectory renders AI SDK message parts", () => {
   assert.match(html, /Completed/)
   assert.match(html, /sample\.pdf/)
   assert.match(html, /success/)
+})
+
+test("group replies project typed AI SDK data parts", () => {
+  assert.deepEqual(
+    groupReplies({
+      id: "response-1",
+      role: "assistant",
+      parts: [
+        {
+          type: "data-groupMessage",
+          id: "reply-1",
+          data: {
+            id: "reply-1",
+            author: "researcher",
+            content: "Start with one real customer workflow.",
+          },
+        },
+      ],
+    }),
+    [
+      {
+        id: "reply-1",
+        author: "researcher",
+        content: "Start with one real customer workflow.",
+      },
+    ]
+  )
+})
+
+test("group activity tracks decisions, replies, and settlement", () => {
+  const events: GroupActivityEvent[] = [
+    { type: "started", participants: ["researcher", "critic"] },
+    {
+      type: "notification",
+      notification: 1,
+      messageCount: 1,
+      recipients: ["researcher", "critic"],
+    },
+    {
+      type: "participant",
+      notification: 1,
+      participant: "researcher",
+      state: "considering",
+    },
+    {
+      type: "participant",
+      notification: 1,
+      participant: "critic",
+      state: "considering",
+    },
+    {
+      type: "participant",
+      notification: 1,
+      participant: "researcher",
+      state: "replied",
+      replies: 1,
+    },
+    {
+      type: "participant",
+      notification: 1,
+      participant: "critic",
+      state: "passed",
+    },
+    {
+      type: "notification",
+      notification: 2,
+      messageCount: 1,
+      recipients: ["critic"],
+    },
+    {
+      type: "participant",
+      notification: 2,
+      participant: "critic",
+      state: "passed",
+    },
+    { type: "settled", notifications: 2 },
+  ]
+
+  assert.deepEqual(events.reduce(reduceGroupActivity, initialGroupActivity), {
+    phase: "settled",
+    notification: 2,
+    messageCount: 1,
+    participants: [
+      { name: "researcher", state: "caught-up", replies: 1 },
+      { name: "critic", state: "caught-up", replies: 0 },
+    ],
+  })
 })
 
 test("assistant artifact links resolve through the chat API", () => {

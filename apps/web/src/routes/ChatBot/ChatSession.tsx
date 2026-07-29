@@ -14,8 +14,17 @@ import {
 } from "react"
 
 import { apiUrl, chatTransport } from "./chatTransport"
+import {
+  initialGroupActivity,
+  isGroupActivityEvent,
+  reduceGroupActivity,
+  type GroupActivityState,
+} from "./groupActivity"
+import type { GroupUIMessage } from "./groupMessages"
 
-type ChatSession = UseChatHelpers<UIMessage>
+type ChatSession = UseChatHelpers<GroupUIMessage> & {
+  groupActivity: GroupActivityState
+}
 
 const ChatSessionContext = createContext<ChatSession | null>(null)
 
@@ -27,7 +36,7 @@ export function useChatSession() {
 
 interface ChatSessionProviderProps extends PropsWithChildren {
   chatId: string
-  initialMessages: UIMessage[]
+  initialMessages: GroupUIMessage[]
   resume: boolean
 }
 
@@ -41,11 +50,20 @@ export function ChatSessionProvider({
   const [scheduledStreamId, setScheduledStreamId] = useState<string | null>(
     null
   )
-  const session = useChat({
+  const [groupActivity, setGroupActivity] = useState(initialGroupActivity)
+  const session = useChat<GroupUIMessage>({
     id: chatId,
     messages: initialMessages,
     transport: chatTransport,
     resume: shouldResume,
+    onData: (part) => {
+      if (
+        part.type === "data-groupActivity" &&
+        isGroupActivityEvent(part.data)
+      ) {
+        setGroupActivity((current) => reduceGroupActivity(current, part.data))
+      }
+    },
     onFinish: ({ message, isAbort, isError }) => {
       setShouldResume(false)
       if (!isAbort && !isError) {
@@ -57,6 +75,7 @@ export function ChatSessionProvider({
   useEffect(() => {
     setShouldResume(resume)
     setScheduledStreamId(null)
+    setGroupActivity(initialGroupActivity)
   }, [chatId, resume])
 
   useEffect(() => {
@@ -75,7 +94,7 @@ export function ChatSessionProvider({
   }, [chatId, scheduledStreamId, session.setMessages])
 
   return (
-    <ChatSessionContext.Provider value={session}>
+    <ChatSessionContext.Provider value={{ ...session, groupActivity }}>
       {children}
     </ChatSessionContext.Provider>
   )
@@ -122,7 +141,9 @@ export async function waitForStream(
         state.streamId === streamId &&
         "messages" in state &&
         Array.isArray(state.messages)
-          ? await safeValidateUIMessages({ messages: state.messages })
+          ? await safeValidateUIMessages<GroupUIMessage>({
+              messages: state.messages,
+            })
           : null
       if (messages?.success) {
         return { streamId, messages: messages.data }

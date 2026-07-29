@@ -13,14 +13,14 @@ export function ChatHeader() {
         <div className="flex items-center gap-3">
           <Avatar>
             <AvatarFallback className="bg-foreground font-heading font-semibold text-background">
-              D
+              5
             </AvatarFallback>
           </Avatar>
           <div>
             <p className="font-heading text-sm font-semibold tracking-tight">
-              DeepAgents
+              DeepAgents Group
             </p>
-            <p className="text-xs text-muted-foreground">Local starter</p>
+            <p className="text-xs text-muted-foreground">Five specialists</p>
           </div>
         </div>
         <Badge variant="outline" className="gap-2 font-normal">

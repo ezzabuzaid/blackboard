@@ -15,12 +15,14 @@ import {
   MessageScrollerViewport,
   Spinner,
 } from "@stdlib/shadcn"
+import type { UIMessage } from "ai"
 import { useMemo } from "react"
 import { Streamdown } from "streamdown"
 
 import { AgentTrajectory } from "./AgentTrajectory"
 import { useChatSession } from "./ChatSession"
 import { artifactBaseUrl, artifactRemarkPlugins } from "./artifactLinks"
+import { groupReplies, type GroupMessage } from "./groupMessages"
 
 export function Conversation() {
   const { id: chatId, messages, status } = useChatSession()
@@ -43,62 +45,25 @@ export function Conversation() {
                 </MessageScrollerItem>
               )}
 
-              {messages.map((message) => (
-                <MessageScrollerItem
-                  key={message.id}
-                  messageId={message.id}
-                  scrollAnchor={message.role === "user"}
-                  className="animate-in duration-300 fade-in slide-in-from-bottom-2"
-                >
-                  <Message align={message.role === "user" ? "end" : "start"}>
-                    <MessageContent>
-                      {message.role === "assistant" && (
-                        <MessageHeader>Assistant</MessageHeader>
-                      )}
-                      {message.role === "assistant" && (
-                        <AgentTrajectory
-                          active={
-                            status === "streaming" &&
-                            message.id === latestMessage?.id
-                          }
-                          parts={message.parts}
-                        />
-                      )}
-                      <Bubble
-                        variant={message.role === "user" ? "default" : "ghost"}
-                      >
-                        <BubbleContent
-                          className={
-                            message.role === "user"
-                              ? "whitespace-pre-wrap"
-                              : undefined
-                          }
-                        >
-                          {message.parts.map((part, index) =>
-                            part.type === "text" ? (
-                              message.role === "assistant" ? (
-                                <AssistantMarkdown
-                                  active={
-                                    status === "streaming" &&
-                                    message.id === latestMessage?.id
-                                  }
-                                  chatId={chatId}
-                                  key={`${message.id}-${index}`}
-                                  text={part.text}
-                                />
-                              ) : (
-                                <p key={`${message.id}-${index}`}>
-                                  {part.text}
-                                </p>
-                              )
-                            ) : null
-                          )}
-                        </BubbleContent>
-                      </Bubble>
-                    </MessageContent>
-                  </Message>
-                </MessageScrollerItem>
-              ))}
+              {messages
+                .filter((message) => message.parts.length > 0)
+                .map((message) => (
+                  <MessageScrollerItem
+                    key={message.id}
+                    messageId={message.id}
+                    scrollAnchor={message.role === "user"}
+                    className="animate-in duration-300 fade-in slide-in-from-bottom-2"
+                  >
+                    <ConversationMessage
+                      active={
+                        status === "streaming" &&
+                        message.id === latestMessage?.id
+                      }
+                      chatId={chatId}
+                      message={message}
+                    />
+                  </MessageScrollerItem>
+                ))}
 
               {waitingForAssistant && (
                 <MessageScrollerItem>
@@ -119,6 +84,89 @@ export function Conversation() {
         </MessageScroller>
       </MessageScrollerProvider>
     </section>
+  )
+}
+
+function ConversationMessage({
+  active,
+  chatId,
+  message,
+}: {
+  active: boolean
+  chatId: string
+  message: UIMessage
+}) {
+  const replies = groupReplies(message)
+  if (replies.length > 0) {
+    return (
+      <div className="flex flex-col gap-6">
+        {replies.map((reply) => (
+          <GroupReply chatId={chatId} key={reply.id} message={reply} />
+        ))}
+      </div>
+    )
+  }
+
+  return (
+    <Message align={message.role === "user" ? "end" : "start"}>
+      <MessageContent>
+        {message.role === "assistant" && (
+          <>
+            <MessageHeader>Assistant</MessageHeader>
+            <AgentTrajectory active={active} parts={message.parts} />
+          </>
+        )}
+        <Bubble variant={message.role === "user" ? "default" : "ghost"}>
+          <BubbleContent
+            className={
+              message.role === "user"
+                ? "whitespace-pre-wrap"
+                : "max-w-[65ch] text-base leading-relaxed"
+            }
+          >
+            {message.parts.map((part, index) =>
+              part.type === "text" ? (
+                message.role === "assistant" ? (
+                  <AssistantMarkdown
+                    active={active}
+                    chatId={chatId}
+                    key={`${message.id}-${index}`}
+                    text={part.text}
+                  />
+                ) : (
+                  <p key={`${message.id}-${index}`}>{part.text}</p>
+                )
+              ) : null
+            )}
+          </BubbleContent>
+        </Bubble>
+      </MessageContent>
+    </Message>
+  )
+}
+
+function GroupReply({
+  chatId,
+  message,
+}: {
+  chatId: string
+  message: GroupMessage
+}) {
+  return (
+    <Message>
+      <MessageContent>
+        <MessageHeader>{message.author}</MessageHeader>
+        <Bubble variant="ghost">
+          <BubbleContent className="max-w-[65ch] text-base leading-relaxed">
+            <AssistantMarkdown
+              active={false}
+              chatId={chatId}
+              text={message.content}
+            />
+          </BubbleContent>
+        </Bubble>
+      </MessageContent>
+    </Message>
   )
 }
 
@@ -160,8 +208,9 @@ function WelcomeMessage() {
       <MessageContent>
         <MessageHeader>Assistant</MessageHeader>
         <Bubble variant="ghost">
-          <BubbleContent className="whitespace-pre-wrap">
-            Ask me anything. I’m running locally with DeepAgents.
+          <BubbleContent className="max-w-[65ch] text-base leading-relaxed whitespace-pre-wrap">
+            Message the group. Specialists reply only when they have something
+            useful to add.
           </BubbleContent>
         </Bubble>
       </MessageContent>
