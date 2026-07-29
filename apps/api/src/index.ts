@@ -5,6 +5,7 @@ import { SqliteContextStore, SqliteStreamStore } from "@deepagents/context"
 import {
   AgentRuntime,
   PgBossTurnQueue,
+  SqliteApprovalMutex,
   SqliteMailboxStore,
   type ConversationId,
   type TurnRef,
@@ -40,7 +41,7 @@ boss.on("error", (error) => console.error("[queue error]", error))
 await boss.start()
 resources.defer(() => boss.stop({ graceful: false }))
 
-const queue = new PgBossTurnQueue(boss, { schema: "pgboss" })
+const queue = new PgBossTurnQueue(boss)
 await queue.initialize()
 
 const runtime = new AgentRuntime(assistant, {
@@ -48,6 +49,9 @@ const runtime = new AgentRuntime(assistant, {
   streamStore,
   queue,
   mailboxStore,
+  approvalMutex: resources.use(
+    new SqliteApprovalMutex(join(dataDir, "approval.sqlite"))
+  ),
 })
 resources.defer(disposeSandboxes)
 resources.use(await runtime.work())

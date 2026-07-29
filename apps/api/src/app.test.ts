@@ -191,6 +191,7 @@ test("chat state hydrates history without duplicating the replayable head", asyn
   assert.deepEqual(await response.json(), {
     messages: [messages[0]],
     resume: true,
+    streamId: "stream-1",
   })
 })
 
@@ -311,7 +312,7 @@ test("schedule_task enqueues work for the same conversation", async () => {
   assert.deepEqual(result, { turnId: "turn-2" })
 })
 
-test("sandbox exposes a persistent workspace to Bash across turns", async () => {
+test("sandbox persists its workspace and exposes WebGL through agent-browser", async () => {
   const conversation = { chatId: "chat-1", userId: "local-user" }
 
   try {
@@ -341,6 +342,12 @@ test("sandbox exposes a persistent workspace to Bash across turns", async () => 
       stderr: "",
       exitCode: 0,
     })
+
+    const webgl = await secondTurn.sandbox.executeCommand(
+      `agent-browser --cdp 9222 --json eval "Boolean(document.createElement('canvas').getContext('webgl2'))"`
+    )
+    assert.equal(webgl.exitCode, 0, webgl.stderr)
+    assert.equal(JSON.parse(webgl.stdout).data.result, true)
 
     const artifact = await app.request("/api/chat/chat-1/artifacts/sample.pdf")
     assert.equal(artifact.status, 200)

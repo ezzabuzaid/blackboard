@@ -24,6 +24,7 @@ export interface ChatStreamStore {
 export interface ChatSnapshot {
   messages: UIMessage[]
   resume: boolean
+  streamId: string | null
 }
 
 export class ChatService {
@@ -38,16 +39,19 @@ export class ChatService {
   async snapshot(conversation: ConversationId): Promise<ChatSnapshot> {
     const observation = this.#runtime.observe(conversation)
     const head = await observation.engine.headMessage()
-    const resume =
+    const streamId =
       head?.name === "assistant" &&
       (await this.#streams.getStreamStatus(head.id)) !== null
+        ? head.id
+        : null
     const messages = await observation.engine.getMessages()
 
     return {
-      messages: resume
-        ? messages.filter((message) => message.id !== head.id)
+      messages: streamId
+        ? messages.filter((message) => message.id !== streamId)
         : messages,
-      resume,
+      resume: streamId !== null,
+      streamId,
     }
   }
 

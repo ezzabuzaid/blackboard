@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-image=self-delegate-agent-browser:0.26.0-r2
+image=self-delegate-agent-browser:0.26.0-r4
 archive=$(mktemp "${TMPDIR:-/tmp}/self-delegate-agent-browser.XXXXXX")
 trap 'rm -f "$archive"' EXIT
 

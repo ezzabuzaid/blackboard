@@ -13,7 +13,7 @@ import {
 } from "microsandbox"
 
 const resources = new AsyncDisposableStack()
-const sandboxImage = "self-delegate-agent-browser:0.26.0-r2"
+const sandboxImage = "self-delegate-agent-browser:0.26.0-r4"
 const sandboxName = ({ chatId, userId }: SandboxContext) =>
   `self-delegate-${createHash("sha256")
     .update(JSON.stringify([userId, chatId]))
@@ -56,7 +56,9 @@ export default defineSandbox(async (context) => {
             .nosuid()
             .nodev()
         )
-        .network((network) => network.policy(NetworkPolicy.none())),
+        .network((network) =>
+          network.policy(NetworkPolicy.fromProfiles(["public"]))
+        ),
   })
   resources.use(sandbox)
   return sandbox

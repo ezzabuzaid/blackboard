@@ -46,7 +46,6 @@ export const scheduleTask = defineTool<
     required: ["task"],
     additionalProperties: false,
   }),
-  recovery: "idempotent",
   execute: async ({ task }, { context, toolCallId }) => {
     const turnId = await context.controlPlane.enqueue(
       context.actor.thread.conversation,

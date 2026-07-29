@@ -10,6 +10,8 @@ nohup /usr/local/bin/browser \
   --headless=new \
   --no-sandbox \
   --disable-dev-shm-usage \
+  --use-gl=angle \
+  --use-angle=swiftshader \
   --remote-debugging-address=127.0.0.1 \
   --remote-debugging-port=9222 \
   --user-data-dir=/tmp/agent-browser-chromium \

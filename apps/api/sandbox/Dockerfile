@@ -1,9 +1,9 @@
-FROM alpine:3.23
+FROM node:lts-alpine
 
 ARG AGENT_BROWSER_VERSION=0.26.0
 ARG TARGETARCH
 
-RUN apk add --no-cache ca-certificates chromium font-noto \
+RUN apk add --no-cache ca-certificates chromium chromium-swiftshader font-noto \
   && case "$TARGETARCH" in \
     amd64) agent_browser_arch=x64 ;; \
     arm64) agent_browser_arch=arm64 ;; \

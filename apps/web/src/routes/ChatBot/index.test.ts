@@ -9,6 +9,7 @@ import { Streamdown } from "streamdown"
 
 import { AgentTrajectory } from "./AgentTrajectory"
 import { artifactRemarkPlugins, sandboxArtifactUrl } from "./artifactLinks"
+import { scheduledTurnId, waitForStream } from "./ChatSession"
 import { loader } from "./loader"
 
 test("loader adds a chat id to the URL", async () => {
@@ -86,6 +87,53 @@ test("loader hydrates the selected chat and reports API state", async () => {
       initialMessages: [],
       resume: false,
     })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("scheduled turns hydrate history before resuming their stream", async () => {
+  const originalFetch = globalThis.fetch
+  let requests = 0
+  const messages: UIMessage[] = [
+    {
+      id: "scheduled-user",
+      role: "user",
+      parts: [{ type: "text", text: "Self-scheduled task:\nContinue" }],
+    },
+  ]
+  globalThis.fetch = async () =>
+    Response.json({
+      streamId: ++requests === 1 ? "stream-1" : "stream-2",
+      messages,
+    })
+
+  try {
+    assert.equal(
+      scheduledTurnId({
+        id: "stream-1",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool-schedule_task",
+            toolCallId: "call-1",
+            state: "output-available",
+            input: { task: "Continue" },
+            output: { turnId: "stream-2" },
+          },
+        ],
+      }),
+      "stream-2"
+    )
+    assert.deepEqual(
+      await waitForStream(
+        "test-chat",
+        "stream-2",
+        new AbortController().signal
+      ),
+      { streamId: "stream-2", messages }
+    )
+    assert.equal(requests, 2)
   } finally {
     globalThis.fetch = originalFetch
   }
