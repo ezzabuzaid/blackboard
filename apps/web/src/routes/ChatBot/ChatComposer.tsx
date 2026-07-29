@@ -2,15 +2,14 @@ import { useState } from "react"
 
 import {
   Field,
-  FieldDescription,
   FieldError,
   FieldLabel,
   InputGroup,
   InputGroupAddon,
   InputGroupButton,
   InputGroupTextarea,
-  Kbd,
 } from "@stdlib/shadcn"
+import { SendIcon } from "lucide-react"
 
 import { useChatSession } from "./ChatSession"
 
@@ -34,9 +33,9 @@ export function ChatComposer() {
   }
 
   return (
-    <footer className="shrink-0 border-t border-border/70 bg-background/95 backdrop-blur">
+    <footer className="shrink-0 bg-muted/60">
       <form
-        className="mx-auto w-full max-w-3xl px-5 py-4"
+        className="mx-auto w-full max-w-3xl px-3 py-3 sm:px-5"
         onSubmit={(event) => {
           event.preventDefault()
           void sendMessage()
@@ -46,7 +45,7 @@ export function ChatComposer() {
           <FieldLabel htmlFor="message" className="sr-only">
             Message
           </FieldLabel>
-          <InputGroup className="min-h-14 rounded-2xl bg-card">
+          <InputGroup className="min-h-[52px] rounded-full border-transparent bg-card has-disabled:!bg-card has-disabled:!opacity-100 has-[[data-slot=input-group-control]:focus-visible]:!border-transparent has-[[data-slot=input-group-control]:focus-visible]:!ring-0">
             <InputGroupTextarea
               id="message"
               value={draft}
@@ -61,30 +60,25 @@ export function ChatComposer() {
               disabled={pending}
               aria-invalid={!!error}
               rows={1}
-              className="max-h-40 min-h-12 px-3 py-3"
+              className="max-h-40 min-h-10 px-4 py-[9px] text-[15px] leading-[22px]"
             />
-            <InputGroupAddon align="inline-end" className="self-end py-2">
+            <InputGroupAddon align="inline-end" className="self-end p-1">
               <InputGroupButton
                 type="submit"
                 variant="default"
-                size="sm"
+                size="icon-sm"
                 disabled={pending || !draft.trim()}
-                className="h-9 rounded-xl px-4"
+                aria-label={pending ? "Sending" : "Send"}
+                className="size-10 rounded-full"
               >
-                {pending ? "Sending" : "Send"}
+                <SendIcon aria-hidden="true" />
               </InputGroupButton>
             </InputGroupAddon>
           </InputGroup>
-          {error ? (
+          {error && (
             <FieldError className="min-h-5 px-1 text-xs">
               {error.message}
             </FieldError>
-          ) : (
-            <FieldDescription className="flex min-h-5 items-center gap-1 px-1 text-xs">
-              <Kbd>Enter</Kbd>
-              to send ·<Kbd>Shift</Kbd>+<Kbd>Enter</Kbd>
-              for a new line
-            </FieldDescription>
           )}
         </Field>
       </form>

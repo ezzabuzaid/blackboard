@@ -39,13 +39,13 @@ export function Conversation() {
   const waitingForAssistant = pending && latestMessage?.role === "user"
 
   return (
-    <section aria-label="Conversation" className="min-h-0 flex-1 bg-muted/30">
+    <section aria-label="Conversation" className="min-h-0 flex-1 bg-muted/60">
       <MessageScrollerProvider autoScroll>
         <MessageScroller>
           <MessageScrollerViewport>
             <MessageScrollerContent
               aria-busy={status === "streaming"}
-              className="mx-auto w-full max-w-3xl justify-end gap-6 px-4 py-6 sm:px-5 sm:py-8"
+              className="mx-auto w-full max-w-3xl justify-end gap-3 px-3 py-4 sm:px-5 sm:py-6"
             >
               {messages.length === 0 && (
                 <MessageScrollerItem>
@@ -106,7 +106,7 @@ function ConversationMessage({
   const replies = groupReplies(message)
   if (replies.length > 0) {
     return (
-      <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-3">
         {groupReplyClusters(replies).map((cluster) => (
           <GroupReplyCluster
             chatId={chatId}
@@ -131,7 +131,7 @@ function ConversationMessage({
           <BubbleContent
             className={
               message.role === "user"
-                ? "rounded-2xl rounded-br-md px-2.5 py-1.5 text-base leading-tight whitespace-pre-wrap"
+                ? "relative !overflow-visible rounded-[8px] rounded-tr-none px-[9px] py-1.5 text-sm leading-5 whitespace-pre-wrap before:absolute before:top-0 before:-right-2 before:size-2 before:bg-inherit before:[clip-path:polygon(0_0,100%_0,0_100%)] before:content-['']"
                 : "max-w-[65ch] text-base leading-tight"
             }
           >
@@ -169,17 +169,19 @@ function GroupReplyCluster({
       aria-label={`${cluster.author} messages`}
     >
       <GroupAvatar name={cluster.author} className="mb-0.5" />
-      <BubbleGroup className="w-full gap-1">
+      <BubbleGroup className="w-full gap-0.5">
         {cluster.messages.map((message, index) => (
           <Bubble variant="outline" key={message.id}>
             <BubbleContent
-              className={`max-w-[65ch] rounded-2xl px-2.5 py-1.5 text-base leading-tight ${
-                index === cluster.messages.length - 1 ? "rounded-bl-md" : ""
+              className={`relative max-w-[65ch] !overflow-visible !border-transparent !bg-card rounded-[8px] px-[9px] py-1.5 text-sm leading-5 ${
+                index === 0
+                  ? "rounded-tl-none before:absolute before:top-0 before:-left-2 before:size-2 before:bg-inherit before:[clip-path:polygon(100%_0,100%_100%,0_0)] before:content-['']"
+                  : ""
               }`}
             >
               {index === 0 && (
                 <MessageHeader
-                  className={`mb-0.5 px-0 text-[13px] font-semibold capitalize ${groupMemberNameClass(
+                  className={`px-0 text-[13px] leading-[22px] font-medium ${groupMemberNameClass(
                     cluster.author
                   )}`}
                 >
