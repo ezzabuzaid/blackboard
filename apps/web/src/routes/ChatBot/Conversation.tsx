@@ -88,7 +88,7 @@ function UserMessageCluster({ cluster }: { cluster: GroupMessageCluster }) {
           {cluster.messages.map((message, index) => (
             <Bubble variant="tinted" key={message.id}>
               <BubbleContent
-                className={`relative !overflow-visible rounded-[8px] px-[9px] py-1.5 text-sm leading-5 whitespace-pre-wrap ${
+                className={`relative max-w-[65ch] min-w-12 !overflow-visible rounded-[8px] px-[9px] py-1.5 text-sm leading-5 whitespace-pre-wrap ${
                   index === 0
                     ? "rounded-tr-none before:absolute before:top-0 before:-right-2 before:size-2 before:bg-inherit before:content-[''] before:[clip-path:polygon(0_0,100%_0,0_100%)]"
                     : ""

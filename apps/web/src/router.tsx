@@ -7,6 +7,7 @@ export const router = createBrowserRouter([
     path: "/",
     Component: Root,
     ErrorBoundary,
+    HydrateFallback: BootFallback,
     children: [
       {
         index: true,
@@ -24,3 +25,11 @@ export const router = createBrowserRouter([
     ],
   },
 ])
+
+function BootFallback() {
+  return (
+    <main className="grid min-h-svh place-items-center bg-background text-sm text-muted-foreground">
+      Loading group…
+    </main>
+  )
+}

@@ -5,9 +5,9 @@
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "node --env-file-if-exists=../../.env --import tsx --watch src/index.ts",
+    "dev": "node --env-file=.env --import tsx --watch src/index.ts",
     "sandbox-image": "sh sandbox/build-image.sh",
-    "start": "node --env-file-if-exists=../../.env dist/index.js",
+    "start": "node --env-file=.env dist/index.js",
     "test": "node --test dist/app.test.js",
     "typecheck": "tsc --noEmit"
   },

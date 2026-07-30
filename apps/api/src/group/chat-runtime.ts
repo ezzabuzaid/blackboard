@@ -1,8 +1,16 @@
-import { resolve } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 
-import { openai } from "@ai-sdk/openai"
-import { createFileTelemetry } from "@deepagents/context/telemetry/file"
-import type { ConversationId } from "@deepagents/experimental/zukhruf"
+import {
+  SqliteContextStore,
+  SqliteStreamStore,
+  type StreamPart,
+} from "@deepagents/context"
+import {
+  SqliteApprovalMutex,
+  SqliteMailboxStore,
+  type AgentDeclaration,
+  type ConversationId,
+} from "@deepagents/experimental/zukhruf"
 
 import {
   WhatsAppGroup,
@@ -10,31 +18,46 @@ import {
   type WhatsAppParticipant,
   type WhatsAppRoomEvent,
 } from "./whatsapp.js"
-import { WhatsAppRoomStore } from "./room-store.js"
+
+const CHAT_EVENT_TYPE = "data-whatsapp-chat-event"
 
 export class WhatsAppChatRuntime implements AsyncDisposable {
-  readonly #participants: WhatsAppParticipant[]
+  readonly #participants: readonly WhatsAppParticipant[]
   readonly #chats = new Map<string, Promise<WhatsAppGroup>>()
   readonly #resources = new AsyncDisposableStack()
-  readonly #store: WhatsAppRoomStore
-  readonly #limits?: Partial<WhatsAppGroupLimits>
+  readonly #store: SqliteContextStore
+  readonly #streamStore: SqliteStreamStore
+  readonly #mailboxStore: SqliteMailboxStore
+  readonly #approvalMutex: SqliteApprovalMutex
+  readonly #limits: WhatsAppGroupLimits
+  readonly #sandboxForChat: (
+    conversation: ConversationId
+  ) => AgentDeclaration["sandbox"]
 
-  constructor(
-    participants = defaultParticipants(),
-    {
-      storagePath = resolve(
-        process.env.ZUKHRUF_DATA_DIR ?? ".data/zukhruf",
-        "group-rooms.sqlite"
-      ),
-      limits,
-    }: {
-      storagePath?: string
-      limits?: Partial<WhatsAppGroupLimits>
-    } = {}
-  ) {
-    this.#participants = participants
-    this.#limits = limits
-    this.#store = this.#resources.use(new WhatsAppRoomStore(storagePath))
+  constructor(options: {
+    participants: readonly WhatsAppParticipant[]
+    limits: WhatsAppGroupLimits
+    sandboxForChat: (
+      conversation: ConversationId
+    ) => AgentDeclaration["sandbox"]
+    databasePath: string
+    mailboxPath: string
+    approvalPath: string
+  }) {
+    this.#participants = options.participants
+    this.#limits = options.limits
+    this.#sandboxForChat = options.sandboxForChat
+
+    const database = new DatabaseSync(options.databasePath)
+    this.#resources.defer(() => database.close())
+    this.#store = new SqliteContextStore(database)
+    this.#streamStore = new SqliteStreamStore(database)
+    this.#mailboxStore = this.#resources.use(
+      new SqliteMailboxStore(options.mailboxPath)
+    )
+    this.#approvalMutex = this.#resources.use(
+      new SqliteApprovalMutex(options.approvalPath)
+    )
   }
 
   async post(
@@ -81,22 +104,25 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   }
 
   async #createChat(conversation: ConversationId) {
-    const hydration = this.#store.load(conversation)
-    const participants = (
-      hydration
-        ? hydration.snapshot.participants.map(({ name, specialty }) => {
-            const participant = this.#participants.find(
-              (candidate) => candidate.name === name
-            )
-            if (!participant) {
-              throw new Error(
-                `Stored participant "${name}" is not configured in this runtime`
-              )
-            }
-            return { ...participant, specialty }
-          })
-        : this.#participants
-    ).map((participant) =>
+    const streamId = JSON.stringify([
+      "whatsapp-chat",
+      conversation.userId,
+      conversation.chatId,
+    ])
+    const now = Date.now()
+    await this.#streamStore.upsertStream({
+      id: streamId,
+      status: "running",
+      createdAt: now,
+      startedAt: now,
+      finishedAt: null,
+      cancelRequestedAt: null,
+      error: null,
+    })
+    const events = (await this.#streamStore.getChunks(streamId)).map(
+      ({ seq, data }) => chatEvent(data, seq)
+    )
+    const participants = this.#participants.map((participant) =>
       participant.telemetry
         ? {
             ...participant,
@@ -108,71 +134,40 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
         : participant
     )
     const group = await WhatsAppGroup.create({
-      userId: conversation.userId,
+      conversation,
       participants,
-      hydration: hydration ?? undefined,
+      sandbox: this.#sandboxForChat(conversation),
+      store: this.#store,
+      streamStore: this.#streamStore,
+      mailboxStore: this.#mailboxStore,
+      approvalMutex: this.#approvalMutex,
+      events,
       limits: this.#limits,
-      persist: (snapshot, event) =>
-        this.#store.save(conversation, snapshot, event),
+      persist: (event) =>
+        this.#streamStore.appendChunks([
+          {
+            streamId,
+            seq: event.cursor,
+            data: { type: CHAT_EVENT_TYPE, data: event },
+            createdAt: Date.now(),
+          },
+        ]),
     })
     this.#resources.use(group)
     await group.recoverInterrupted()
-    this.#store.save(conversation, group.snapshot())
     return group
   }
 }
 
-function defaultParticipants(): WhatsAppParticipant[] {
-  const model = () => openai("gpt-5.6-luna")
-  return [
-    {
-      name: "Maya",
-      specialty: "Research",
-      instructions:
-        "You contribute evidence, concrete facts, and questions that need research. You are curious but socially reserved and sometimes respond to greetings.",
-      model: model(),
-      tools: {
-        web_search: openai.tools.webSearch(),
-      },
-    },
-    {
-      name: "Omar",
-      specialty: "Engineering",
-      instructions:
-        "You contribute technical feasibility, architecture, and implementation consequences. You are quiet in casual conversation and usually let others answer greetings.",
-      model: model(),
-    },
-    {
-      name: "Lina",
-      specialty: "Product",
-      instructions:
-        "You contribute user needs, product scope, adoption, and business value. You are warm and welcoming and often respond to greetings.",
-      model: model(),
-    },
-    {
-      name: "Rami",
-      specialty: "Critic",
-      instructions:
-        "You contribute contradictions, risks, missing assumptions, and failure modes. You are reserved and rarely respond to greetings.",
-      model: model(),
-    },
-    {
-      name: "Noor",
-      specialty: "Creative alternatives",
-      instructions:
-        "You contribute useful alternatives and ideas that the others are unlikely to surface. You are playful and sociable and often respond briefly to casual messages.",
-      model: model(),
-    },
-  ].map((participant, index) => ({
-    ...participant,
-    telemetry: {
-      integrations: createFileTelemetry({
-        path: resolve(
-          process.env.ZUKHRUF_DATA_DIR ?? ".data/zukhruf",
-          "group-telemetry",
-          `${index}-${encodeURIComponent(participant.name).slice(0, 100)}.jsonl`
-        ),
-      }),
-    },
-  }))
+function chatEvent(part: StreamPart, sequence: number) {
+  if (
+    part.type !== CHAT_EVENT_TYPE ||
+    typeof part.data !== "object" ||
+    part.data === null ||
+    !("cursor" in part.data) ||
+    part.data.cursor !== sequence
+  ) {
+    throw new Error(`Invalid WhatsApp chat event at sequence ${sequence}`)
+  }
+  return part.data as WhatsAppRoomEvent
 }

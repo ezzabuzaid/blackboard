@@ -2,32 +2,29 @@ import { randomUUID } from "node:crypto"
 
 import {
   type AgentModel,
-  InMemoryContextStore,
-  SqliteStreamStore,
-  createVirtualSandbox,
+  type ContextStore,
+  type StreamStore,
   role,
 } from "@deepagents/context"
 import {
   AgentRuntime,
   MessageDeliveryMode,
   PgBossTurnQueue,
-  SqliteApprovalMutex,
-  SqliteMailboxStore,
+  type ApprovalMutex,
   type AgentDeclaration,
   type ConversationId,
+  type MailboxStore,
   createInterAgentCommunication,
   defineAgent,
-  defineSandbox,
   defineTool,
 } from "@deepagents/experimental/zukhruf"
 import { PGlite } from "@electric-sql/pglite"
 import { jsonSchema, type ToolSet } from "ai"
-import { InMemoryFs } from "just-bash"
 import { PgBoss, fromPglite } from "pg-boss"
 
 export interface WhatsAppParticipant {
   name: string
-  specialty: string
+  source: string
   instructions?: string
   model: AgentModel
   tools?: ToolSet
@@ -92,14 +89,9 @@ export type WhatsAppRoomEvent =
 
 export interface WhatsAppGroupSnapshot {
   messages: WhatsAppMessage[]
-  participants: { name: string; specialty: string }[]
+  participants: { name: string; source: string }[]
   activity: WhatsAppGroupActivityState
   cursor: number
-}
-
-export interface WhatsAppGroupHydration {
-  snapshot: WhatsAppGroupSnapshot
-  events: WhatsAppRoomEvent[]
 }
 
 export interface WhatsAppGroupLimits {
@@ -109,14 +101,16 @@ export interface WhatsAppGroupLimits {
 }
 
 export interface WhatsAppGroupOptions {
-  userId: string
-  participants: WhatsAppParticipant[]
-  hydration?: WhatsAppGroupHydration
-  limits?: Partial<WhatsAppGroupLimits>
-  persist?: (
-    snapshot: WhatsAppGroupSnapshot,
-    event: WhatsAppRoomEvent
-  ) => void | Promise<void>
+  conversation: ConversationId
+  participants: readonly WhatsAppParticipant[]
+  sandbox: AgentDeclaration["sandbox"]
+  store: ContextStore
+  streamStore: StreamStore
+  mailboxStore: MailboxStore
+  approvalMutex: ApprovalMutex
+  events: WhatsAppRoomEvent[]
+  limits: WhatsAppGroupLimits
+  persist: (event: WhatsAppRoomEvent) => void | Promise<void>
   onMessage?: (message: WhatsAppMessage) => void | Promise<void>
   onActivity?: (activity: WhatsAppGroupActivity) => void | Promise<void>
   onEvent?: (event: WhatsAppRoomEvent) => void | Promise<void>
@@ -147,7 +141,7 @@ interface GroupSubscriber extends Pick<
 export class WhatsAppGroup implements AsyncDisposable {
   readonly #resources: AsyncDisposableStack
   readonly #participants: RunningParticipant[]
-  readonly #profiles: { name: string; specialty: string }[]
+  readonly #profiles: { name: string; source: string }[]
   readonly #user: ConversationId
   readonly #subscribers = new Set<GroupSubscriber>()
   readonly #messages: WhatsAppMessage[] = []
@@ -157,7 +151,7 @@ export class WhatsAppGroup implements AsyncDisposable {
   readonly #mailboxRecipients = new Map<string, Set<string>>()
   readonly #replyCounts = new Map<string, number>()
   readonly #limits: WhatsAppGroupLimits
-  readonly #persist?: WhatsAppGroupOptions["persist"]
+  readonly #persist: WhatsAppGroupOptions["persist"]
   #activity: WhatsAppGroupActivityState = {
     phase: "idle",
     notification: 0,
@@ -180,33 +174,29 @@ export class WhatsAppGroup implements AsyncDisposable {
   ) {
     this.#resources = resources.disposables
     this.#participants = resources.participants
-    this.#user = { chatId: "user", userId: options.userId }
-    this.#profiles =
-      options.hydration?.snapshot.participants ??
-      options.participants.map(({ name, specialty }) => ({
-        name,
-        specialty,
-      }))
-    this.#limits = {
-      notifications: 25,
-      agentMessages: 100,
-      transcriptMessages: 500,
-      ...options.limits,
-    }
+    this.#user = options.conversation
+    this.#profiles = options.participants.map(({ name, source }) => ({
+      name,
+      source,
+    }))
+    this.#limits = options.limits
     this.#persist = options.persist
-    if (options.hydration) {
-      this.#messages.push(
-        ...structuredClone(options.hydration.snapshot.messages)
-      )
-      for (const message of this.#messages) {
+    for (const event of structuredClone(options.events)) {
+      this.#events.push(event)
+      this.#cursor = event.cursor
+      if (event.type === "message") {
+        const { message } = event
+        this.#messages.push(message)
         this.#messagesById.set(message.id, message)
-      }
-      this.#events.push(...structuredClone(options.hydration.events))
-      this.#activity = structuredClone(options.hydration.snapshot.activity)
-      this.#sequence = this.#messages.at(-1)?.sequence ?? 0
-      this.#cursor = options.hydration.snapshot.cursor
-      for (const participant of this.#activity.participants) {
-        this.#replyCounts.set(participant.name, participant.replies)
+        this.#sequence = message.sequence
+        if (message.author !== "user") {
+          this.#replyCounts.set(
+            message.author,
+            (this.#replyCounts.get(message.author) ?? 0) + 1
+          )
+        }
+      } else {
+        this.#activity = reduceActivity(this.#activity, event.activity)
       }
     }
     if (options.onMessage || options.onActivity || options.onEvent) {
@@ -225,16 +215,9 @@ export class WhatsAppGroup implements AsyncDisposable {
     await using resources = new AsyncDisposableStack()
     const database = new PGlite()
     resources.defer(() => database.close())
-    const streamStore = new SqliteStreamStore(":memory:")
-    resources.defer(() => streamStore.close())
-    const mailboxStore = new SqliteMailboxStore(":memory:")
-    resources.defer(() => mailboxStore.close())
-    const approvalMutex = new SqliteApprovalMutex(":memory:")
-    resources.defer(() => approvalMutex.close())
     const boss = new PgBoss({ db: fromPglite(database), backend: "pglite" })
     boss.on("error", (error) => console.error("[queue error]", error))
-    resources.defer(() => boss.stop({ close: false, graceful: false }))
-    const store = new InMemoryContextStore()
+    resources.defer(() => boss.stop({ close: false, graceful: true }))
     const participants: RunningParticipant[] = []
     let publishReply: (author: string, content: string) => Promise<boolean>
 
@@ -251,18 +234,16 @@ export class WhatsAppGroup implements AsyncDisposable {
           name: participant.name,
           model: participant.model,
           telemetry: participant.telemetry,
-          sandbox: defineSandbox(() =>
-            createVirtualSandbox({ fs: new InMemoryFs() })
-          ),
+          sandbox: options.sandbox,
           instructions: [
             role(
               [
-                `You are ${participant.name} in a WhatsApp-style group chat. Your specialty is ${participant.specialty}. ${participant.instructions ?? ""}`,
+                `You are ${participant.name} in a WhatsApp-style group chat. You own this data source: ${participant.source}. ${participant.instructions ?? ""}`,
                 "Every turn is a notification containing new public group messages.",
                 "New public messages may also arrive as mailbox communications between model steps; reconsider your planned contribution when they do.",
                 "Read them and decide autonomously whether to participate.",
-                "For casual or social messages, you may respond briefly when it fits your personality; silence is also natural, and the group should not answer in chorus.",
-                "For substantive messages, reply only when your specialty gives you something useful and non-duplicative to add.",
+                "For casual or social messages, you may respond briefly; silence is also natural, and the group should not answer in chorus.",
+                "For substantive messages, reply only when your owned data source gives you something useful and non-duplicative to add.",
                 "If yes, call reply_to_group with the concise message you want everyone to see.",
                 "If no, do not call reply_to_group. Do not reply merely to agree, repeat, or announce silence.",
                 "Your ordinary assistant text is private and never appears in the group.",
@@ -296,19 +277,19 @@ export class WhatsAppGroup implements AsyncDisposable {
           },
         }),
         {
-          store,
-          streamStore,
+          store: options.store,
+          streamStore: options.streamStore,
           queue,
-          mailboxStore,
-          approvalMutex,
+          mailboxStore: options.mailboxStore,
+          approvalMutex: options.approvalMutex,
         }
       )
 
       participants.push({
         name: participant.name,
         conversation: {
-          chatId: `whatsapp-${index}`,
-          userId: options.userId,
+          chatId: `${options.conversation.chatId}:participant:${index}`,
+          userId: options.conversation.userId,
         },
         runtime,
         active: false,
@@ -600,7 +581,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       message,
     }
     this.#events.push(event)
-    await this.#persist?.(this.snapshot(), event)
+    await this.#persist(event)
     await Promise.all(
       [...this.#subscribers].map((subscriber) =>
         this.#deliver(subscriber, event, () => subscriber.onMessage?.(message))
@@ -616,7 +597,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       activity,
     }
     this.#events.push(event)
-    await this.#persist?.(this.snapshot(), event)
+    await this.#persist(event)
     await Promise.all(
       [...this.#subscribers].map((subscriber) =>
         this.#deliver(subscriber, event, () =>
@@ -706,8 +687,11 @@ export class WhatsAppGroup implements AsyncDisposable {
   }
 
   static #validate(options: WhatsAppGroupOptions) {
-    if (!options.userId.trim()) {
+    if (!options.conversation.userId.trim()) {
       throw new Error("WhatsAppGroup userId cannot be empty")
+    }
+    if (!options.conversation.chatId.trim()) {
+      throw new Error("WhatsAppGroup chatId cannot be empty")
     }
     if (options.participants.length === 0) {
       throw new Error("WhatsAppGroup requires at least one participant")
@@ -725,12 +709,12 @@ export class WhatsAppGroup implements AsyncDisposable {
         )
       }
       if (
-        !participant.specialty.trim() ||
-        participant.specialty !== participant.specialty.trim() ||
-        participant.specialty.length > 200
+        !participant.source.trim() ||
+        participant.source !== participant.source.trim() ||
+        participant.source.length > 200
       ) {
         throw new Error(
-          "WhatsAppGroup participant specialties must be valid, unpadded text"
+          "WhatsAppGroup participant sources must be valid, unpadded text"
         )
       }
       if (participant.name.toLowerCase() === "user") {
@@ -746,12 +730,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       }
       names.add(normalizedName)
     }
-    for (const [name, limit] of Object.entries({
-      notifications: 25,
-      agentMessages: 100,
-      transcriptMessages: 500,
-      ...options.limits,
-    })) {
+    for (const [name, limit] of Object.entries(options.limits)) {
       if (!Number.isSafeInteger(limit) || limit <= 0) {
         throw new Error(`WhatsAppGroup ${name} limit must be positive`)
       }

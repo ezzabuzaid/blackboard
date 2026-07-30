@@ -1,12 +1,40 @@
+import { mkdirSync } from "node:fs"
+import { resolve } from "node:path"
+
 import { createTerminus } from "@godaddy/terminus"
 import { serve } from "@hono/node-server"
 
 import { createApp } from "./app.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
+import { whatsappParticipants } from "./group/participants.js"
+import { createWhatsAppSandbox } from "./group/sandbox.js"
+
+const dataDirectory = process.env.ZUKHRUF_DATA_DIR
+if (!dataDirectory) throw new Error("ZUKHRUF_DATA_DIR is required")
+mkdirSync(dataDirectory, { recursive: true })
+
+const port = Number(process.env.PORT)
+if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) {
+  throw new Error("PORT must be a valid TCP port")
+}
 
 await using resources = new AsyncDisposableStack()
 
-const runtime = resources.use(new WhatsAppChatRuntime())
+const sandboxResources = resources.use(new AsyncDisposableStack())
+const runtime = resources.use(
+  new WhatsAppChatRuntime({
+    participants: whatsappParticipants,
+    limits: {
+      notifications: 25,
+      agentMessages: 100,
+      transcriptMessages: 500,
+    },
+    sandboxForChat: createWhatsAppSandbox(sandboxResources, dataDirectory),
+    databasePath: resolve(dataDirectory, "group.sqlite"),
+    mailboxPath: resolve(dataDirectory, "mailbox.sqlite"),
+    approvalPath: resolve(dataDirectory, "approval.sqlite"),
+  })
+)
 
 const app = createApp({
   runtime,
@@ -16,7 +44,7 @@ const app = createApp({
 await using server = serve(
   {
     fetch: app.fetch,
-    port: Number(process.env.PORT ?? 3001),
+    port,
   },
   ({ port }) => console.log(`API listening on http://localhost:${port}`)
 )

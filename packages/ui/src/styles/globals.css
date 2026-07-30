@@ -159,3 +159,28 @@
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Fix list item alignment in streamdown */
+[data-streamdown="list-item"] > p {
+  display: inline;
+}
+
+[data-streamdown="list-item"]
+  > :is(
+    [data-streamdown="ordered-list"],
+    [data-streamdown="unordered-list"]
+  ):only-child,
+[data-streamdown="list-item"]
+  > :is(
+    [data-streamdown="ordered-list"],
+    [data-streamdown="unordered-list"]
+  ):only-child
+  > [data-streamdown="list-item"] {
+  display: inline;
+}
+
+[data-streamdown="unordered-list"],
+[data-streamdown="ordered-list"] {
+  list-style-position: outside;
+  padding-left: 1.5rem;
+}

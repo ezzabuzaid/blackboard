@@ -1,6 +1,6 @@
 import { Avatar, AvatarFallback, AvatarGroup, cn } from "@stdlib/shadcn"
 
-export const groupMembers = ["Maya", "Omar", "Lina", "Rami", "Noor"] as const
+export const groupMembers = ["Maya", "Omar", "Lina", "Paul Graham"] as const
 
 const fallbackTone = {
   avatar: "bg-muted text-foreground",
@@ -24,11 +24,7 @@ const memberTones: Record<
     avatar: "bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-200",
     name: "text-rose-700 dark:text-rose-300",
   },
-  Rami: {
-    avatar: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200",
-    name: "text-sky-700 dark:text-sky-300",
-  },
-  Noor: {
+  "Paul Graham": {
     avatar:
       "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
     name: "text-emerald-700 dark:text-emerald-300",
@@ -52,7 +48,10 @@ export function GroupAvatar({
   size?: "default" | "sm"
   className?: string
 }) {
-  const monogram = `${name.at(0) ?? ""}${name.at(-1) ?? ""}`.toUpperCase()
+  const parts = name.split(/\s+/u)
+  const monogram = `${parts[0]?.at(0) ?? ""}${
+    (parts.length === 1 ? parts[0]?.at(-1) : parts.at(-1)?.at(0)) ?? ""
+  }`.toUpperCase()
 
   return (
     <Avatar

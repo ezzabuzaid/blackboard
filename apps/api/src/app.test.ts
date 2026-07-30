@@ -2,12 +2,24 @@ import assert from "node:assert/strict"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
 import { setTimeout as sleep } from "node:timers/promises"
 
 import { openai } from "@ai-sdk/openai"
+import {
+  SqliteContextStore,
+  SqliteStreamStore,
+  createVirtualSandbox,
+} from "@deepagents/context"
+import {
+  SqliteApprovalMutex,
+  SqliteMailboxStore,
+  defineSandbox,
+} from "@deepagents/experimental/zukhruf"
 import { simulateReadableStream } from "ai"
 import { MockLanguageModelV4 } from "ai/test"
+import { InMemoryFs } from "just-bash"
 
 import agentSandbox, {
   disposeSandboxes,
@@ -17,10 +29,70 @@ import { scheduleTask } from "./agent/tools/schedule-task.js"
 import { createApp, type AppDependencies } from "./app.js"
 import type { ListQueuedTurns, QueuedTurn } from "./chat/routes.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
-import { WhatsAppRoomStore } from "./group/room-store.js"
-import { WhatsAppGroup, WhatsAppGroupLimitError } from "./group/whatsapp.js"
+import {
+  businessProfilePath,
+  gtmBacklogPath,
+  productSignalsPath,
+  shareSandboxInstance,
+  whatsappSandboxName,
+} from "./group/sandbox.js"
+import {
+  WhatsAppGroup,
+  WhatsAppGroupLimitError,
+  type WhatsAppParticipant,
+} from "./group/whatsapp.js"
 
 type ChatRuntime = AppDependencies["runtime"]
+
+const testGroupSandbox = shareSandboxInstance(
+  defineSandbox(() => createVirtualSandbox({ fs: new InMemoryFs() }))
+)
+const testDataDirectory = "/test/zukhruf"
+const testGroupConversation = { chatId: "test-room", userId: "user-1" }
+const testGroupLimits = {
+  notifications: 25,
+  agentMessages: 100,
+  transcriptMessages: 500,
+}
+
+function testGroupDependencies(resources: AsyncDisposableStack) {
+  const database = new DatabaseSync(":memory:")
+  resources.defer(() => database.close())
+  return {
+    store: new SqliteContextStore(database),
+    streamStore: new SqliteStreamStore(database),
+    mailboxStore: resources.use(new SqliteMailboxStore(":memory:")),
+    approvalMutex: resources.use(new SqliteApprovalMutex(":memory:")),
+    events: [],
+    limits: testGroupLimits,
+    persist: async () => {},
+  }
+}
+
+function memoryRuntime(participants: WhatsAppParticipant[]) {
+  return new WhatsAppChatRuntime({
+    participants,
+    limits: testGroupLimits,
+    sandboxForChat: () => testGroupSandbox,
+    databasePath: ":memory:",
+    mailboxPath: ":memory:",
+    approvalPath: ":memory:",
+  })
+}
+
+function durableRuntime(
+  participants: WhatsAppParticipant[],
+  directory: string
+) {
+  return new WhatsAppChatRuntime({
+    participants,
+    limits: testGroupLimits,
+    sandboxForChat: () => testGroupSandbox,
+    databasePath: join(directory, "group.sqlite"),
+    mailboxPath: join(directory, "mailbox.sqlite"),
+    approvalPath: join(directory, "approval.sqlite"),
+  })
+}
 
 const unusedRuntime: ChatRuntime = {
   async post() {
@@ -60,6 +132,73 @@ test("health reports the linked agent", async () => {
   })
 })
 
+test("group members share one sandbox instance", async () => {
+  const maya = {
+    chatId: "room-1:participant:0",
+    userId: "user-1",
+  }
+  const omar = {
+    chatId: "room-1:participant:1",
+    userId: "user-1",
+  }
+  const lina = {
+    chatId: "room-1:participant:2",
+    userId: "user-1",
+  }
+  const paul = {
+    chatId: "room-1:participant:3",
+    userId: "user-1",
+  }
+  const [mayaSandbox, omarSandbox, linaSandbox, paulSandbox] =
+    await Promise.all([
+      testGroupSandbox(maya),
+      testGroupSandbox(omar),
+      testGroupSandbox(lina),
+      testGroupSandbox(paul),
+    ])
+
+  assert.equal(mayaSandbox, omarSandbox)
+  assert.equal(mayaSandbox, linaSandbox)
+  assert.equal(mayaSandbox, paulSandbox)
+  assert.equal(mayaSandbox.sandbox, omarSandbox.sandbox)
+  assert.equal(mayaSandbox.sandbox, linaSandbox.sandbox)
+  assert.equal(mayaSandbox.sandbox, paulSandbox.sandbox)
+})
+
+test("group rooms keep distinct sandboxes and share GTM source folders", () => {
+  const firstRoom = { chatId: "room-1", userId: "user-1" }
+  const secondRoom = { chatId: "room-2", userId: "user-1" }
+
+  assert.notEqual(
+    whatsappSandboxName(testDataDirectory, firstRoom),
+    whatsappSandboxName(testDataDirectory, secondRoom)
+  )
+  assert.equal(
+    businessProfilePath(testDataDirectory, firstRoom.userId),
+    businessProfilePath(testDataDirectory, secondRoom.userId)
+  )
+  assert.notEqual(
+    businessProfilePath(testDataDirectory, "user-1"),
+    businessProfilePath(testDataDirectory, "user-2")
+  )
+  assert.equal(
+    gtmBacklogPath(testDataDirectory, firstRoom.userId),
+    gtmBacklogPath(testDataDirectory, secondRoom.userId)
+  )
+  assert.notEqual(
+    gtmBacklogPath(testDataDirectory, "user-1"),
+    gtmBacklogPath(testDataDirectory, "user-2")
+  )
+  assert.equal(
+    productSignalsPath(testDataDirectory, firstRoom.userId),
+    productSignalsPath(testDataDirectory, secondRoom.userId)
+  )
+  assert.notEqual(
+    productSignalsPath(testDataDirectory, "user-1"),
+    productSignalsPath(testDataDirectory, "user-2")
+  )
+})
+
 test("room message POST returns before active participants settle", async () => {
   const participantStarted = Promise.withResolvers<void>()
   const releaseParticipant = Promise.withResolvers<void>()
@@ -70,16 +209,13 @@ test("room message POST returns before active participants settle", async () => 
       return groupTextResponse("Nothing distinct to add.")
     },
   })
-  await using runtime = new WhatsAppChatRuntime(
-    [
-      {
-        name: "Maya",
-        specialty: "Finds evidence.",
-        model: participant,
-      },
-    ],
-    { storagePath: ":memory:" }
-  )
+  await using runtime = memoryRuntime([
+    {
+      name: "Maya",
+      source: "Research evidence.",
+      model: participant,
+    },
+  ])
 
   try {
     const groupApp = testApp({ runtime })
@@ -130,7 +266,7 @@ test("room message POST returns before active participants settle", async () => 
           content: "What should we do first?",
         },
       ],
-      participants: [{ name: "Maya", specialty: "Finds evidence." }],
+      participants: [{ name: "Maya", source: "Research evidence." }],
       activity: {
         phase: "active",
         notification: 1,
@@ -414,13 +550,18 @@ test("publishes a group reply before slower members finish", async () => {
     },
   })
 
-  await using group = await WhatsAppGroup.create({
-    userId: "user-1",
-    participants: [
-      { name: "fast", specialty: "Answers quickly.", model: fast },
-      { name: "slow", specialty: "Checks carefully.", model: slow },
-    ],
-  })
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        { name: "fast", source: "Fast answers.", model: fast },
+        { name: "slow", source: "Careful checks.", model: slow },
+      ],
+    })
+  )
 
   const published: { author: string; content: string }[] = []
   const sending = group.send("Can anyone answer?", ({ author, content }) => {
@@ -486,13 +627,18 @@ test("an active member sees a peer reply before its next model step", async () =
     },
   })
 
-  await using group = await WhatsAppGroup.create({
-    userId: "user-1",
-    participants: [
-      { name: "early", specialty: "Answers quickly.", model: early },
-      { name: "late", specialty: "Checks answers carefully.", model: late },
-    ],
-  })
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        { name: "early", source: "Fast answers.", model: early },
+        { name: "late", source: "Careful checks.", model: late },
+      ],
+    })
+  )
 
   const messages = await group.send("What is the answer?", (message) => {
     if (message.author === "early") earlyReplyPublished.resolve()
@@ -515,41 +661,46 @@ test("an active member sees a peer reply before its next model step", async () =
 test("each group member uses its own telemetry", async () => {
   const firstStarts: unknown[] = []
   const secondStarts: unknown[] = []
-  await using group = await WhatsAppGroup.create({
-    userId: "user-1",
-    participants: [
-      {
-        name: "first",
-        specialty: "Reviews the discussion.",
-        model: new MockLanguageModelV4({
-          doStream: groupTextResponse("Nothing to add."),
-        }),
-        telemetry: {
-          functionId: "parent-chat:first",
-          integrations: {
-            onStart(event) {
-              firstStarts.push(event)
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        {
+          name: "first",
+          source: "Discussion record.",
+          model: new MockLanguageModelV4({
+            doStream: groupTextResponse("Nothing to add."),
+          }),
+          telemetry: {
+            functionId: "parent-chat:first",
+            integrations: {
+              onStart(event) {
+                firstStarts.push(event)
+              },
             },
           },
         },
-      },
-      {
-        name: "second",
-        specialty: "Challenges the discussion.",
-        model: new MockLanguageModelV4({
-          doStream: groupTextResponse("Nothing to add."),
-        }),
-        telemetry: {
-          functionId: "parent-chat:second",
-          integrations: {
-            onStart(event) {
-              secondStarts.push(event)
+        {
+          name: "second",
+          source: "Risk record.",
+          model: new MockLanguageModelV4({
+            doStream: groupTextResponse("Nothing to add."),
+          }),
+          telemetry: {
+            functionId: "parent-chat:second",
+            integrations: {
+              onStart(event) {
+                secondStarts.push(event)
+              },
             },
           },
         },
-      },
-    ],
-  })
+      ],
+    })
+  )
 
   await group.send("Review this.")
 
@@ -579,12 +730,17 @@ test("coalesces human interventions posted while a batch is running", async () =
     },
   })
 
-  await using group = await WhatsAppGroup.create({
-    userId: "user-1",
-    participants: [
-      { name: "member", specialty: "Reviews the discussion.", model: member },
-    ],
-  })
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        { name: "member", source: "Discussion record.", model: member },
+      ],
+    })
+  )
 
   const published: { author: string; content: string }[] = []
   const sending = group.send(
@@ -669,7 +825,7 @@ test("every group member receives greetings concurrently and social replies stay
           ? groupToolResponse("reply_to_group", "social-reply", {
               message: "Hey! Good to see you.",
             })
-          : groupTextResponse("Greetings are outside my specialty.")
+          : groupTextResponse("Greetings are outside my source.")
       }
       return groupTextResponse("Reply posted.")
     },
@@ -686,24 +842,29 @@ test("every group member receives greetings concurrently and social replies stay
     },
   })
 
-  await using group = await WhatsAppGroup.create({
-    userId: "user-1",
-    participants: [
-      {
-        name: "researcher",
-        specialty: "Finds evidence and is socially curious.",
-        model: researcher,
-        tools: {
-          web_search: openai.tools.webSearch(),
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        {
+          name: "researcher",
+          source: "Research evidence.",
+          model: researcher,
+          tools: {
+            web_search: openai.tools.webSearch(),
+          },
         },
-      },
-      {
-        name: "critic",
-        specialty: "Challenges unsupported claims.",
-        model: critic,
-      },
-    ],
-  })
+        {
+          name: "critic",
+          source: "Risk record.",
+          model: critic,
+        },
+      ],
+    })
+  )
 
   const messages = await group.send("Hi everyone!")
 
@@ -731,12 +892,11 @@ test("every group member receives greetings concurrently and social replies stay
 
 test("a room survives a runtime restart and replays persisted events", async () => {
   const directory = await mkdtemp(join(tmpdir(), "zukhruf-room-"))
-  const storagePath = join(directory, "rooms.sqlite")
   const conversation = { chatId: "durable-chat", userId: "local-user" }
   const participants = [
     {
       name: "Maya",
-      specialty: "Finds evidence.",
+      source: "Research evidence.",
       model: new MockLanguageModelV4({
         doStream: groupTextResponse("Nothing distinct to add."),
       }),
@@ -745,9 +905,7 @@ test("a room survives a runtime restart and replays persisted events", async () 
 
   try {
     {
-      await using runtime = new WhatsAppChatRuntime(participants, {
-        storagePath,
-      })
+      await using runtime = durableRuntime(participants, directory)
       await runtime.post(conversation, {
         id: "message-1",
         content: "Keep this after restart.",
@@ -755,9 +913,7 @@ test("a room survives a runtime restart and replays persisted events", async () 
       await waitForRoom(runtime, conversation, "settled")
     }
 
-    await using runtime = new WhatsAppChatRuntime(participants, {
-      storagePath,
-    })
+    await using runtime = durableRuntime(participants, directory)
     const snapshot = await runtime.snapshot(conversation)
     assert.deepEqual(
       snapshot.messages.map(({ id, author, content }) => ({
@@ -774,7 +930,7 @@ test("a room survives a runtime restart and replays persisted events", async () 
       ]
     )
     assert.deepEqual(snapshot.participants, [
-      { name: "Maya", specialty: "Finds evidence." },
+      { name: "Maya", source: "Research evidence." },
     ])
     assert.equal(snapshot.activity.phase, "settled")
 
@@ -797,14 +953,13 @@ test("a room survives a runtime restart and replays persisted events", async () 
 
 test("runtime shutdown persists interrupted participant work as stopped", async () => {
   const directory = await mkdtemp(join(tmpdir(), "zukhruf-interrupted-room-"))
-  const storagePath = join(directory, "rooms.sqlite")
   const conversation = { chatId: "interrupted-chat", userId: "local-user" }
   const participantStarted = Promise.withResolvers<void>()
   const releaseParticipant = Promise.withResolvers<void>()
   const participants = [
     {
       name: "Maya",
-      specialty: "Finds evidence.",
+      source: "Research evidence.",
       model: new MockLanguageModelV4({
         doStream: async ({ abortSignal }) => {
           participantStarted.resolve()
@@ -823,7 +978,7 @@ test("runtime shutdown persists interrupted participant work as stopped", async 
   ]
 
   try {
-    const firstRuntime = new WhatsAppChatRuntime(participants, { storagePath })
+    const firstRuntime = durableRuntime(participants, directory)
     await firstRuntime.post(conversation, {
       id: "message-1",
       content: "This work will be interrupted.",
@@ -831,9 +986,8 @@ test("runtime shutdown persists interrupted participant work as stopped", async 
     await participantStarted.promise
     await firstRuntime[Symbol.asyncDispose]()
 
-    using store = new WhatsAppRoomStore(storagePath)
-    const snapshot = store.load(conversation)?.snapshot
-    assert.ok(snapshot)
+    await using secondRuntime = durableRuntime(participants, directory)
+    const snapshot = await secondRuntime.snapshot(conversation)
     assert.equal(snapshot.activity.phase, "stopped")
     assert.equal(snapshot.activity.stopReason, "interrupted")
     assert.deepEqual(
@@ -874,16 +1028,13 @@ test("room stop cancels active participant work", async () => {
       return groupTextResponse("Nothing distinct to add.")
     },
   })
-  await using runtime = new WhatsAppChatRuntime(
-    [
-      {
-        name: "Maya",
-        specialty: "Finds evidence.",
-        model: participant,
-      },
-    ],
-    { storagePath: ":memory:" }
-  )
+  await using runtime = memoryRuntime([
+    {
+      name: "Maya",
+      source: "Research evidence.",
+      model: participant,
+    },
+  ])
 
   try {
     const groupApp = testApp({ runtime })
@@ -919,22 +1070,31 @@ test("the room stops at its public reply ceiling", async () => {
         }),
     })
 
-  await using group = await WhatsAppGroup.create({
-    userId: "user-1",
-    participants: [
-      {
-        name: "Maya",
-        specialty: "Research.",
-        model: alwaysReplies("Maya"),
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        {
+          name: "Maya",
+          source: "Research evidence.",
+          model: alwaysReplies("Maya"),
+        },
+        {
+          name: "Omar",
+          source: "Engineering record.",
+          model: alwaysReplies("Omar"),
+        },
+      ],
+      limits: {
+        ...testGroupLimits,
+        notifications: 10,
+        agentMessages: 2,
       },
-      {
-        name: "Omar",
-        specialty: "Engineering.",
-        model: alwaysReplies("Omar"),
-      },
-    ],
-    limits: { notifications: 10, agentMessages: 2 },
-  })
+    })
+  )
 
   const messages = await group.send("Debate forever.")
   assert.equal(messages.filter(({ author }) => author !== "user").length, 2)
@@ -944,34 +1104,39 @@ test("the room stops at its public reply ceiling", async () => {
 
 test("one participant failure does not erase successful replies", async () => {
   let usefulCalls = 0
-  await using group = await WhatsAppGroup.create({
-    userId: "user-1",
-    participants: [
-      {
-        name: "Maya",
-        specialty: "Research.",
-        model: new MockLanguageModelV4({
-          doStream: async () => {
-            usefulCalls++
-            return usefulCalls === 1
-              ? groupToolResponse("reply_to_group", "useful-reply", {
-                  message: "Here is the useful result.",
-                })
-              : groupTextResponse("Nothing else to add.")
-          },
-        }),
-      },
-      {
-        name: "Omar",
-        specialty: "Engineering.",
-        model: new MockLanguageModelV4({
-          doStream: async () => {
-            throw new Error("participant unavailable")
-          },
-        }),
-      },
-    ],
-  })
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        {
+          name: "Maya",
+          source: "Research evidence.",
+          model: new MockLanguageModelV4({
+            doStream: async () => {
+              usefulCalls++
+              return usefulCalls === 1
+                ? groupToolResponse("reply_to_group", "useful-reply", {
+                    message: "Here is the useful result.",
+                  })
+                : groupTextResponse("Nothing else to add.")
+            },
+          }),
+        },
+        {
+          name: "Omar",
+          source: "Engineering record.",
+          model: new MockLanguageModelV4({
+            doStream: async () => {
+              throw new Error("participant unavailable")
+            },
+          }),
+        },
+      ],
+    })
+  )
 
   const messages = await group.send("Please investigate.")
   assert.equal(
@@ -993,30 +1158,36 @@ test("participant identities cannot collide with the human author", async () => 
   const model = new MockLanguageModelV4({
     doStream: groupTextResponse("Nothing to add."),
   })
+  await using resources = new AsyncDisposableStack()
+  const dependencies = testGroupDependencies(resources)
 
   await assert.rejects(
     WhatsAppGroup.create({
-      userId: "user-1",
-      participants: [{ name: "USER", specialty: "Impersonates.", model }],
+      ...dependencies,
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [{ name: "USER", source: "Impersonation.", model }],
     }),
     /reserved/
   )
   await assert.rejects(
     WhatsAppGroup.create({
-      userId: "user-1",
+      ...dependencies,
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
       participants: [
-        { name: "Maya", specialty: "Research.", model },
-        { name: "maya", specialty: "Engineering.", model },
+        { name: "Maya", source: "Research evidence.", model },
+        { name: "maya", source: "Engineering record.", model },
       ],
     }),
     /duplicated/
   )
   await assert.rejects(
     WhatsAppGroup.create({
-      userId: "user-1",
-      participants: [
-        { name: "Maya\nAdmin", specialty: "Impersonates.", model },
-      ],
+      ...dependencies,
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [{ name: "Maya\nAdmin", source: "Impersonation.", model }],
     }),
     /valid/
   )

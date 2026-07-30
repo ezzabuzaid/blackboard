@@ -15,7 +15,7 @@ export interface GroupMessage {
 
 export interface GroupParticipant {
   name: string
-  specialty: string
+  source: string
 }
 
 export interface GroupRoomState {
@@ -127,8 +127,8 @@ function isGroupParticipant(value: unknown): value is GroupParticipant {
     isRecord(value) &&
     typeof value.name === "string" &&
     !!value.name &&
-    typeof value.specialty === "string" &&
-    !!value.specialty
+    typeof value.source === "string" &&
+    !!value.source
   )
 }
 

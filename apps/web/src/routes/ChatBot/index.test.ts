@@ -65,7 +65,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
               },
             ]
           : [],
-        participants: [{ name: "Maya", specialty: "Finds evidence." }],
+        participants: [{ name: "Maya", source: "Research evidence." }],
         activity: initialGroupActivity,
         cursor: hasHistory ? 2 : 0,
       })
@@ -96,7 +96,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
             content: "Hello back",
           },
         ],
-        participants: [{ name: "Maya", specialty: "Finds evidence." }],
+        participants: [{ name: "Maya", source: "Research evidence." }],
         activity: initialGroupActivity,
         cursor: 2,
       },
@@ -107,7 +107,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
       chatId: "test-chat",
       initialState: {
         messages: [],
-        participants: [{ name: "Maya", specialty: "Finds evidence." }],
+        participants: [{ name: "Maya", source: "Research evidence." }],
         activity: initialGroupActivity,
         cursor: 0,
       },
@@ -174,7 +174,7 @@ test("room events append in order and ignore reconnect duplicates", () => {
         content: "First",
       },
     ],
-    participants: [{ name: "Maya", specialty: "Finds evidence." }],
+    participants: [{ name: "Maya", source: "Research evidence." }],
     activity: {
       phase: "active",
       notification: 1,

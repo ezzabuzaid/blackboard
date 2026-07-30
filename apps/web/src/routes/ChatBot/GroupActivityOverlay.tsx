@@ -19,7 +19,6 @@ import {
 } from "lucide-react"
 
 import { InfoOverlay } from "../../components/InfoOverlay"
-import { GroupAvatar } from "./GroupAvatar"
 import { useGroupChat } from "./GroupChat"
 import type {
   GroupActivityState,
@@ -52,19 +51,25 @@ export function GroupActivityOverlay() {
       <Separator />
       <ItemGroup className="gap-2 p-3">
         {activity.participants.map((participant) => (
-          <Item key={participant.name} variant="muted" size="sm">
-            <ItemMedia>
-              <GroupAvatar name={participant.name} size="sm" />
+          <Item
+            key={participant.name}
+            variant="muted"
+            size="sm"
+            className="flex-nowrap items-start"
+          >
+            <ItemMedia className="size-6">
+              <ActivityIcon state={participant.state} />
             </ItemMedia>
-            <ItemContent>
+            <ItemContent className="min-w-0">
               <ItemTitle className="capitalize">{participant.name}</ItemTitle>
-              <ItemDescription>
+              <ItemDescription className="line-clamp-1">
                 {stateLabel(participant.state)}
-                {participantSpecialty(participants, participant.name)}
+              </ItemDescription>
+              <ItemDescription className="line-clamp-1">
+                {participantSource(participants, participant.name)}
               </ItemDescription>
             </ItemContent>
-            <ItemActions>
-              <ActivityIcon state={participant.state} />
+            <ItemActions className="shrink-0 self-start">
               <Badge variant="outline">
                 {participant.replies}{" "}
                 {participant.replies === 1 ? "reply" : "replies"}
@@ -103,11 +108,8 @@ function activitySummary(state: GroupActivityState) {
   }`
 }
 
-function participantSpecialty(participants: GroupParticipant[], name: string) {
-  const specialty = participants.find(
-    (participant) => participant.name === name
-  )?.specialty
-  return specialty ? ` · ${specialty}` : ""
+function participantSource(participants: GroupParticipant[], name: string) {
+  return participants.find((participant) => participant.name === name)?.source
 }
 
 function stateLabel(state: ParticipantActivityState) {
