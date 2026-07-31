@@ -27,6 +27,7 @@ import agentSandbox, {
 } from "./agent/sandbox.js"
 import { scheduleTask } from "./agent/tools/schedule-task.js"
 import { createApp, type AppDependencies } from "./app.js"
+import { parseChatGPTTokens } from "./chatgpt.js"
 import type { ListQueuedTurns, QueuedTurn } from "./chat/routes.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import {
@@ -121,6 +122,29 @@ function testApp({
 }
 
 const app = testApp()
+
+test("saved ChatGPT credentials are validated before use", () => {
+  assert.deepEqual(
+    parseChatGPTTokens(
+      JSON.stringify({
+        accessToken: "access",
+        refreshToken: "refresh",
+        accountId: "account",
+        expiresAt: 1,
+      })
+    ),
+    {
+      accessToken: "access",
+      refreshToken: "refresh",
+      accountId: "account",
+      expiresAt: 1,
+    }
+  )
+  assert.throws(
+    () => parseChatGPTTokens('{"accessToken":42}'),
+    /Invalid saved ChatGPT credentials/
+  )
+})
 
 test("health reports the linked agent", async () => {
   const response = await app.request("/api/health")

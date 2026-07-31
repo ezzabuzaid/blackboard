@@ -22,8 +22,11 @@ npm run dev
 ```
 
 The sandbox image command loads Chromium, `agent-browser`, and its
-version-matched skills into Microsandbox's local OCI cache. Set `OPENAI_API_KEY`
-in `.env` before sending a message.
+version-matched skills into Microsandbox's local OCI cache. On the first
+`npm run dev`, open the URL printed by the API and enter its device code to
+connect your ChatGPT subscription. Credentials are saved with owner-only
+permissions under `ZUKHRUF_DATA_DIR`; set `CHATGPT_MODEL` only to override the
+first model available to that account.
 
 ## Checks
 
