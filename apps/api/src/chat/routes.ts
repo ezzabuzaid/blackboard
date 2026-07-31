@@ -20,7 +20,10 @@ export type ListQueuedTurns = (
 ) => Promise<QueuedTurn[]>
 
 export function createChatRoutes(
-  chats: Pick<WhatsAppChatRuntime, "post" | "snapshot" | "stop" | "subscribe">,
+  chats: Pick<
+    WhatsAppChatRuntime,
+    "post" | "snapshot" | "stop" | "subscribe" | "traces"
+  >,
   listQueuedTurns: ListQueuedTurns
 ) {
   return new Hono()
@@ -66,6 +69,20 @@ export function createChatRoutes(
       return context.json({
         turns: await listQueuedTurns(conversation),
       })
+    })
+    .get("/:chatId/agents/:agent/traces", async (context) => {
+      const conversation = conversationFrom(context.req.param("chatId"))
+      if (!conversation) {
+        return context.json({ error: "Invalid chat id." }, 400)
+      }
+
+      const traces = await chats.traces(
+        conversation,
+        context.req.param("agent")
+      )
+      return traces
+        ? context.json(traces)
+        : context.json({ error: "Agent not found." }, 404)
     })
     .get("/:chatId/artifacts/:path{.+}", async (context) => {
       const conversation = conversationFrom(context.req.param("chatId"))

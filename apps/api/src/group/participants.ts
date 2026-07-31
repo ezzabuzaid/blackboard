@@ -9,11 +9,15 @@ const dataDirectory = process.env.ZUKHRUF_DATA_DIR
 if (!dataDirectory) throw new Error("ZUKHRUF_DATA_DIR is required")
 const chatgpt = await createChatGPTSubscription(dataDirectory)
 
-const telemetry = (file: string) => ({
-  integrations: createFileTelemetry({
-    path: resolve(dataDirectory, "group-telemetry", file),
-  }),
-})
+const telemetry = (file: string) => {
+  const tracePath = resolve(dataDirectory, "group-telemetry", file)
+  return {
+    tracePath,
+    telemetry: {
+      integrations: createFileTelemetry({ path: tracePath }),
+    },
+  }
+}
 
 export const whatsappParticipants = [
   {
@@ -25,7 +29,7 @@ export const whatsappParticipants = [
     tools: {
       web_search: chatgpt.webSearch,
     },
-    telemetry: telemetry("0-Maya.jsonl"),
+    ...telemetry("0-Maya.jsonl"),
   },
   {
     name: "Omar",
@@ -33,7 +37,7 @@ export const whatsappParticipants = [
     instructions:
       "You own the durable GTM backlog in /workspace/backlog/backlog.md. Read it before contributing. Keep concrete campaigns, experiments, follow-ups, priorities, next actions, and reported outcomes current. Update it only when the user commits to work, changes a priority, or reports a result; never invent commitments. You may read the business profile for context, but do not modify it.",
     model: chatgpt.model,
-    telemetry: telemetry("1-Omar.jsonl"),
+    ...telemetry("1-Omar.jsonl"),
   },
   {
     name: "Lina",
@@ -41,7 +45,7 @@ export const whatsappParticipants = [
     instructions:
       "You own the durable product-usage source in /workspace/product. Read it before contributing. Maintain evidence about onboarding, activation, feature adoption, retention, product-qualified leads, and customer behavior. Turn product behavior into GTM signals, clearly separating observed data from hypotheses. You may read the business profile and GTM backlog for context, but do not modify them.",
     model: chatgpt.model,
-    telemetry: telemetry("2-Lina.jsonl"),
+    ...telemetry("2-Lina.jsonl"),
   },
   {
     name: "Paul Graham",
@@ -49,6 +53,6 @@ export const whatsappParticipants = [
     instructions:
       "You are a read-only founder advisor grounded in Paul Graham's startup doctrine. Challenge the premise instead of decorating weak plans. Ask whether actual users want even a rough version, focus on the small group with the strongest need, and treat weekly growth rate as the decision compass. Prefer shipping, talking to users, and doing things that do not scale over launch theater, feature accumulation, partnerships, or strategy theater. Speak in plain declarative sentences with one useful observation at a time. Read the business profile, GTM backlog, and product signals when relevant, but never modify any workspace source and never invent company facts.",
     model: chatgpt.model,
-    telemetry: telemetry("3-Paul-Graham.jsonl"),
+    ...telemetry("3-Paul-Graham.jsonl"),
   },
 ] as const satisfies readonly WhatsAppParticipant[]

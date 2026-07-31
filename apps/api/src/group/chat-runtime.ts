@@ -18,6 +18,7 @@ import {
   type WhatsAppParticipant,
   type WhatsAppRoomEvent,
 } from "./whatsapp.js"
+import { readAgentTraces } from "../traces/agent-traces.js"
 
 const CHAT_EVENT_TYPE = "data-whatsapp-chat-event"
 
@@ -85,6 +86,20 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   async stop(conversation: ConversationId) {
     const group = await this.#chat(conversation)
     return group.stop()
+  }
+
+  async traces(conversation: ConversationId, participantName: string) {
+    const participant = this.#participants.find(
+      ({ name }) => name === participantName
+    )
+    if (!participant?.tracePath) return null
+    return {
+      agent: participant.name,
+      turns: await readAgentTraces(
+        participant.tracePath,
+        `${conversation.chatId}:${participant.name}`
+      ),
+    }
   }
 
   async [Symbol.asyncDispose]() {

@@ -18,6 +18,7 @@ import {
   reduceGroupRoom,
   type GroupRoomState,
 } from "./groupMessages"
+import { traceItems } from "./traces/agentTrace"
 import { loader } from "./loader"
 
 test("loader adds a chat id to the URL", async () => {
@@ -266,6 +267,45 @@ test("group activity tracks decisions, replies, and settlement", () => {
       { name: "critic", state: "caught-up", replies: 0 },
     ],
   })
+})
+
+test("trace tool calls include their matching result once", () => {
+  assert.deepEqual(
+    traceItems([
+      {
+        type: "tool-call",
+        toolCallId: "tool-1",
+        toolName: "readFile",
+        title: "[Undefined]",
+        input: { path: "/workspace/business/README.md" },
+      },
+      {
+        type: "tool-result",
+        toolCallId: "tool-1",
+        toolName: "readFile",
+        output: "Business profile",
+      },
+      { type: "tool-result", toolCallId: "orphan", output: "Kept raw" },
+    ]),
+    [
+      {
+        type: "tool",
+        name: "readFile",
+        title: null,
+        input: { path: "/workspace/business/README.md" },
+        output: "Business profile",
+      },
+      {
+        type: "raw",
+        label: "tool-result",
+        value: {
+          type: "tool-result",
+          toolCallId: "orphan",
+          output: "Kept raw",
+        },
+      },
+    ]
+  )
 })
 
 test("group activity preserves failures and cumulative reply counts", () => {

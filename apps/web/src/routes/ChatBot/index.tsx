@@ -8,6 +8,10 @@ import { GroupActivityOverlay } from "./GroupActivityOverlay"
 import { GroupAvatarStack } from "./GroupAvatar"
 import { GroupChatProvider, useGroupChat } from "./GroupChat"
 import { loader } from "./loader"
+import {
+  AgentTraceProvider,
+  AgentTraceSidebar,
+} from "./traces/AgentTraceSidebar"
 
 export { loader }
 
@@ -16,12 +20,15 @@ export default function ChatBot() {
 
   return (
     <GroupChatProvider key={chatId} chatId={chatId} initialState={initialState}>
-      <main className="relative flex h-svh flex-col bg-background">
-        <GroupHeader />
-        <GroupActivityOverlay />
-        <Conversation />
-        <ChatComposer />
-      </main>
+      <AgentTraceProvider>
+        <main className="relative flex h-svh flex-col bg-background">
+          <GroupHeader />
+          <GroupActivityOverlay />
+          <Conversation />
+          <ChatComposer />
+          <AgentTraceSidebar />
+        </main>
+      </AgentTraceProvider>
     </GroupChatProvider>
   )
 }

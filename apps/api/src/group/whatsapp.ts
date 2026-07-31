@@ -29,6 +29,7 @@ export interface WhatsAppParticipant {
   model: AgentModel
   tools?: ToolSet
   telemetry?: AgentDeclaration["telemetry"]
+  tracePath?: string
 }
 
 export interface WhatsAppMessage {

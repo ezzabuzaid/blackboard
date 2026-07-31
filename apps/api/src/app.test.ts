@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -42,6 +42,7 @@ import {
   WhatsAppGroupLimitError,
   type WhatsAppParticipant,
 } from "./group/whatsapp.js"
+import { readAgentTraces } from "./traces/agent-traces.js"
 
 type ChatRuntime = AppDependencies["runtime"]
 
@@ -108,6 +109,9 @@ const unusedRuntime: ChatRuntime = {
   async subscribe() {
     throw new Error("Unexpected subscribe")
   },
+  async traces() {
+    throw new Error("Unexpected traces")
+  },
 }
 
 const noQueuedTurns = async (): Promise<QueuedTurn[]> => []
@@ -154,6 +158,91 @@ test("health reports the linked agent", async () => {
     status: "ok",
     agent: "zukhruf",
   })
+})
+
+test("agent telemetry is grouped into complete chat-scoped turns", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "agent-traces-"))
+  const path = join(directory, "maya.jsonl")
+  const functionId = "room-1:Maya"
+  const entry = (event: string, timestamp: string, data: object) =>
+    JSON.stringify({ event, timestamp, data: { functionId, ...data } })
+
+  try {
+    await writeFile(
+      path,
+      [
+        "not json",
+        entry("onStart", "2026-07-31T10:00:00.000Z", {
+          callId: "call-1",
+          modelId: "gpt-5.6-sol",
+          messages: [{ role: "user", content: "New group message" }],
+        }),
+        JSON.stringify({
+          event: "onEnd",
+          timestamp: "2026-07-31T10:00:01.000Z",
+          data: { functionId: "other-room:Maya", callId: "ignored" },
+        }),
+        entry("onEnd", "2026-07-31T10:00:02.000Z", {
+          callId: "call-1",
+          model: "gpt-5.6-sol",
+          finishReason: "stop",
+          totalUsage: {
+            inputTokens: 100,
+            inputTokenDetails: { cacheReadTokens: 64 },
+            outputTokens: 10,
+            outputTokenDetails: { reasoningTokens: 4 },
+            totalTokens: 110,
+          },
+          steps: [
+            {
+              stepNumber: 0,
+              finishReason: "stop",
+              performance: { responseTimeMs: 123 },
+              usage: { totalTokens: 110 },
+              content: [{ type: "reasoning", text: "Checked context" }],
+            },
+          ],
+        }),
+      ].join("\n")
+    )
+
+    assert.deepEqual(await readAgentTraces(path, functionId), [
+      {
+        callId: "call-1",
+        startedAt: "2026-07-31T10:00:00.000Z",
+        endedAt: "2026-07-31T10:00:02.000Z",
+        modelId: "gpt-5.6-sol",
+        notification: "New group message",
+        status: "completed",
+        finishReason: "stop",
+        usage: {
+          inputTokens: 100,
+          outputTokens: 10,
+          reasoningTokens: 4,
+          cacheReadTokens: 64,
+          totalTokens: 110,
+        },
+        steps: [
+          {
+            stepNumber: 0,
+            finishReason: "stop",
+            responseTimeMs: 123,
+            usage: {
+              inputTokens: 0,
+              outputTokens: 0,
+              reasoningTokens: 0,
+              cacheReadTokens: 0,
+              totalTokens: 110,
+            },
+            content: [{ type: "reasoning", text: "Checked context" }],
+          },
+        ],
+        error: null,
+      },
+    ])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test("group members share one sandbox instance", async () => {

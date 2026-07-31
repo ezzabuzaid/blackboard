@@ -1,4 +1,6 @@
-import { Avatar, AvatarFallback, AvatarGroup, cn } from "@stdlib/shadcn"
+import { Avatar, AvatarFallback, AvatarGroup, Button, cn } from "@stdlib/shadcn"
+
+import { useAgentTraceSelection } from "./traces/AgentTraceSidebar"
 
 export const groupMembers = ["Maya", "Omar", "Lina", "Paul Graham"] as const
 
@@ -48,23 +50,33 @@ export function GroupAvatar({
   size?: "default" | "sm"
   className?: string
 }) {
+  const { select } = useAgentTraceSelection()
   const parts = name.split(/\s+/u)
   const monogram = `${parts[0]?.at(0) ?? ""}${
     (parts.length === 1 ? parts[0]?.at(-1) : parts.at(-1)?.at(0)) ?? ""
   }`.toUpperCase()
 
   return (
-    <Avatar
-      size={size}
-      className={cn("relative z-10 bg-background", className)}
-      title={name}
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label={`View ${name} traces`}
+      className="size-auto rounded-full p-0 focus-visible:ring-offset-2"
+      onClick={() => select(name)}
     >
-      <AvatarFallback
-        className={cn("font-medium uppercase", memberTone(name).avatar)}
+      <Avatar
+        size={size}
+        className={cn("relative z-10 bg-background", className)}
+        title={name}
       >
-        {monogram}
-      </AvatarFallback>
-    </Avatar>
+        <AvatarFallback
+          className={cn("font-medium uppercase", memberTone(name).avatar)}
+        >
+          {monogram}
+        </AvatarFallback>
+      </Avatar>
+    </Button>
   )
 }
 
