@@ -1,5 +1,5 @@
 {
-  "name": "self-delegate",
+  "name": "baseera",
   "version": "0.0.1",
   "private": true,
   "scripts": {
@@ -10,14 +10,14 @@
     "typecheck": "nx run-many -t typecheck"
   },
   "devDependencies": {
-    "nx": "23.1.0",
+    "nx": "23.1.1",
     "prettier": "^3.8.3",
     "prettier-plugin-tailwindcss": "^0.8.0",
     "typescript": "^6"
   },
   "packageManager": "npm@11.12.1",
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.22.0"
   },
   "workspaces": [
     "apps/*",

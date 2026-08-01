@@ -2,7 +2,7 @@ import { redirect, type LoaderFunctionArgs } from "react-router"
 
 import { apiUrl } from "./api"
 import { initialGroupActivity } from "./groupActivity"
-import { isGroupRoomState } from "./groupMessages"
+import { isGroupChatState } from "./groupMessages"
 
 export async function loader({ request }: LoaderFunctionArgs) {
   const url = new URL(request.url)
@@ -24,7 +24,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
     }
 
     const state: unknown = await stateResponse.json()
-    if (!isGroupRoomState(state)) {
+    if (!isGroupChatState(state)) {
       throw new Error("Invalid chat state")
     }
 

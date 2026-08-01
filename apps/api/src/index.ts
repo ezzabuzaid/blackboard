@@ -9,6 +9,7 @@ import { createApp } from "./app.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import { whatsappParticipants } from "./group/participants.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
+import { openArtifact } from "./sandbox.js"
 
 const dataDirectory = process.env.ZUKHRUF_DATA_DIR
 if (!dataDirectory) throw new Error("ZUKHRUF_DATA_DIR is required")
@@ -33,13 +34,14 @@ const runtime = resources.use(
     sandboxForChat: createWhatsAppSandbox(sandboxResources, dataDirectory),
     databasePath: resolve(dataDirectory, "group.sqlite"),
     mailboxPath: resolve(dataDirectory, "mailbox.sqlite"),
-    approvalPath: resolve(dataDirectory, "approval.sqlite"),
   })
 )
 
 const app = createApp({
   runtime,
   listQueuedTurns: async () => [],
+  openArtifact: (conversation, path) =>
+    openArtifact(dataDirectory, conversation, path),
 })
 
 const webRoot = process.env.WEB_ROOT

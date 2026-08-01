@@ -48,7 +48,7 @@ function GroupHeader() {
     <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-card px-3 sm:px-5">
       <GroupAvatarStack members={participants.map(({ name }) => name)} />
       <div className="min-w-0 flex-1">
-        <h1 className="truncate text-sm font-semibold">DeepAgents Group</h1>
+        <h1 className="truncate text-sm font-semibold">Baseera</h1>
         <p
           className="truncate text-xs text-muted-foreground"
           aria-live="polite"

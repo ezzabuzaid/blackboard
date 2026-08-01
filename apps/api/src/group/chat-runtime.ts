@@ -1,12 +1,13 @@
 import { DatabaseSync } from "node:sqlite"
 
 import {
+  PollingChangeSource,
   SqliteContextStore,
   SqliteStreamStore,
+  StreamManager,
   type StreamPart,
 } from "@deepagents/context"
 import {
-  SqliteApprovalMutex,
   SqliteMailboxStore,
   type AgentDeclaration,
   type ConversationId,
@@ -14,9 +15,9 @@ import {
 
 import {
   WhatsAppGroup,
+  type WhatsAppChatEvent,
   type WhatsAppGroupLimits,
   type WhatsAppParticipant,
-  type WhatsAppRoomEvent,
 } from "./whatsapp.js"
 import { readAgentTraces } from "../traces/agent-traces.js"
 
@@ -28,8 +29,8 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   readonly #resources = new AsyncDisposableStack()
   readonly #store: SqliteContextStore
   readonly #streamStore: SqliteStreamStore
+  readonly #streams: StreamManager
   readonly #mailboxStore: SqliteMailboxStore
-  readonly #approvalMutex: SqliteApprovalMutex
   readonly #limits: WhatsAppGroupLimits
   readonly #sandboxForChat: (
     conversation: ConversationId
@@ -43,7 +44,6 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     ) => AgentDeclaration["sandbox"]
     databasePath: string
     mailboxPath: string
-    approvalPath: string
   }) {
     this.#participants = options.participants
     this.#limits = options.limits
@@ -53,11 +53,12 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     this.#resources.defer(() => database.close())
     this.#store = new SqliteContextStore(database)
     this.#streamStore = new SqliteStreamStore(database)
+    this.#streams = new StreamManager({
+      store: this.#streamStore,
+      changeSource: new PollingChangeSource({ reads: this.#streamStore }),
+    })
     this.#mailboxStore = this.#resources.use(
       new SqliteMailboxStore(options.mailboxPath)
-    )
-    this.#approvalMutex = this.#resources.use(
-      new SqliteApprovalMutex(options.approvalPath)
     )
   }
 
@@ -77,7 +78,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   async subscribe(
     conversation: ConversationId,
     after: number,
-    onEvent: (event: WhatsAppRoomEvent) => void | Promise<void>
+    onEvent: (event: WhatsAppChatEvent) => void | Promise<void>
   ) {
     const group = await this.#chat(conversation)
     return group.subscribe({ after, onEvent })
@@ -153,9 +154,8 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       participants,
       sandbox: this.#sandboxForChat(conversation),
       store: this.#store,
-      streamStore: this.#streamStore,
+      streams: this.#streams,
       mailboxStore: this.#mailboxStore,
-      approvalMutex: this.#approvalMutex,
       events,
       limits: this.#limits,
       persist: (event) =>
@@ -184,7 +184,7 @@ function chatEvent(part: StreamPart, sequence: number, createdAt: number) {
   ) {
     throw new Error(`Invalid WhatsApp chat event at sequence ${sequence}`)
   }
-  const event = part.data as WhatsAppRoomEvent
+  const event = part.data as WhatsAppChatEvent
   if (event.type !== "message") return event
 
   return {

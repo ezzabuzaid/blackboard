@@ -9,15 +9,15 @@ import {
 import { apiUrl } from "./api"
 import {
   addGroupMessage,
+  isGroupChatEvent,
+  isGroupChatState,
   isGroupMessage,
-  isGroupRoomEvent,
-  isGroupRoomState,
-  reduceGroupRoom,
-  type GroupRoomState,
+  reduceGroupChat,
+  type GroupChatState,
   type GroupMessage,
 } from "./groupMessages"
 
-interface GroupChat extends GroupRoomState {
+interface GroupChat extends GroupChatState {
   chatId: string
   posting: boolean
   stopping: boolean
@@ -40,7 +40,7 @@ export function useGroupChat() {
 
 interface GroupChatProviderProps extends PropsWithChildren {
   chatId: string
-  initialState: GroupRoomState
+  initialState: GroupChatState
 }
 
 export function GroupChatProvider({
@@ -48,7 +48,7 @@ export function GroupChatProvider({
   initialState,
   children,
 }: GroupChatProviderProps) {
-  const [room, setRoom] = useState(initialState)
+  const [chat, setChat] = useState(initialState)
   const [posting, setPosting] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null)
@@ -61,8 +61,8 @@ export function GroupChatProvider({
     const receive = ({ data }: MessageEvent<string>) => {
       try {
         const event: unknown = JSON.parse(data)
-        if (isGroupRoomEvent(event)) {
-          setRoom((current) => reduceGroupRoom(current, event))
+        if (isGroupChatEvent(event)) {
+          setChat((current) => reduceGroupChat(current, event))
         }
       } catch {
         // A malformed event cannot advance the cursor.
@@ -95,7 +95,7 @@ export function GroupChatProvider({
       if (!response.ok || !message) {
         throw new Error("The group could not receive your message.")
       }
-      setRoom((current) => ({
+      setChat((current) => ({
         ...current,
         messages: addGroupMessage(current.messages, message),
       }))
@@ -121,10 +121,10 @@ export function GroupChatProvider({
         { method: "POST" }
       )
       const state: unknown = await response.json()
-      if (!response.ok || !isGroupRoomState(state)) {
+      if (!response.ok || !isGroupChatState(state)) {
         throw new Error("The group could not be stopped.")
       }
-      setRoom(state)
+      setChat(state)
     } catch (cause) {
       const nextError =
         cause instanceof Error
@@ -140,7 +140,7 @@ export function GroupChatProvider({
   return (
     <GroupChatContext.Provider
       value={{
-        ...room,
+        ...chat,
         chatId,
         posting,
         stopping,

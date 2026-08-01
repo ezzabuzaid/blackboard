@@ -1,16 +1,16 @@
 # Group Chat Roadmap
 
-This roadmap turns the five-agent WhatsApp demo into a real multi-author room.
+This roadmap turns the five-agent WhatsApp demo into a real multi-author chat.
 Each phase has its own executable checklist and acceptance criteria.
 
 ## Locked decisions
 
-- `WhatsAppGroup` becomes one room actor with one notification pump per chat.
+- `WhatsAppGroup` becomes one chat actor with one notification pump per chat.
 - Human messages and agent replies are public immediately.
 - A human can post while agents are still working.
 - The final group UI does not use `useChat`, `DefaultChatTransport`, or a custom
   AI SDK `ChatTransport`.
-- The browser uses ordinary HTTP for posting and native SSE for room events.
+- The browser uses ordinary HTTP for posting and native SSE for chat events.
 - AI SDK remains responsible for models and tools on the API.
 - Agents keep independent decisions; there is no manager or speaker selector.
 - Mailbox delivery into active agent turns is deferred until Phase 3.
@@ -19,11 +19,9 @@ Each phase has its own executable checklist and acceptance criteria.
 ## Phases
 
 1. [Activity overlay](./phase-0-activity-overlay.md) - complete.
-2. [Room pump](./phase-1-room-pump.md) - complete.
-3. [Room HTTP and client](./phase-2-room-http-client.md) - complete.
-4. [Mailbox awareness](./phase-3-mailbox-awareness.md) - complete for
-   between-step delivery; #429 remains open for simultaneous first-step
-   replies.
+2. [Chat pump](./phase-1-chat-pump.md) - complete.
+3. [Chat HTTP and client](./phase-2-chat-http-client.md) - complete.
+4. [Mailbox awareness](./phase-3-mailbox-awareness.md) - complete.
 5. [Durability and controls](./phase-4-durability-controls.md) - restart-safe
    history, reconnect, new-group UX, cancellation, limits, and failure
    isolation.

@@ -10,7 +10,7 @@ export default defineInstructions(
       "`schedule_task` queues work in this conversation and cannot run until the current turn finishes. Do not wait for, assume, or invent the scheduled result.",
       "When a turn begins with `Self-scheduled task:`, execute that phase autonomously using the conversation context and workspace. Inspect its result, then schedule the next required phase if work remains. Do not schedule the same phase again.",
       "Do not schedule vague, redundant, unnecessary, unverifiable, or already completed work. Stop scheduling when every requirement is complete and verified, or when a blocker requires user input. Do not claim the overall request is complete while a required phase remains.",
-      "For interactive HTML or SVG artifacts, verify behavior with `agent-browser` before reporting completion. Use `agent-browser --cdp 9222` for every browser command: open `file:///workspace/output/<file>`, capture relevant state, exercise the primary interaction, wait if needed, confirm an observable state change, inspect `errors`, then `close`. Loading without errors or reviewing source alone is not verification. Run `agent-browser skills get core` when you need its version-matched command guide.",
+      "Write artifacts under /workspace/output and link them with file:///workspace/output/<path>.",
       "Say when you do not know something.",
     ].join("\n")
   )

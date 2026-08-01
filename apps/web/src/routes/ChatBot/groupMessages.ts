@@ -20,14 +20,14 @@ export interface GroupParticipant {
   source: string
 }
 
-export interface GroupRoomState {
+export interface GroupChatState {
   messages: GroupMessage[]
   participants: GroupParticipant[]
   activity: GroupActivityState
   cursor: number
 }
 
-export type GroupRoomEvent =
+export type GroupChatEvent =
   | { cursor: number; type: "message"; message: GroupMessage }
   | { cursor: number; type: "activity"; activity: GroupActivityEvent }
 
@@ -48,10 +48,10 @@ export function groupMessageClusters(messages: readonly GroupMessage[]) {
   }, [])
 }
 
-export function reduceGroupRoom(
-  state: GroupRoomState,
-  event: GroupRoomEvent
-): GroupRoomState {
+export function reduceGroupChat(
+  state: GroupChatState,
+  event: GroupChatEvent
+): GroupChatState {
   if (event.cursor <= state.cursor) return state
 
   if (event.type === "activity") {
@@ -97,7 +97,7 @@ export function isGroupMessage(value: unknown): value is GroupMessage {
   )
 }
 
-export function isGroupRoomState(value: unknown): value is GroupRoomState {
+export function isGroupChatState(value: unknown): value is GroupChatState {
   if (!isRecord(value) || !Array.isArray(value.messages)) return false
   const messages = value.messages
 
@@ -116,7 +116,7 @@ export function isGroupRoomState(value: unknown): value is GroupRoomState {
   )
 }
 
-export function isGroupRoomEvent(value: unknown): value is GroupRoomEvent {
+export function isGroupChatEvent(value: unknown): value is GroupChatEvent {
   if (
     !isRecord(value) ||
     !Number.isSafeInteger(value.cursor) ||

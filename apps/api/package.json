@@ -6,23 +6,21 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --env-file=.env --import tsx --watch src/index.ts",
-    "sandbox-image": "sh sandbox/build-image.sh",
     "start": "node --env-file=.env dist/index.js",
     "test": "node --test dist/app.test.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.23",
-    "@deepagents/context": "5.0.0",
-    "@deepagents/experimental": "5.0.0",
+    "@deepagents/context": "6.0.0",
+    "@deepagents/experimental": "6.0.0",
     "@electric-sql/pglite": "0.5.4",
     "@godaddy/terminus": "^4.12.1",
-    "@hono/node-server": "1.19.14",
+    "@hono/node-server": "2.0.12",
     "@opencoredev/loginwithchatgpt-core": "0.2.0",
     "ai": "7.0.41",
     "hono": "4.12.31",
     "just-bash": "3.1.0",
-    "microsandbox": "^0.6.7",
     "pg-boss": "12.26.1"
   },
   "devDependencies": {

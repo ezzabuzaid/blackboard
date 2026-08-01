@@ -16,8 +16,8 @@ import {
 import {
   addGroupMessage,
   groupMessageClusters,
-  reduceGroupRoom,
-  type GroupRoomState,
+  reduceGroupChat,
+  type GroupChatState,
 } from "./groupMessages"
 import { traceItems } from "./traces/agentTrace"
 import { loader } from "./loader"
@@ -184,8 +184,8 @@ test("group messages cluster only consecutive messages from one author", () => {
   )
 })
 
-test("room events append in order and ignore reconnect duplicates", () => {
-  const hydrated: GroupRoomState = {
+test("chat events append in order and ignore reconnect duplicates", () => {
+  const hydrated: GroupChatState = {
     messages: [
       {
         id: "message-1",
@@ -218,10 +218,10 @@ test("room events append in order and ignore reconnect duplicates", () => {
       replyToMessageId: "message-1",
     },
   }
-  const withReply = reduceGroupRoom(hydrated, reply)
+  const withReply = reduceGroupChat(hydrated, reply)
 
   assert.deepEqual(withReply.messages, [...hydrated.messages, reply.message])
-  assert.strictEqual(reduceGroupRoom(withReply, reply), withReply)
+  assert.strictEqual(reduceGroupChat(withReply, reply), withReply)
   assert.deepEqual(
     addGroupMessage(withReply.messages, {
       id: "message-2",

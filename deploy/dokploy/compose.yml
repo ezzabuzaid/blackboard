@@ -10,8 +10,6 @@ services:
       WEB_ORIGIN: ${WEB_ORIGIN:?WEB_ORIGIN is required}
       WEB_ROOT: /app/apps/web/dist
       ZUKHRUF_DATA_DIR: /data/zukhruf
-    devices:
-      - /dev/kvm:/dev/kvm
     volumes:
       - data:/data
     healthcheck:
@@ -28,4 +26,4 @@ services:
 volumes:
   data:
     external: true
-    name: warrome-data
+    name: baseera-data

@@ -1,10 +1,10 @@
-# Phase 2: Room HTTP and Client
+# Phase 2: Chat HTTP and Client
 
 Status: Complete
 
 ## Goal
 
-Replace the single-assistant request-response lifecycle with a multi-author room
+Replace the single-assistant request-response lifecycle with a multi-author chat
 connection while keeping the existing conversation presentation components.
 
 ## API contract
@@ -15,23 +15,23 @@ connection while keeping the existing conversation presentation components.
   - current activity state
   - the latest event cursor
 - [x] Add `GET /api/chat/:chatId/events`.
-- [x] Stream native SSE events with an SSE id matching the room sequence.
+- [x] Stream native SSE events with an SSE id matching the chat sequence.
 - [x] Support an initial `after` cursor and `Last-Event-ID` reconnect.
 - [x] Replay events after the cursor before subscribing to new events.
 - [x] Add `POST /api/chat/:chatId/messages`.
 - [x] Validate message id and non-empty content at the HTTP trust boundary.
 - [x] Make repeated client message ids idempotent.
 - [x] Return the accepted public message immediately; do not wait for agents.
-- [x] Keep the SSE connection open while the room is idle.
+- [x] Keep the SSE connection open while the chat is idle.
 - [x] Remove the group path's AI SDK `UIMessageStream` response.
 - [x] Remove the root `POST /api/chat` route when no remaining caller uses it.
 
 ## Browser state
 
-- [x] Replace `useChat` with a room-specific `useGroupChat` hook.
+- [x] Replace `useChat` with a chat-specific `useGroupChat` hook.
 - [x] Hydrate ordered messages and the cursor from the route loader.
-- [x] Open one native `EventSource` per selected room.
-- [x] Reduce message and activity events into room state by sequence.
+- [x] Open one native `EventSource` per selected chat.
+- [x] Reduce message and activity events into chat state by sequence.
 - [x] Ignore duplicate events after reconnect.
 - [x] Close the old `EventSource` when the chat id changes or the component
       unmounts.
@@ -39,7 +39,7 @@ connection while keeping the existing conversation presentation components.
 - [x] Clear the draft after the message POST is accepted.
 - [x] Keep the composer enabled while agents are considering or replying.
 - [x] Disable only for an empty draft or the short message POST operation.
-- [x] Render human-authored room messages on the user side and agent messages
+- [x] Render human-authored chat messages on the user side and agent messages
       on the group side.
 - [x] Show human names, derived initials, and specialties instead of raw role
       identifiers.
@@ -50,7 +50,7 @@ connection while keeping the existing conversation presentation components.
 - [x] Remove `DefaultChatTransport` and `chatTransport`.
 - [x] Remove group usage of `ChatSession` and AI SDK `UseChatHelpers`.
 - [x] Remove `GroupUIMessage` and `data-groupMessage` transcript projection
-      after the room message model replaces them.
+      after the chat message model replaces them.
 - [x] Remove resume logic that assumes one active assistant response.
 - [x] Preserve artifact URL rendering only if group participants still publish
       artifacts.
@@ -63,12 +63,12 @@ connection while keeping the existing conversation presentation components.
 - [x] Posting while agents work renders the human message immediately.
 - [x] A fast agent reply renders before a slow agent finishes.
 - [x] The composer accepts another message while activity is live.
-- [x] Switching rooms disconnects the old stream and clears old activity.
+- [x] Switching chats disconnects the old stream and clears old activity.
 - [x] Visually verify desktop layout, scrolling, reconnect, and intervention.
 
 ## Acceptance criteria
 
 - [x] The group screen no longer imports `useChat` or `ChatTransport`.
-- [x] The page behaves as one room connection, not one response stream per
+- [x] The page behaves as one chat connection, not one response stream per
       human message.
 - [x] Human and agent messages share one ordered public transcript.

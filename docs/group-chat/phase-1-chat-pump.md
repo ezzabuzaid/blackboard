@@ -1,8 +1,8 @@
-# Phase 1: Single Room Pump
+# Phase 1: Single Chat Pump
 
 ## Goal
 
-Make `WhatsAppGroup` an event-driven room where every public message appears
+Make `WhatsAppGroup` an event-driven chat where every public message appears
 immediately and one pump owns all participant notification work.
 
 Status: Complete
@@ -31,12 +31,12 @@ Use stable human names as the Zukhruf declaration identity and keep the role in
 - [x] Prove that agent replies posted during a batch are delivered exactly once
       in the next batch.
 - [x] Prove only one pump drains the pending inbox when posts overlap.
-- [x] Prove the room settles only after both the inbox and active participant
+- [x] Prove the chat settles only after both the inbox and active participant
       batch are empty.
 
-## Room model
+## Chat model
 
-- [x] Replace the per-call `send()` loop with one room-owned pending inbox.
+- [x] Replace the per-call `send()` loop with one chat-owned pending inbox.
 - [x] Add one `post()` path used by both humans and `reply_to_group`.
 - [x] Give every public message:
   - a stable id
@@ -44,7 +44,7 @@ Use stable human names as the Zukhruf declaration identity and keep the role in
   - an author
   - content
 - [x] Append a message to the transcript before scheduling agent work.
-- [x] Notify room subscribers immediately after appending the message.
+- [x] Notify chat subscribers immediately after appending the message.
 - [x] Add the same message to the pending notification inbox.
 - [x] Start the pump only when it is not already running.
 - [x] Drain one immutable notification batch at a time.
@@ -68,6 +68,6 @@ Use stable human names as the Zukhruf declaration identity and keep the role in
 
 - [x] Public reply latency is determined by the replying participant, not the
       slowest participant in the batch.
-- [x] Human messages never wait for the room to settle before becoming public.
+- [x] Human messages never wait for the chat to settle before becoming public.
 - [x] No overlapping caller can drain another caller's replies.
 - [x] The original concurrent, voluntary, no-manager behavior remains intact.

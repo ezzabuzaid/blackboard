@@ -1,10 +1,9 @@
 import type { ConversationId, TurnRef } from "@deepagents/experimental/zukhruf"
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
-import { stream, streamSSE } from "hono/streaming"
+import { streamSSE } from "hono/streaming"
 import { getMimeType } from "hono/utils/mime"
 
-import { openArtifact } from "../agent/sandbox.js"
 import type { WhatsAppChatRuntime } from "../group/chat-runtime.js"
 import {
   WhatsAppGroupLimitError,
@@ -22,12 +21,18 @@ export type ListQueuedTurns = (
   conversation: ConversationId
 ) => Promise<QueuedTurn[]>
 
+export type OpenArtifact = (
+  conversation: ConversationId,
+  path: string
+) => Promise<{ body: Uint8Array<ArrayBuffer>; size: number } | null>
+
 export function createChatRoutes(
   chats: Pick<
     WhatsAppChatRuntime,
     "post" | "snapshot" | "stop" | "subscribe" | "traces"
   >,
-  listQueuedTurns: ListQueuedTurns
+  listQueuedTurns: ListQueuedTurns,
+  openArtifact: OpenArtifact
 ) {
   return new Hono()
     .get("/:chatId/state", async (context) => {
@@ -44,7 +49,7 @@ export function createChatRoutes(
         context.req.header("Last-Event-ID") ?? context.req.query("after") ?? "0"
       )
       if (!conversation || after === null) {
-        return context.json({ error: "Invalid room event cursor." }, 400)
+        return context.json({ error: "Invalid chat event cursor." }, 400)
       }
 
       return streamSSE(context, async (output) => {
@@ -110,12 +115,7 @@ export function createChatRoutes(
       context.header("Content-Length", String(artifact.size))
       context.header("X-Content-Type-Options", "nosniff")
 
-      return stream(context, async (output) => {
-        await using body = artifact.body
-        for await (const chunk of body) {
-          await output.write(chunk)
-        }
-      })
+      return context.body(artifact.body)
     })
     .post("/:chatId/stop", async (context) => {
       const conversation = conversationFrom(context.req.param("chatId"))
@@ -130,7 +130,7 @@ export function createChatRoutes(
       bodyLimit({
         maxSize: 10 * 1024,
         onError: (context) =>
-          context.json({ error: "Room message is too large." }, 413),
+          context.json({ error: "Chat message is too large." }, 413),
       }),
       async (context) => {
         const conversation = conversationFrom(context.req.param("chatId"))
@@ -158,7 +158,7 @@ export function createChatRoutes(
               !replyToMessageId.trim() ||
               replyToMessageId.length > 200))
         ) {
-          return context.json({ error: "Invalid room message." }, 400)
+          return context.json({ error: "Invalid chat message." }, 400)
         }
 
         try {

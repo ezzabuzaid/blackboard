@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-project_name=WarRome
-compose_name=self-delegate
-volume_name=warrome-data
+project_name=Baseera
+compose_name=baseera
+volume_name=baseera-data
 dokploy_url=${DOKPLOY_URL:-https://dokploy.limerence.sh}
 ssh_host=${DOKPLOY_SSH_HOST:-root@167.233.88.12}
 chatgpt_model=${CHATGPT_MODEL:-gpt-5.6-sol}
@@ -11,7 +11,7 @@ token_file=${CHATGPT_TOKEN_FILE:-apps/api/.data/zukhruf/chatgpt.json}
 deploy_domain=${DEPLOY_DOMAIN:-}
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 compose_file=$root/deploy/dokploy/compose.yml
-temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/warrome-deploy.XXXXXX")
+temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/baseera-deploy.XXXXXX")
 smoke_container=
 smoke_volume=
 
@@ -31,10 +31,14 @@ fail() {
   exit 1
 }
 
-for command in curl git jq npx ssh tar; do
+for command in curl git jq node npx ssh tar; do
   command -v "$command" >/dev/null || fail "$command is required"
 done
 
+if [[ -z ${DOKPLOY_API_KEY:-} && -f $root/apps/api/.env ]]; then
+  DOKPLOY_API_KEY=$(node --env-file="$root/apps/api/.env" \
+    --print 'process.env.DOKPLOY_API_KEY ?? ""')
+fi
 [[ -n ${DOKPLOY_API_KEY:-} ]] || fail "DOKPLOY_API_KEY is required"
 [[ -s $token_file ]] || fail "ChatGPT credentials not found at $token_file"
 
@@ -54,16 +58,6 @@ run_logged() {
   printf '✓ %s\n' "$label"
 }
 
-unwrap() {
-  jq -er '
-    if .error then
-      error(.error.json.message // .error.message // "Dokploy request failed")
-    else
-      .result.data.json
-    end
-  '
-}
-
 dokploy_post() {
   local procedure=$1
   local payload=$2
@@ -72,77 +66,74 @@ dokploy_post() {
     --request POST "$dokploy_url/api/$procedure" \
     --header "x-api-key: $DOKPLOY_API_KEY" \
     --header 'content-type: application/json' \
-    --data "$(jq -cn --argjson payload "$payload" '{json:$payload}')"); then
+    --data "$payload"); then
     printf '%s\n' "$response" | jq -r '.error.json.message // .message // .' >&2 2>/dev/null || true
     return 1
   fi
-  printf '%s\n' "$response" | unwrap
+  printf '%s\n' "$response"
 }
 
 dokploy_query() {
   local procedure=$1
   local payload=${2:-}
-  local url=$dokploy_url/api/trpc/$procedure
+  local url=$dokploy_url/api/$procedure
   local response
   if [[ -n $payload ]]; then
-    local input
-    input=$(jq -cn --argjson payload "$payload" '{json:$payload}' \
-      | jq -Rr @uri)
-    url="$url?input=$input"
+    local query
+    query=$(printf '%s\n' "$payload" | jq -r \
+      'to_entries | map("\(.key)=\(.value | tostring | @uri)") | join("&")')
+    url="$url?$query"
   fi
   if ! response=$(curl --silent --show-error --fail-with-body \
     "$url" --header "x-api-key: $DOKPLOY_API_KEY"); then
     printf '%s\n' "$response" | jq -r '.error.json.message // .message // .' >&2 2>/dev/null || true
     return 1
   fi
-  printf '%s\n' "$response" | unwrap
+  printf '%s\n' "$response"
 }
 
 cd "$root"
 
-run_logged "api typecheck" npx nx run api:typecheck
-run_logged "web typecheck" npx nx run web:typecheck
-run_logged "api tests" npx nx run api:test
-run_logged "web tests" npx nx run web:test
+if [[ -n ${BASEERA_IMAGE:-} ]]; then
+  [[ $BASEERA_IMAGE =~ ^baseera:[[:alnum:]_.-]+$ ]] \
+    || fail "BASEERA_IMAGE must be a baseera image tag"
+  image=$BASEERA_IMAGE
+  deployment_id=${image#baseera:}
+  ssh "$ssh_host" docker image inspect "$image" >/dev/null \
+    || fail "$image does not exist on $ssh_host"
+  printf '✓ using remote image %s\n' "$image"
+else
+  run_logged "api typecheck" npx nx run api:typecheck
+  run_logged "web typecheck" npx nx run web:typecheck
+  run_logged "api tests" npx nx run api:test
+  run_logged "web tests" npx nx run web:test
 
-remote_arch=$(ssh "$ssh_host" uname -m)
-case $remote_arch in
-  x86_64 | aarch64 | arm64) ;;
-  *) fail "unsupported Dokploy host architecture: $remote_arch" ;;
-esac
+  deployment_id=$(printf '%s-%s' \
+    "$(git rev-parse --short=12 HEAD)" "$(date -u +%Y%m%d%H%M%S)")
+  image=baseera:$deployment_id
 
-ssh "$ssh_host" 'test -r /dev/kvm && test -w /dev/kvm' \
-  || fail "/dev/kvm is not usable on $ssh_host"
-
-deployment_id=$(printf '%s-%s' \
-  "$(git rev-parse --short=12 HEAD)" "$(date -u +%Y%m%d%H%M%S)")
-image=warrome:$deployment_id
-
-printf '→ build container on Dokploy host\n'
-build_log=$temp_dir/remote_container_build.log
-if ! tar \
-  --exclude .git \
-  --exclude .nx \
-  --exclude .data \
-  --exclude dist \
-  --exclude node_modules \
-  -cf - . \
-  | ssh "$ssh_host" "docker build --file deploy/dokploy/Dockerfile --tag '$image' -" \
-    >"$build_log" 2>&1; then
-  tail -n 100 "$build_log" >&2
-  fail "remote container build failed"
+  printf '→ build container on Dokploy host\n'
+  build_log=$temp_dir/remote_container_build.log
+  if ! tar \
+    --exclude .git \
+    --exclude .nx \
+    --exclude .data \
+    --exclude dist \
+    --exclude node_modules \
+    -cf - . \
+    | ssh "$ssh_host" "docker build --file deploy/dokploy/Dockerfile --tag '$image' -" \
+      >"$build_log" 2>&1; then
+    tail -n 100 "$build_log" >&2
+    fail "remote container build failed"
+  fi
+  printf '✓ build container on Dokploy host\n'
 fi
-printf '✓ build container on Dokploy host\n'
 
-printf '→ remote Microsandbox/KVM smoke test\n'
-ssh "$ssh_host" "docker run --rm --device /dev/kvm '$image' node --input-type=module --eval 'import { Sandbox } from \"microsandbox\"; await using sandbox = await Sandbox.builder(\"warrome-deploy-check\").image(\"alpine\").ephemeral(true).create(); const output = await sandbox.shell(\"printf ready\"); if (output.stdout() !== \"ready\") process.exit(1)'" >/dev/null
-printf '✓ remote Microsandbox/KVM smoke test\n'
-
-smoke_container=warrome-smoke-$deployment_id
-smoke_volume=warrome-smoke-$deployment_id
+smoke_container=baseera-smoke-$deployment_id
+smoke_volume=baseera-smoke-$deployment_id
 ssh "$ssh_host" "docker volume create '$smoke_volume'" >/dev/null
 ssh "$ssh_host" "docker run --rm -i --volume '$smoke_volume:/data' '$image' sh -ceu 'umask 077; mkdir -p /data/zukhruf; cat > /data/zukhruf/chatgpt.json'" <"$token_file"
-ssh "$ssh_host" "docker run --detach --rm --name '$smoke_container' --device /dev/kvm --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' '$image'" >/dev/null
+ssh "$ssh_host" "docker run --detach --rm --name '$smoke_container' --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' '$image'" >/dev/null
 for _ in {1..30}; do
   if ssh "$ssh_host" "docker exec '$smoke_container' node --input-type=module --eval 'const [health, html] = await Promise.all([fetch(\"http://127.0.0.1:3001/api/health\"), fetch(\"http://127.0.0.1:3001/\")]); if (!health.ok || !(await html.text()).includes(\"<div id=\\\"root\\\"></div>\")) process.exit(1)'" >/dev/null 2>&1; then
     break
@@ -168,7 +159,7 @@ project_count=$(printf '%s\n' "$projects" | jq --arg name "$project_name" '[.[] 
 if [[ $project_count -eq 0 ]]; then
   created=$(dokploy_post project.create "$(jq -cn \
     --arg name "$project_name" \
-    '{name:$name,description:"One-off self-delegate deployment"}')")
+    '{name:$name,description:"One-off Baseera deployment"}')")
   project=$(printf '%s\n' "$created" | jq '.project')
   environment=$(printf '%s\n' "$created" | jq '.environment')
   printf '✓ created Dokploy project %s\n' "$project_name"
@@ -190,7 +181,7 @@ if [[ $compose_count -eq 0 ]]; then
     --arg name "$compose_name" \
     --arg environmentId "$environment_id" \
     --arg composeFile "$raw_compose" \
-    '{name:$name,description:"WarRome app",environmentId:$environmentId,composeType:"docker-compose",composeFile:$composeFile}')")
+    '{name:$name,description:"Baseera app",environmentId:$environmentId,composeType:"docker-compose",composeFile:$composeFile}')")
   printf '✓ created Dokploy compose service %s\n' "$compose_name"
 fi
 
@@ -205,7 +196,7 @@ if [[ -z $deploy_domain ]]; then
   deploy_domain=$(printf '%s\n' "$domains" \
     | jq -r '[.[] | select(.serviceName == "app" and .path == "/")] | first | .host // empty')
   if [[ -z $deploy_domain ]]; then
-    deploy_domain=$(dokploy_post domain.generateDomain '{"appName":"warrome"}' | jq -er '.')
+    deploy_domain=$(dokploy_post domain.generateDomain '{"appName":"baseera"}' | jq -er '.')
   fi
 fi
 web_origin=https://$deploy_domain
@@ -228,7 +219,7 @@ else
   dokploy_post domain.update "$(printf '%s\n' "$domain_payload" | jq --arg domainId "$domain_id" '. + {domainId:$domainId} | del(.composeId)')" >/dev/null
 fi
 
-title="WarRome $deployment_id"
+title="Baseera $deployment_id"
 dokploy_post compose.deploy "$(jq -cn \
   --arg composeId "$compose_id" \
   --arg title "$title" \

@@ -3,14 +3,13 @@ import { randomUUID } from "node:crypto"
 import {
   type AgentModel,
   type ContextStore,
-  type StreamStore,
+  type StreamManager,
   role,
 } from "@deepagents/context"
 import {
   AgentRuntime,
   MessageDeliveryMode,
   PgBossTurnQueue,
-  type ApprovalMutex,
   type AgentDeclaration,
   type ConversationId,
   type MailboxStore,
@@ -91,7 +90,7 @@ export interface WhatsAppGroupActivityState {
   presence: { name: string; state: WhatsAppParticipantPresence }[]
 }
 
-export type WhatsAppRoomEvent =
+export type WhatsAppChatEvent =
   | { cursor: number; type: "message"; message: WhatsAppMessage }
   | {
       cursor: number
@@ -117,15 +116,14 @@ export interface WhatsAppGroupOptions {
   participants: readonly WhatsAppParticipant[]
   sandbox: AgentDeclaration["sandbox"]
   store: ContextStore
-  streamStore: StreamStore
+  streams: StreamManager
   mailboxStore: MailboxStore
-  approvalMutex: ApprovalMutex
-  events: WhatsAppRoomEvent[]
+  events: WhatsAppChatEvent[]
   limits: WhatsAppGroupLimits
-  persist: (event: WhatsAppRoomEvent) => void | Promise<void>
+  persist: (event: WhatsAppChatEvent) => void | Promise<void>
   onMessage?: (message: WhatsAppMessage) => void | Promise<void>
   onActivity?: (activity: WhatsAppGroupActivity) => void | Promise<void>
-  onEvent?: (event: WhatsAppRoomEvent) => void | Promise<void>
+  onEvent?: (event: WhatsAppChatEvent) => void | Promise<void>
 }
 
 export class WhatsAppGroupLimitError extends Error {
@@ -147,8 +145,18 @@ interface RunningParticipant {
   conversation: ConversationId
   runtime: AgentRuntime
   active: boolean
+  seenThroughSequence: number
   turnId?: string
 }
+
+type WhatsAppReplyResult =
+  | { posted: true }
+  | { posted: false; reason: "stopped" | "limit" }
+  | {
+      posted: false
+      reason: "transcript_changed"
+      messages: WhatsAppMessage[]
+    }
 
 interface GroupSubscriber extends Pick<
   WhatsAppGroupOptions,
@@ -165,7 +173,7 @@ export class WhatsAppGroup implements AsyncDisposable {
   readonly #subscribers = new Set<GroupSubscriber>()
   readonly #messages: WhatsAppMessage[] = []
   readonly #messagesById = new Map<string, WhatsAppMessage>()
-  readonly #events: WhatsAppRoomEvent[] = []
+  readonly #events: WhatsAppChatEvent[] = []
   readonly #pending: WhatsAppMessage[] = []
   readonly #mailboxRecipients = new Map<string, Set<string>>()
   readonly #replyCounts = new Map<string, number>()
@@ -243,12 +251,13 @@ export class WhatsAppGroup implements AsyncDisposable {
       author: string,
       content: string,
       replyToMessageId?: string
-    ) => Promise<boolean>
+    ) => Promise<WhatsAppReplyResult>
 
     await boss.start()
     for (const [index, participant] of options.participants.entries()) {
       const queue = new PgBossTurnQueue(boss, {
         queue: `zukhruf-whatsapp-${index}`,
+        schema: "pgboss",
         pollingIntervalSeconds: 0.5,
       })
       await queue.initialize()
@@ -268,7 +277,10 @@ export class WhatsAppGroup implements AsyncDisposable {
                 "Read them and decide autonomously whether to participate.",
                 "For casual or social messages, you may respond briefly; silence is also natural, and the group should not answer in chorus.",
                 "For substantive messages, reply only when your owned data source gives you something useful and non-duplicative to add.",
+                `When the user explicitly asks for exactly one answer, only the named participant may reply; if nobody is named, only ${options.participants[0]!.name} may reply. Every other participant must stay silent.`,
+                "A short, unaddressed user follow-up or acknowledgment belongs to the participant who authored the immediately preceding public reply. If that was not you, stay silent. An explicit participant name or request to the whole group overrides this.",
                 "If yes, call reply_to_group with the concise message you want everyone to see.",
+                "If reply_to_group reports transcript_changed, reconsider the new messages and either retry with a distinct contribution or remain silent.",
                 "If no, do not call reply_to_group. Do not reply merely to agree, repeat, or announce silence.",
                 "Your ordinary assistant text is private and never appears in the group.",
               ].join(" ")
@@ -296,30 +308,27 @@ export class WhatsAppGroup implements AsyncDisposable {
                     minLength: 1,
                     maxLength: 200,
                     description:
-                      "The exact group message id when directly replying to one message.",
+                      "Optional UI pointer to one earlier public message. Omit replyToMessageId by default. Set it only to emphasize a particular earlier message or when directly replying to another participant's message. Do not set it merely because your contribution answers the latest user message or continues the current discussion.",
                   },
                 },
                 required: ["message"],
                 additionalProperties: false,
               }),
               execute: async ({ message, replyToMessageId }) => {
-                return {
-                  posted: await publishReply(
-                    participant.name,
-                    message.trim(),
-                    replyToMessageId
-                  ),
-                }
+                return publishReply(
+                  participant.name,
+                  message.trim(),
+                  replyToMessageId
+                )
               },
             }),
           },
         }),
         {
           store: options.store,
-          streamStore: options.streamStore,
+          streams: options.streams,
           queue,
           mailboxStore: options.mailboxStore,
-          approvalMutex: options.approvalMutex,
         }
       )
 
@@ -331,6 +340,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         },
         runtime,
         active: false,
+        seenThroughSequence: 0,
       })
       resources.use(await runtime.work())
     }
@@ -451,7 +461,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     if (existing) return existing
     if (this.#messages.length >= this.#limits.transcriptMessages) {
       throw new WhatsAppGroupLimitError(
-        "WhatsApp room transcript limit reached"
+        "WhatsApp chat transcript limit reached"
       )
     }
     if (replyToMessageId && !this.#messagesById.has(replyToMessageId)) {
@@ -482,19 +492,33 @@ export class WhatsAppGroup implements AsyncDisposable {
     author: string,
     content: string,
     replyToMessageId?: string
-  ) {
-    if (this.#stopRequested) return false
+  ): Promise<WhatsAppReplyResult> {
+    if (this.#stopRequested) return { posted: false, reason: "stopped" }
     if (
       this.#agentMessages >= this.#limits.agentMessages ||
       this.#messages.length >= this.#limits.transcriptMessages
     ) {
       this.#stopRequested = "limit"
-      return false
+      return { posted: false, reason: "limit" }
+    }
+
+    const participant = this.#participants.find(({ name }) => name === author)!
+    const newerMessages = this.#messages.filter(
+      ({ author: messageAuthor, sequence }) =>
+        messageAuthor !== author && sequence > participant.seenThroughSequence
+    )
+    if (newerMessages.length > 0) {
+      participant.seenThroughSequence = newerMessages.at(-1)!.sequence
+      return {
+        posted: false,
+        reason: "transcript_changed",
+        messages: structuredClone(newerMessages),
+      }
     }
 
     this.#agentMessages++
     await this.#post(author, content, randomUUID(), replyToMessageId)
-    return true
+    return { posted: true }
   }
 
   #ensurePump() {
@@ -560,6 +584,10 @@ export class WhatsAppGroup implements AsyncDisposable {
         batches.map(async ({ participant, notifications }) => {
           if (notifications.length === 0) return
 
+          participant.seenThroughSequence = Math.max(
+            participant.seenThroughSequence,
+            notifications.at(-1)!.sequence
+          )
           participant.active = true
           try {
             await this.#emitActivity({
@@ -723,7 +751,7 @@ export class WhatsAppGroup implements AsyncDisposable {
 
   #deliver(
     subscriber: GroupSubscriber,
-    event: WhatsAppRoomEvent,
+    event: WhatsAppChatEvent,
     legacyCallback?: () => void | Promise<void>
   ) {
     const delivery = subscriber.delivery.then(async () => {
@@ -747,7 +775,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         "",
       ]),
       "Reply only through reply_to_group when you have something useful to add.",
-      "When directly answering one message, pass its exact id as replyToMessageId.",
+      "Omit replyToMessageId by default. It points to one earlier public message in the UI; use it only to emphasize that message or when directly replying to another participant. Do not use it for an ordinary response to the latest user message or current discussion.",
     ].join("\n")
   }
 
@@ -789,8 +817,8 @@ export class WhatsAppGroup implements AsyncDisposable {
                 }`
               : message.content,
             metadata: {
-              roomMessageId: message.id,
-              roomSequence: message.sequence,
+              chatMessageId: message.id,
+              chatSequence: message.sequence,
               replyToMessageId: message.replyToMessageId,
               authorPath: message.author,
               recipientPath: participant.name,

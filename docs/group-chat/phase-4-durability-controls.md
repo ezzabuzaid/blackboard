@@ -2,30 +2,30 @@
 
 ## Goal
 
-Move the validated room experience beyond the in-memory demo without changing
+Move the validated chat experience beyond the in-memory demo without changing
 its public conversation semantics.
 
 ## Chat lifecycle
 
 - [x] Add a visible "New group" action.
 - [x] Create a fresh chat id without requiring manual URL editing.
-- [x] Keep the selected room in the URL for reload and sharing on the same
+- [x] Keep the selected chat in the URL for reload and sharing on the same
       installation.
-- [x] Preserve the participant roster for each room.
+- [x] Preserve the participant roster for each chat.
 
 ## Persistence and reconnect
 
-- [x] Replace the in-memory room transcript with durable storage.
-- [x] Persist event sequence, public messages, participants, and current room
+- [x] Replace the in-memory chat transcript with durable storage.
+- [x] Persist event sequence, public messages, participants, and current chat
       activity.
-- [x] Reconstruct a room after an API restart.
+- [x] Reconstruct a chat after an API restart.
 - [x] Resume SSE delivery from `Last-Event-ID`.
 - [x] Define what happens to participant work interrupted by process restart.
 - [x] Verify a completed conversation survives API and browser restart.
 
 ## Operational controls
 
-- [x] Add a room stop action that cancels active participant turns.
+- [x] Add a chat stop action that cancels active participant turns.
 - [x] Add an explicit notification/message ceiling.
 - [x] Surface which participant failed without discarding successful replies.
 - [x] Isolate one participant failure from the remaining group.
@@ -50,7 +50,7 @@ its public conversation semantics.
 
 ## Acceptance criteria
 
-- [x] Restarting the API does not erase a room.
+- [x] Restarting the API does not erase a chat.
 - [x] A reconnecting browser receives no gaps or duplicates.
 - [x] The user can stop runaway work.
 - [x] One failed participant does not erase other public replies.

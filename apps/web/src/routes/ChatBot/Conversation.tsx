@@ -290,7 +290,7 @@ function WelcomeMessage() {
       <GroupAvatarStack className="mt-1 max-sm:mt-0" />
       <MessageContent className="gap-1">
         <MessageHeader className="text-foreground">
-          DeepAgents Group
+          Baseera
         </MessageHeader>
         <Bubble variant="ghost">
           <BubbleContent className="max-w-[65ch] text-base leading-relaxed whitespace-pre-wrap">
