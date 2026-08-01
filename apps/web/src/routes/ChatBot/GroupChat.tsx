@@ -14,14 +14,18 @@ import {
   isGroupRoomState,
   reduceGroupRoom,
   type GroupRoomState,
+  type GroupMessage,
 } from "./groupMessages"
 
 interface GroupChat extends GroupRoomState {
   chatId: string
   posting: boolean
   stopping: boolean
+  replyingTo: GroupMessage | null
   error: Error | null
   clearError(): void
+  replyTo(message: GroupMessage): void
+  cancelReply(): void
   postMessage(content: string): Promise<void>
   stop(): Promise<void>
 }
@@ -47,6 +51,7 @@ export function GroupChatProvider({
   const [room, setRoom] = useState(initialState)
   const [posting, setPosting] = useState(false)
   const [stopping, setStopping] = useState(false)
+  const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null)
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
@@ -77,7 +82,11 @@ export function GroupChatProvider({
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: crypto.randomUUID(), content }),
+          body: JSON.stringify({
+            id: crypto.randomUUID(),
+            content,
+            ...(replyingTo ? { replyToMessageId: replyingTo.id } : {}),
+          }),
         }
       )
       const body: unknown = await response.json()
@@ -90,6 +99,7 @@ export function GroupChatProvider({
         ...current,
         messages: addGroupMessage(current.messages, message),
       }))
+      setReplyingTo(null)
     } catch (cause) {
       const nextError =
         cause instanceof Error
@@ -134,8 +144,11 @@ export function GroupChatProvider({
         chatId,
         posting,
         stopping,
+        replyingTo,
         error,
         clearError: () => setError(null),
+        replyTo: setReplyingTo,
+        cancelReply: () => setReplyingTo(null),
         postMessage,
         stop,
       }}

@@ -63,10 +63,10 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
 
   async post(
     conversation: ConversationId,
-    message: { id: string; content: string }
+    message: { id: string; content: string; replyToMessageId?: string }
   ) {
     const group = await this.#chat(conversation)
-    return group.post(message.content, message.id)
+    return group.post(message.content, message.id, message.replyToMessageId)
   }
 
   async snapshot(conversation: ConversationId) {
@@ -135,7 +135,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       error: null,
     })
     const events = (await this.#streamStore.getChunks(streamId)).map(
-      ({ seq, data }) => chatEvent(data, seq)
+      ({ seq, data, createdAt }) => chatEvent(data, seq, createdAt)
     )
     const participants = this.#participants.map((participant) =>
       participant.telemetry
@@ -174,7 +174,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   }
 }
 
-function chatEvent(part: StreamPart, sequence: number) {
+function chatEvent(part: StreamPart, sequence: number, createdAt: number) {
   if (
     part.type !== CHAT_EVENT_TYPE ||
     typeof part.data !== "object" ||
@@ -184,5 +184,15 @@ function chatEvent(part: StreamPart, sequence: number) {
   ) {
     throw new Error(`Invalid WhatsApp chat event at sequence ${sequence}`)
   }
-  return part.data as WhatsAppRoomEvent
+  const event = part.data as WhatsAppRoomEvent
+  if (event.type !== "message") return event
+
+  return {
+    ...event,
+    message: {
+      ...event.message,
+      sentAt: event.message.sentAt ?? new Date(createdAt).toISOString(),
+      replyToMessageId: event.message.replyToMessageId ?? null,
+    },
+  }
 }

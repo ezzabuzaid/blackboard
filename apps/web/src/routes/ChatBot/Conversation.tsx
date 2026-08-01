@@ -2,8 +2,8 @@ import {
   Bubble,
   BubbleContent,
   BubbleGroup,
-  Marker,
-  MarkerContent,
+  Button,
+  cn,
   Message,
   MessageContent,
   MessageHeader,
@@ -14,6 +14,7 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@stdlib/shadcn"
+import { CornerUpLeft } from "lucide-react"
 import { useMemo } from "react"
 import { Streamdown } from "streamdown"
 
@@ -24,10 +25,23 @@ import {
   groupMemberNameClass,
 } from "./GroupAvatar"
 import { useGroupChat } from "./GroupChat"
-import { groupMessageClusters, type GroupMessageCluster } from "./groupMessages"
+import {
+  groupMessageClusters,
+  type GroupMessage,
+  type GroupMessageCluster,
+} from "./groupMessages"
+
+const messageTime = new Intl.DateTimeFormat(undefined, {
+  hour: "numeric",
+  minute: "2-digit",
+})
 
 export function Conversation() {
-  const { activity, chatId, messages } = useGroupChat()
+  const { activity, chatId, messages, replyTo } = useGroupChat()
+  const messagesById = useMemo(
+    () => new Map(messages.map((message) => [message.id, message])),
+    [messages]
+  )
 
   return (
     <section aria-label="Conversation" className="min-h-0 flex-1 bg-muted/60">
@@ -36,7 +50,7 @@ export function Conversation() {
           <MessageScrollerViewport>
             <MessageScrollerContent
               aria-busy={activity.phase === "active"}
-              className="mx-auto w-full max-w-3xl justify-end gap-3 px-3 py-4 sm:px-5 sm:py-6"
+              className="mx-auto w-full max-w-3xl justify-end gap-2 px-3 py-4 sm:px-5 sm:py-6"
             >
               {messages.length === 0 && (
                 <MessageScrollerItem>
@@ -51,26 +65,21 @@ export function Conversation() {
                   className="animate-in duration-300 fade-in slide-in-from-bottom-2"
                 >
                   {cluster.author === "user" ? (
-                    <UserMessageCluster cluster={cluster} />
+                    <UserMessageCluster
+                      cluster={cluster}
+                      messagesById={messagesById}
+                      onReply={replyTo}
+                    />
                   ) : (
-                    <GroupReplyCluster chatId={chatId} cluster={cluster} />
+                    <GroupReplyCluster
+                      chatId={chatId}
+                      cluster={cluster}
+                      messagesById={messagesById}
+                      onReply={replyTo}
+                    />
                   )}
                 </MessageScrollerItem>
               ))}
-
-              {activity.phase === "active" && (
-                <MessageScrollerItem>
-                  <Marker
-                    role="status"
-                    className="animate-in gap-3 duration-200 fade-in"
-                  >
-                    <GroupAvatarStack />
-                    <MarkerContent>
-                      The group is considering new messages
-                    </MarkerContent>
-                  </Marker>
-                </MessageScrollerItem>
-              )}
             </MessageScrollerContent>
           </MessageScrollerViewport>
           <MessageScrollerButton />
@@ -80,13 +89,24 @@ export function Conversation() {
   )
 }
 
-function UserMessageCluster({ cluster }: { cluster: GroupMessageCluster }) {
+interface MessageClusterProps {
+  cluster: GroupMessageCluster
+  messagesById: ReadonlyMap<string, GroupMessage>
+  onReply(message: GroupMessage): void
+}
+
+function UserMessageCluster({
+  cluster,
+  messagesById,
+  onReply,
+}: MessageClusterProps) {
   return (
     <Message align="end" aria-label="Your messages">
       <MessageContent>
         <BubbleGroup className="items-end gap-0.5">
           {cluster.messages.map((message, index) => (
             <Bubble variant="tinted" key={message.id}>
+              <ReplyButton message={message} align="end" onReply={onReply} />
               <BubbleContent
                 className={`relative max-w-[65ch] min-w-12 !overflow-visible rounded-[8px] px-[9px] py-1.5 text-sm leading-5 whitespace-pre-wrap ${
                   index === 0
@@ -94,7 +114,17 @@ function UserMessageCluster({ cluster }: { cluster: GroupMessageCluster }) {
                     : ""
                 }`}
               >
-                {message.content}
+                <ReplyQuote
+                  message={
+                    message.replyToMessageId
+                      ? messagesById.get(message.replyToMessageId)
+                      : undefined
+                  }
+                />
+                <p>
+                  {message.content}
+                  <MessageTimestamp sentAt={message.sentAt} />
+                </p>
               </BubbleContent>
             </Bubble>
           ))}
@@ -107,19 +137,21 @@ function UserMessageCluster({ cluster }: { cluster: GroupMessageCluster }) {
 function GroupReplyCluster({
   chatId,
   cluster,
-}: {
+  messagesById,
+  onReply,
+}: MessageClusterProps & {
   chatId: string
-  cluster: GroupMessageCluster
 }) {
   return (
     <Message
-      className="items-end gap-2"
+      className="items-start gap-2"
       aria-label={`${cluster.author} messages`}
     >
-      <GroupAvatar name={cluster.author} className="mb-0.5" />
-      <BubbleGroup className="w-full gap-0.5">
+      <GroupAvatar name={cluster.author} className="mt-0.5" />
+      <BubbleGroup className="w-fit max-w-[85%] gap-0.5 sm:max-w-[75%]">
         {cluster.messages.map((message, index) => (
           <Bubble variant="outline" key={message.id}>
+            <ReplyButton message={message} align="start" onReply={onReply} />
             <BubbleContent
               className={`relative max-w-[65ch] !overflow-visible rounded-[8px] !border-transparent !bg-card px-[9px] py-1.5 text-sm leading-5 ${
                 index === 0
@@ -136,16 +168,86 @@ function GroupReplyCluster({
                   {cluster.author}
                 </MessageHeader>
               )}
+              <ReplyQuote
+                message={
+                  message.replyToMessageId
+                    ? messagesById.get(message.replyToMessageId)
+                    : undefined
+                }
+              />
               <AssistantMarkdown
                 active={false}
                 chatId={chatId}
                 text={message.content}
               />
+              <MessageTimestamp sentAt={message.sentAt} />
             </BubbleContent>
           </Bubble>
         ))}
       </BubbleGroup>
     </Message>
+  )
+}
+
+function ReplyButton({
+  message,
+  align,
+  onReply,
+}: {
+  message: GroupMessage
+  align: "start" | "end"
+  onReply(message: GroupMessage): void
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-xs"
+      aria-label={`Reply to ${message.author === "user" ? "your message" : message.author}`}
+      className={cn(
+        "absolute z-10 text-muted-foreground opacity-60 sm:top-1/2 sm:-translate-y-1/2 sm:bg-transparent sm:opacity-0 sm:group-focus-within/bubble:opacity-100 sm:group-hover/bubble:opacity-100",
+        align === "end"
+          ? "top-1/2 -left-8 -translate-y-1/2"
+          : "top-2 right-2 bg-card/90 sm:-right-8"
+      )}
+      onClick={() => onReply(message)}
+    >
+      <CornerUpLeft aria-hidden="true" />
+    </Button>
+  )
+}
+
+function ReplyQuote({ message }: { message?: GroupMessage }) {
+  if (!message) return null
+  return (
+    <div className="mb-1.5 rounded-[6px] border-l-[3px] border-primary bg-muted/70 px-2 py-1">
+      <p
+        className={cn(
+          "text-xs font-medium",
+          message.author === "user"
+            ? "text-primary"
+            : groupMemberNameClass(message.author)
+        )}
+      >
+        {message.author === "user" ? "You" : message.author}
+      </p>
+      <p className="line-clamp-2 text-xs text-muted-foreground">
+        {message.content}
+      </p>
+    </div>
+  )
+}
+
+function MessageTimestamp({ sentAt }: { sentAt: string }) {
+  const date = new Date(sentAt)
+  return (
+    <time
+      dateTime={sentAt}
+      title={date.toLocaleString()}
+      className="ml-2 inline-block align-baseline text-[10px] leading-none whitespace-nowrap text-muted-foreground"
+    >
+      {messageTime.format(date)}
+    </time>
   )
 }
 
@@ -172,6 +274,7 @@ export function AssistantMarkdown({
 
   return (
     <Streamdown
+      className="contents space-y-2 [&>p:last-child]:inline"
       linkSafety={linkSafety}
       mode={active ? "streaming" : "static"}
       remarkPlugins={remarkPlugins}

@@ -6,7 +6,10 @@ import { getMimeType } from "hono/utils/mime"
 
 import { openArtifact } from "../agent/sandbox.js"
 import type { WhatsAppChatRuntime } from "../group/chat-runtime.js"
-import { WhatsAppGroupLimitError } from "../group/whatsapp.js"
+import {
+  WhatsAppGroupLimitError,
+  WhatsAppReplyTargetError,
+} from "../group/whatsapp.js"
 import { conversationFrom } from "./conversation.js"
 
 export interface QueuedTurn {
@@ -138,6 +141,10 @@ export function createChatRoutes(
           body && typeof body === "object" && "content" in body
             ? body.content
             : null
+        const replyToMessageId =
+          body && typeof body === "object" && "replyToMessageId" in body
+            ? body.replyToMessageId
+            : undefined
         if (
           !conversation ||
           typeof id !== "string" ||
@@ -145,7 +152,11 @@ export function createChatRoutes(
           id.length > 200 ||
           typeof content !== "string" ||
           !content.trim() ||
-          content.length > 8_000
+          content.length > 8_000 ||
+          (replyToMessageId !== undefined &&
+            (typeof replyToMessageId !== "string" ||
+              !replyToMessageId.trim() ||
+              replyToMessageId.length > 200))
         ) {
           return context.json({ error: "Invalid room message." }, 400)
         }
@@ -154,11 +165,17 @@ export function createChatRoutes(
           const message = await chats.post(conversation, {
             id,
             content: content.trim(),
+            ...(replyToMessageId
+              ? { replyToMessageId: replyToMessageId.trim() }
+              : {}),
           })
           return context.json({ message }, 201)
         } catch (error) {
           if (error instanceof WhatsAppGroupLimitError) {
             return context.json({ error: error.message }, 409)
+          }
+          if (error instanceof WhatsAppReplyTargetError) {
+            return context.json({ error: error.message }, 400)
           }
           throw error
         }

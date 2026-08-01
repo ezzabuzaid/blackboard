@@ -13,6 +13,12 @@ export type GroupActivityEvent =
       state: "considering" | "replied" | "passed" | "failed"
       replies?: number
     }
+  | {
+      type: "presence"
+      notification: number
+      participant: string
+      state: Exclude<ParticipantPresenceState, "idle">
+    }
   | { type: "settled"; notifications: number }
   | {
       type: "stopped"
@@ -29,6 +35,8 @@ export type ParticipantActivityState =
   | "failed"
   | "stopped"
 
+export type ParticipantPresenceState = "idle" | "reading" | "typing" | "seen"
+
 export interface GroupActivityState {
   phase: "idle" | "active" | "settled" | "stopped"
   stopReason?: "user" | "limit" | "interrupted"
@@ -39,6 +47,7 @@ export interface GroupActivityState {
     state: ParticipantActivityState
     replies: number
   }[]
+  presence: { name: string; state: ParticipantPresenceState }[]
 }
 
 export const initialGroupActivity: GroupActivityState = {
@@ -46,6 +55,7 @@ export const initialGroupActivity: GroupActivityState = {
   notification: 0,
   messageCount: 0,
   participants: [],
+  presence: [],
 }
 
 export function reduceGroupActivity(
@@ -62,6 +72,7 @@ export function reduceGroupActivity(
         state: "notified",
         replies: 0,
       })),
+      presence: event.participants.map((name) => ({ name, state: "idle" })),
     }
   }
 
@@ -77,6 +88,11 @@ export function reduceGroupActivity(
           ? { ...participant, state: "notified" }
           : participant
       ),
+      presence: state.presence.map((participant) =>
+        recipients.has(participant.name)
+          ? { ...participant, state: "idle" }
+          : participant
+      ),
     }
   }
 
@@ -90,6 +106,10 @@ export function reduceGroupActivity(
         state:
           participant.state === "failed" ? "failed" : ("caught-up" as const),
       })),
+      presence: state.presence.map((participant) => ({
+        ...participant,
+        state: "seen",
+      })),
     }
   }
   if (event.type === "stopped") {
@@ -102,6 +122,21 @@ export function reduceGroupActivity(
         ...participant,
         state: participant.state === "failed" ? "failed" : ("stopped" as const),
       })),
+      presence: state.presence.map((participant) => ({
+        ...participant,
+        state: "idle",
+      })),
+    }
+  }
+
+  if (event.type === "presence") {
+    return {
+      ...state,
+      presence: state.presence.map((participant) =>
+        participant.name === event.participant
+          ? { ...participant, state: event.state }
+          : participant
+      ),
     }
   }
 
@@ -136,6 +171,13 @@ export function isGroupActivityEvent(
   }
   if (value.type === "settled") {
     return positiveInteger(value.notifications)
+  }
+  if (value.type === "presence") {
+    return (
+      positiveInteger(value.notification) &&
+      typeof value.participant === "string" &&
+      ["reading", "typing", "seen"].includes(String(value.state))
+    )
   }
   if (value.type === "stopped") {
     return (
@@ -181,8 +223,44 @@ export function isGroupActivityState(
           "stopped",
         ].includes(String(participant.state)) &&
         nonNegativeInteger(participant.replies)
+    ) &&
+    Array.isArray(value.presence) &&
+    value.presence.every(
+      (participant) =>
+        isRecord(participant) &&
+        typeof participant.name === "string" &&
+        ["idle", "reading", "typing", "seen"].includes(
+          String(participant.state)
+        )
     )
   )
+}
+
+export function groupPresenceLabel(state: GroupActivityState) {
+  const typing = state.presence.filter(({ state }) => state === "typing")
+  if (typing.length > 0)
+    return presenceNames(
+      typing.map(({ name }) => name),
+      "typing"
+    )
+
+  const reading = state.presence.filter(({ state }) => state === "reading")
+  if (reading.length > 0) {
+    return presenceNames(
+      reading.map(({ name }) => name),
+      "reading"
+    )
+  }
+
+  return state.phase === "settled" && state.notification > 0
+    ? "Seen by all"
+    : null
+}
+
+function presenceNames(names: string[], action: "reading" | "typing") {
+  if (names.length === 1) return `${names[0]} is ${action}…`
+  if (names.length === 2) return `${names[0]} and ${names[1]} are ${action}…`
+  return `${names[0]} and ${names.length - 1} others are ${action}…`
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -40,6 +40,7 @@ import {
 import {
   WhatsAppGroup,
   WhatsAppGroupLimitError,
+  WhatsAppReplyTargetError,
   type WhatsAppParticipant,
 } from "./group/whatsapp.js"
 import { readAgentTraces } from "./traces/agent-traces.js"
@@ -349,12 +350,18 @@ test("room message POST returns before active participants settle", async () => 
     ])
 
     assert.equal(response.status, 201)
-    assert.deepEqual(await response.json(), {
+    const posted = (await response.json()) as {
+      message: ReturnType<WhatsAppGroup["snapshot"]>["messages"][number]
+    }
+    assert.match(posted.message.sentAt, /^\d{4}-\d{2}-\d{2}T/)
+    assert.deepEqual(posted, {
       message: {
         id: "message-1",
         sequence: 1,
         author: "user",
         content: "What should we do first?",
+        sentAt: posted.message.sentAt,
+        replyToMessageId: null,
       },
     })
     assert.deepEqual(await (await request()).json(), {
@@ -363,6 +370,8 @@ test("room message POST returns before active participants settle", async () => 
         sequence: 1,
         author: "user",
         content: "What should we do first?",
+        sentAt: posted.message.sentAt,
+        replyToMessageId: null,
       },
     })
     await participantStarted.promise
@@ -377,6 +386,8 @@ test("room message POST returns before active participants settle", async () => 
           sequence: 1,
           author: "user",
           content: "What should we do first?",
+          sentAt: posted.message.sentAt,
+          replyToMessageId: null,
         },
       ],
       participants: [{ name: "Maya", source: "Research evidence." }],
@@ -385,8 +396,9 @@ test("room message POST returns before active participants settle", async () => 
         notification: 1,
         messageCount: 1,
         participants: [{ name: "Maya", state: "considering", replies: 0 }],
+        presence: [{ name: "Maya", state: "reading" }],
       },
-      cursor: 4,
+      cursor: 5,
     })
 
     const settled = Promise.withResolvers<void>()
@@ -415,7 +427,7 @@ test("room message POST returns before active participants settle", async () => 
       )
       const reader = response.body!.getReader()
       let events = ""
-      while (!events.includes("id: 6")) {
+      while (!events.includes('"type":"settled"')) {
         const chunk = await reader.read()
         if (chunk.done) break
         events += new TextDecoder().decode(chunk.value, { stream: true })
@@ -426,16 +438,19 @@ test("room message POST returns before active participants settle", async () => 
     }
 
     const events = await readEvents()
-    assert.doesNotMatch(events, /id: 4\n/)
+    assert.doesNotMatch(events, new RegExp(`id: ${state.cursor}\\n`))
     assert.match(events, /event: activity/)
-    assert.match(events, /id: 5/)
-    assert.match(events, /id: 6/)
+    assert.match(events, new RegExp(`id: ${state.cursor + 1}`))
+    assert.match(events, new RegExp(`id: ${state.cursor + 2}`))
+    assert.match(events, new RegExp(`id: ${state.cursor + 3}`))
     assert.match(events, /"type":"settled"/)
 
-    const reconnected = await readEvents({ "Last-Event-ID": "4" })
-    assert.doesNotMatch(reconnected, /id: 4\n/)
-    assert.match(reconnected, /id: 5/)
-    assert.match(reconnected, /id: 6/)
+    const reconnected = await readEvents({
+      "Last-Event-ID": String(state.cursor),
+    })
+    assert.doesNotMatch(reconnected, new RegExp(`id: ${state.cursor}\\n`))
+    assert.match(reconnected, new RegExp(`id: ${state.cursor + 1}`))
+    assert.match(reconnected, new RegExp(`id: ${state.cursor + 3}`))
   } finally {
     releaseParticipant.resolve()
   }
@@ -447,6 +462,7 @@ test("room message and event cursors are validated at the boundary", async () =>
     {},
     { id: "", content: "Hello" },
     { id: "message-1", content: "   " },
+    { id: "message-1", content: "Hello", replyToMessageId: "" },
   ]) {
     const response = await app.request("/api/chat/chat-1/messages", {
       method: "POST",
@@ -495,6 +511,24 @@ test("room message and event cursors are validated at the boundary", async () =>
   })
   assert.equal(limited.status, 409)
   assert.deepEqual(await limited.json(), { error: "Room is full" })
+
+  const missingReply = await testApp({
+    runtime: {
+      ...unusedRuntime,
+      async post() {
+        throw new WhatsAppReplyTargetError("Reply target was not found")
+      },
+    },
+  }).request("/api/chat/chat-1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: "message-2",
+      content: "Reply",
+      replyToMessageId: "missing",
+    }),
+  })
+  assert.equal(missingReply.status, 400)
 })
 
 test("queued turns endpoint uses the requested chat", async () => {
@@ -768,6 +802,70 @@ test("an active member sees a peer reply before its next model step", async () =
       .filter(({ author }) => author !== "user")
       .map(({ author, content }) => ({ author, content })),
     [{ author: "early", content: "The answer is already covered." }]
+  )
+})
+
+test("quoted replies persist resolved context and emit real presence", async () => {
+  const prompts: unknown[] = []
+  let calls = 0
+  const participant = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      prompts.push(prompt)
+      calls++
+      if (calls === 1) {
+        const messageId = JSON.stringify(prompt).match(
+          /\[([\da-f-]{36})\] user:/u
+        )?.[1]
+        assert.ok(messageId)
+        return groupToolResponse("reply_to_group", "reply-1", {
+          message: "Start with the evidence.",
+          replyToMessageId: messageId,
+        })
+      }
+      return groupTextResponse("Nothing else to add.")
+    },
+  })
+
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        { name: "Maya", source: "Research evidence.", model: participant },
+      ],
+    })
+  )
+
+  const activity: string[] = []
+  const messages = await group.send(
+    "What should we do first?",
+    undefined,
+    (event) => {
+      if (event.type === "presence") activity.push(event.state)
+    }
+  )
+  const original = messages.find(({ author }) => author === "user")!
+  const reply = messages.find(({ author }) => author === "Maya")
+  assert.ok(reply, JSON.stringify({ messages, activity, prompts }))
+
+  assert.equal(reply.replyToMessageId, original.id)
+  assert.match(reply.sentAt, /^\d{4}-\d{2}-\d{2}T/)
+  assert.deepEqual(activity, ["reading", "typing", "reading", "seen"])
+
+  const settled = Promise.withResolvers<void>()
+  using subscription = group.subscribe({
+    onActivity(event) {
+      if (event.type === "settled") settled.resolve()
+    },
+  })
+  await group.post("Can you clarify that?", "follow-up", reply.id)
+  await settled.promise
+
+  assert.match(
+    JSON.stringify(prompts.at(-1)),
+    new RegExp(`Replying to \\[${reply.id}] Maya: Start with the evidence\\.`)
   )
 })
 

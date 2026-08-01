@@ -37,7 +37,11 @@ export interface WhatsAppMessage {
   sequence: number
   author: string
   content: string
+  sentAt: string
+  replyToMessageId: string | null
 }
+
+export type WhatsAppParticipantPresence = "idle" | "reading" | "typing" | "seen"
 
 export type WhatsAppGroupActivity =
   | { type: "started"; participants: string[] }
@@ -53,6 +57,12 @@ export type WhatsAppGroupActivity =
       participant: string
       state: "considering" | "replied" | "passed" | "failed"
       replies?: number
+    }
+  | {
+      type: "presence"
+      notification: number
+      participant: string
+      state: Exclude<WhatsAppParticipantPresence, "idle">
     }
   | { type: "settled"; notifications: number }
   | {
@@ -78,6 +88,7 @@ export interface WhatsAppGroupActivityState {
       | "stopped"
     replies: number
   }[]
+  presence: { name: string; state: WhatsAppParticipantPresence }[]
 }
 
 export type WhatsAppRoomEvent =
@@ -124,6 +135,13 @@ export class WhatsAppGroupLimitError extends Error {
   }
 }
 
+export class WhatsAppReplyTargetError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "WhatsAppReplyTargetError"
+  }
+}
+
 interface RunningParticipant {
   name: string
   conversation: ConversationId
@@ -158,6 +176,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     notification: 0,
     messageCount: 0,
     participants: [],
+    presence: [],
   }
   #pump: Promise<void> | null = null
   #sequence = 0
@@ -220,7 +239,11 @@ export class WhatsAppGroup implements AsyncDisposable {
     boss.on("error", (error) => console.error("[queue error]", error))
     resources.defer(() => boss.stop({ close: false, graceful: true }))
     const participants: RunningParticipant[] = []
-    let publishReply: (author: string, content: string) => Promise<boolean>
+    let publishReply: (
+      author: string,
+      content: string,
+      replyToMessageId?: string
+    ) => Promise<boolean>
 
     await boss.start()
     for (const [index, participant] of options.participants.entries()) {
@@ -255,8 +278,11 @@ export class WhatsAppGroup implements AsyncDisposable {
             ...participant.tools,
             reply_to_group: defineTool({
               description:
-                "Post one useful contribution to the public group chat.",
-              inputSchema: jsonSchema<{ message: string }>({
+                "Post one useful contribution to the public group chat. Cite web sources with standard Markdown links containing full URLs, and never include private citation markers such as cite....",
+              inputSchema: jsonSchema<{
+                message: string
+                replyToMessageId?: string
+              }>({
                 type: "object",
                 properties: {
                   message: {
@@ -265,13 +291,24 @@ export class WhatsAppGroup implements AsyncDisposable {
                     maxLength: 8_000,
                     pattern: "\\S",
                   },
+                  replyToMessageId: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: 200,
+                    description:
+                      "The exact group message id when directly replying to one message.",
+                  },
                 },
                 required: ["message"],
                 additionalProperties: false,
               }),
-              execute: async ({ message }) => {
+              execute: async ({ message, replyToMessageId }) => {
                 return {
-                  posted: await publishReply(participant.name, message.trim()),
+                  posted: await publishReply(
+                    participant.name,
+                    message.trim(),
+                    replyToMessageId
+                  ),
                 }
               },
             }),
@@ -302,8 +339,8 @@ export class WhatsAppGroup implements AsyncDisposable {
       disposables: resources.move(),
       participants,
     })
-    publishReply = async (author, content) => {
-      return group.#postParticipant(author, content)
+    publishReply = async (author, content, replyToMessageId) => {
+      return group.#postParticipant(author, content, replyToMessageId)
     }
     return group
   }
@@ -319,7 +356,11 @@ export class WhatsAppGroup implements AsyncDisposable {
     return this.#messages
   }
 
-  async post(content: string, id: string = randomUUID()) {
+  async post(
+    content: string,
+    id: string = randomUUID(),
+    replyToMessageId?: string
+  ) {
     if (this.#closed) throw new Error("WhatsAppGroup is closed")
     const message = content.trim()
     if (!message) throw new Error("WhatsAppGroup message cannot be empty")
@@ -327,7 +368,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       this.#stopRequested = null
       this.#agentMessages = 0
     }
-    return this.#post("user", message, id)
+    return this.#post("user", message, id, replyToMessageId)
   }
 
   snapshot(): WhatsAppGroupSnapshot {
@@ -400,7 +441,12 @@ export class WhatsAppGroup implements AsyncDisposable {
     await this.#resources.disposeAsync()
   }
 
-  async #post(author: string, content: string, id: string = randomUUID()) {
+  async #post(
+    author: string,
+    content: string,
+    id: string = randomUUID(),
+    replyToMessageId?: string
+  ) {
     const existing = this.#messagesById.get(id)
     if (existing) return existing
     if (this.#messages.length >= this.#limits.transcriptMessages) {
@@ -408,12 +454,17 @@ export class WhatsAppGroup implements AsyncDisposable {
         "WhatsApp room transcript limit reached"
       )
     }
+    if (replyToMessageId && !this.#messagesById.has(replyToMessageId)) {
+      throw new WhatsAppReplyTargetError("Reply target was not found")
+    }
 
     const message = {
       id,
       sequence: ++this.#sequence,
       author,
       content,
+      sentAt: new Date().toISOString(),
+      replyToMessageId: replyToMessageId ?? null,
     }
     this.#messages.push(message)
     this.#messagesById.set(id, message)
@@ -427,7 +478,11 @@ export class WhatsAppGroup implements AsyncDisposable {
     return message
   }
 
-  async #postParticipant(author: string, content: string) {
+  async #postParticipant(
+    author: string,
+    content: string,
+    replyToMessageId?: string
+  ) {
     if (this.#stopRequested) return false
     if (
       this.#agentMessages >= this.#limits.agentMessages ||
@@ -438,7 +493,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     }
 
     this.#agentMessages++
-    await this.#post(author, content)
+    await this.#post(author, content, randomUUID(), replyToMessageId)
     return true
   }
 
@@ -513,20 +568,52 @@ export class WhatsAppGroup implements AsyncDisposable {
               participant: participant.name,
               state: "considering",
             })
+            await this.#emitActivity({
+              type: "presence",
+              notification,
+              participant: participant.name,
+              state: "reading",
+            })
             const repliesBefore = this.#replyCounts.get(participant.name) ?? 0
             const turn = await participant.runtime.enqueue(
               participant.conversation,
               {
                 id: randomUUID(),
-                input: WhatsAppGroup.#notification(notifications),
+                input: this.#notification(notifications),
               }
             )
             participant.turnId = turn.id
             let failure: string | undefined
+            const typingCalls = new Set<string>()
             await turn.stream.pipeTo(
               new WritableStream({
-                write(part) {
+                write: async (part) => {
                   if (part.type === "error") failure = part.errorText
+                  if (
+                    (part.type === "tool-input-start" ||
+                      part.type === "tool-input-available") &&
+                    part.toolName === "reply_to_group" &&
+                    !typingCalls.has(part.toolCallId)
+                  ) {
+                    typingCalls.add(part.toolCallId)
+                    await this.#emitActivity({
+                      type: "presence",
+                      notification,
+                      participant: participant.name,
+                      state: "typing",
+                    })
+                  }
+                  if (
+                    part.type === "tool-output-available" &&
+                    typingCalls.delete(part.toolCallId)
+                  ) {
+                    await this.#emitActivity({
+                      type: "presence",
+                      notification,
+                      participant: participant.name,
+                      state: "reading",
+                    })
+                  }
                 },
               })
             )
@@ -541,6 +628,12 @@ export class WhatsAppGroup implements AsyncDisposable {
               state: replies > 0 ? "replied" : "passed",
               ...(replies > 0 ? { replies } : {}),
             })
+            await this.#emitActivity({
+              type: "presence",
+              notification,
+              participant: participant.name,
+              state: "seen",
+            })
           } catch (error) {
             if (!this.#stopRequested) {
               await this.#emitActivity({
@@ -548,6 +641,12 @@ export class WhatsAppGroup implements AsyncDisposable {
                 notification,
                 participant: participant.name,
                 state: "failed",
+              })
+              await this.#emitActivity({
+                type: "presence",
+                notification,
+                participant: participant.name,
+                state: "seen",
               })
               console.error(
                 `[group participant failed] ${participant.name}`,
@@ -635,13 +734,28 @@ export class WhatsAppGroup implements AsyncDisposable {
     return delivery
   }
 
-  static #notification(messages: WhatsAppMessage[]) {
+  #notification(messages: WhatsAppMessage[]) {
     return [
       "New WhatsApp group messages:",
       "",
-      ...messages.flatMap(({ author, content }) => [`${author}:`, content, ""]),
+      ...messages.flatMap((message) => [
+        `[${message.id}] ${message.author}:`,
+        ...(message.replyToMessageId
+          ? [this.#replyContext(message.replyToMessageId)]
+          : []),
+        message.content,
+        "",
+      ]),
       "Reply only through reply_to_group when you have something useful to add.",
+      "When directly answering one message, pass its exact id as replyToMessageId.",
     ].join("\n")
+  }
+
+  #replyContext(replyToMessageId: string) {
+    const target = this.#messagesById.get(replyToMessageId)
+    return target
+      ? `Replying to [${target.id}] ${target.author}: ${target.content}`
+      : `Replying to [${replyToMessageId}]`
   }
 
   async #deliverToActiveParticipants(message: WhatsAppMessage) {
@@ -669,10 +783,15 @@ export class WhatsAppGroup implements AsyncDisposable {
             otherRecipients: eligibleRecipients
               .filter(({ name }) => name !== participant.name)
               .map(({ conversation }) => conversation),
-            content: message.content,
+            content: message.replyToMessageId
+              ? `${this.#replyContext(message.replyToMessageId)}\n${
+                  message.content
+                }`
+              : message.content,
             metadata: {
               roomMessageId: message.id,
               roomSequence: message.sequence,
+              replyToMessageId: message.replyToMessageId,
               authorPath: message.author,
               recipientPath: participant.name,
               otherRecipientNames: eligibleRecipients
@@ -753,6 +872,7 @@ function reduceActivity(
         state: "notified",
         replies: 0,
       })),
+      presence: event.participants.map((name) => ({ name, state: "idle" })),
     }
   }
   if (event.type === "notification") {
@@ -767,6 +887,11 @@ function reduceActivity(
           ? { ...participant, state: "notified" }
           : participant
       ),
+      presence: state.presence.map((participant) =>
+        recipients.has(participant.name)
+          ? { ...participant, state: "idle" }
+          : participant
+      ),
     }
   }
   if (event.type === "settled") {
@@ -778,6 +903,10 @@ function reduceActivity(
         ...participant,
         state:
           participant.state === "failed" ? "failed" : ("caught-up" as const),
+      })),
+      presence: state.presence.map((participant) => ({
+        ...participant,
+        state: "seen",
       })),
     }
   }
@@ -791,6 +920,20 @@ function reduceActivity(
         ...participant,
         state: participant.state === "failed" ? "failed" : ("stopped" as const),
       })),
+      presence: state.presence.map((participant) => ({
+        ...participant,
+        state: "idle",
+      })),
+    }
+  }
+  if (event.type === "presence") {
+    return {
+      ...state,
+      presence: state.presence.map((participant) =>
+        participant.name === event.participant
+          ? { ...participant, state: event.state }
+          : participant
+      ),
     }
   }
   return {

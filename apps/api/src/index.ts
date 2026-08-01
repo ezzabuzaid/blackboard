@@ -3,6 +3,7 @@ import { resolve } from "node:path"
 
 import { createTerminus } from "@godaddy/terminus"
 import { serve } from "@hono/node-server"
+import { serveStatic } from "@hono/node-server/serve-static"
 
 import { createApp } from "./app.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
@@ -40,6 +41,13 @@ const app = createApp({
   runtime,
   listQueuedTurns: async () => [],
 })
+
+const webRoot = process.env.WEB_ROOT
+if (webRoot) {
+  app.get("/api/*", (context) => context.notFound())
+  app.use("*", serveStatic({ root: webRoot }))
+  app.get("*", serveStatic({ root: webRoot, path: "index.html" }))
+}
 
 await using server = serve(
   {

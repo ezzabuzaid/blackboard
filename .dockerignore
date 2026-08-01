@@ -1,0 +1,7 @@
+.data
+.git
+.nx
+node_modules
+**/dist
+**/node_modules
+*.log

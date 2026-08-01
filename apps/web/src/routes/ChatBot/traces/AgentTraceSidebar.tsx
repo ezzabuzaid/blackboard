@@ -75,9 +75,20 @@ export function AgentTraceSidebar() {
 
 function TraceHeader() {
   const { agent } = useAgentTraceSelection()
+  const { activity } = useGroupChat()
+  const operationalState = activity.participants.find(
+    ({ name }) => name === agent
+  )?.state
   return (
     <SheetHeader className="border-b px-5 py-4 pr-14">
-      <SheetTitle>{agent ?? "Agent"} traces</SheetTitle>
+      <div className="flex items-center gap-2">
+        <SheetTitle>{agent ?? "Agent"} traces</SheetTitle>
+        {operationalState && (
+          <Badge variant="outline" className="capitalize">
+            {operationalState.replace("-", " ")}
+          </Badge>
+        )}
+      </div>
       <SheetDescription>
         Private model steps, tools, outputs, and cache usage
       </SheetDescription>

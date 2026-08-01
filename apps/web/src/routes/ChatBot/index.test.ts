@@ -8,6 +8,7 @@ import { Streamdown } from "streamdown"
 
 import { artifactRemarkPlugins, sandboxArtifactUrl } from "./artifactLinks"
 import {
+  groupPresenceLabel,
   initialGroupActivity,
   reduceGroupActivity,
   type GroupActivityEvent,
@@ -20,6 +21,8 @@ import {
 } from "./groupMessages"
 import { traceItems } from "./traces/agentTrace"
 import { loader } from "./loader"
+
+const sentAt = "2026-07-31T12:00:00.000Z"
 
 test("loader adds a chat id to the URL", async () => {
   const request = new Request("http://localhost/?source=test")
@@ -57,12 +60,16 @@ test("loader hydrates the selected chat and reports API state", async () => {
                 sequence: 1,
                 author: "user",
                 content: "Hello",
+                sentAt,
+                replyToMessageId: null,
               },
               {
                 id: "reply-1",
                 sequence: 2,
                 author: "Maya",
                 content: "Hello back",
+                sentAt,
+                replyToMessageId: "message-1",
               },
             ]
           : [],
@@ -89,12 +96,16 @@ test("loader hydrates the selected chat and reports API state", async () => {
             sequence: 1,
             author: "user",
             content: "Hello",
+            sentAt,
+            replyToMessageId: null,
           },
           {
             id: "reply-1",
             sequence: 2,
             author: "Maya",
             content: "Hello back",
+            sentAt,
+            replyToMessageId: "message-1",
           },
         ],
         participants: [{ name: "Maya", source: "Research evidence." }],
@@ -135,24 +146,32 @@ test("group messages cluster only consecutive messages from one author", () => {
     sequence: 1,
     author: "Maya",
     content: "First thought",
+    sentAt,
+    replyToMessageId: null,
   }
   const mayaFollowUp = {
     id: "maya-2",
     sequence: 2,
     author: "Maya",
     content: "One more thing",
+    sentAt,
+    replyToMessageId: null,
   }
   const omar = {
     id: "omar-1",
     sequence: 3,
     author: "Omar",
     content: "Technical consequence",
+    sentAt,
+    replyToMessageId: "maya-2",
   }
   const mayaLater = {
     id: "maya-3",
     sequence: 4,
     author: "Maya",
     content: "Returning later",
+    sentAt,
+    replyToMessageId: null,
   }
 
   assert.deepEqual(
@@ -173,6 +192,8 @@ test("room events append in order and ignore reconnect duplicates", () => {
         sequence: 1,
         author: "user",
         content: "First",
+        sentAt,
+        replyToMessageId: null,
       },
     ],
     participants: [{ name: "Maya", source: "Research evidence." }],
@@ -181,6 +202,7 @@ test("room events append in order and ignore reconnect duplicates", () => {
       notification: 1,
       messageCount: 1,
       participants: [{ name: "Maya", state: "considering", replies: 0 }],
+      presence: [{ name: "Maya", state: "reading" }],
     },
     cursor: 4,
   }
@@ -192,6 +214,8 @@ test("room events append in order and ignore reconnect duplicates", () => {
       sequence: 2,
       author: "Maya",
       content: "Start with the evidence.",
+      sentAt,
+      replyToMessageId: "message-1",
     },
   }
   const withReply = reduceGroupRoom(hydrated, reply)
@@ -204,6 +228,8 @@ test("room events append in order and ignore reconnect duplicates", () => {
       sequence: 3,
       author: "user",
       content: "What if we narrow it?",
+      sentAt,
+      replyToMessageId: "reply-1",
     }).map(({ id }) => id),
     ["message-1", "reply-1", "message-2"]
   )
@@ -266,7 +292,39 @@ test("group activity tracks decisions, replies, and settlement", () => {
       { name: "researcher", state: "caught-up", replies: 1 },
       { name: "critic", state: "caught-up", replies: 0 },
     ],
+    presence: [
+      { name: "researcher", state: "seen" },
+      { name: "critic", state: "seen" },
+    ],
   })
+})
+
+test("group presence reports real reading, typing, and seen states", () => {
+  const started = reduceGroupActivity(initialGroupActivity, {
+    type: "started",
+    participants: ["Maya", "Omar"],
+  })
+  const reading = reduceGroupActivity(started, {
+    type: "presence",
+    notification: 1,
+    participant: "Maya",
+    state: "reading",
+  })
+  assert.equal(groupPresenceLabel(reading), "Maya is reading…")
+
+  const typing = reduceGroupActivity(reading, {
+    type: "presence",
+    notification: 1,
+    participant: "Omar",
+    state: "typing",
+  })
+  assert.equal(groupPresenceLabel(typing), "Omar is typing…")
+  assert.equal(
+    groupPresenceLabel(
+      reduceGroupActivity(typing, { type: "settled", notifications: 1 })
+    ),
+    "Seen by all"
+  )
 })
 
 test("trace tool calls include their matching result once", () => {
@@ -388,6 +446,10 @@ test("group activity explains user, limit, and restart stops", () => {
         participants: [
           { name: "Maya", state: "stopped", replies: 0 },
           { name: "Omar", state: "stopped", replies: 0 },
+        ],
+        presence: [
+          { name: "Maya", state: "idle" },
+          { name: "Omar", state: "idle" },
         ],
       }
     )

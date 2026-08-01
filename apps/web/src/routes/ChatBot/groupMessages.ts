@@ -11,6 +11,8 @@ export interface GroupMessage {
   sequence: number
   author: string
   content: string
+  sentAt: string
+  replyToMessageId: string | null
 }
 
 export interface GroupParticipant {
@@ -87,7 +89,11 @@ export function isGroupMessage(value: unknown): value is GroupMessage {
     "author" in value &&
     typeof value.author === "string" &&
     "content" in value &&
-    typeof value.content === "string"
+    typeof value.content === "string" &&
+    typeof value.sentAt === "string" &&
+    !Number.isNaN(Date.parse(value.sentAt)) &&
+    (value.replyToMessageId === null ||
+      typeof value.replyToMessageId === "string")
   )
 }
 
