@@ -1,10 +1,14 @@
 import { redirect, type LoaderFunctionArgs } from "react-router"
 
-import { apiUrl } from "./api"
+import { requireIdentity } from "../../auth"
+import { apiFetch } from "./api"
 import { initialGroupActivity } from "./groupActivity"
 import { isGroupChatState } from "./groupMessages"
 
-export async function loader({ request }: LoaderFunctionArgs) {
+export async function loader(args: LoaderFunctionArgs) {
+  await requireIdentity(args)
+
+  const { request } = args
   const url = new URL(request.url)
   const chatId = url.searchParams.get("chatId")
   if (!chatId) {
@@ -14,8 +18,8 @@ export async function loader({ request }: LoaderFunctionArgs) {
 
   try {
     const [healthResponse, stateResponse] = await Promise.all([
-      fetch(`${apiUrl}/api/health`, { signal: request.signal }),
-      fetch(`${apiUrl}/api/chat/${encodeURIComponent(chatId)}/state`, {
+      apiFetch("/api/health", { signal: request.signal }),
+      apiFetch(`/api/chat/${encodeURIComponent(chatId)}/state`, {
         signal: request.signal,
       }),
     ])
@@ -34,6 +38,7 @@ export async function loader({ request }: LoaderFunctionArgs) {
       initialState: state,
     }
   } catch (error) {
+    if (error instanceof Response) throw error
     if (request.signal.aborted) throw error
     return {
       apiStatus: "offline" as const,

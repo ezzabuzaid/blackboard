@@ -1,4 +1,4 @@
-import { apiUrl } from "../api"
+import { apiFetch } from "../api"
 
 export interface AgentTraceUsage {
   inputTokens: number
@@ -47,8 +47,8 @@ export async function fetchAgentTraces(
   agent: string,
   signal: AbortSignal
 ) {
-  const response = await fetch(
-    `${apiUrl}/api/chat/${encodeURIComponent(chatId)}/agents/${encodeURIComponent(agent)}/traces`,
+  const response = await apiFetch(
+    `/api/chat/${encodeURIComponent(chatId)}/agents/${encodeURIComponent(agent)}/traces`,
     { signal }
   )
   const value: unknown = await response.json()

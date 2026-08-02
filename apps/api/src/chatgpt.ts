@@ -1,7 +1,3 @@
-import { randomUUID } from "node:crypto"
-import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
-import { dirname, resolve } from "node:path"
-
 import { createOpenAI } from "@ai-sdk/openai"
 import {
   type ChatGPTTokens,
@@ -9,32 +5,54 @@ import {
   createCodexFetch,
   ensureFreshTokens,
   listCodexModels,
-  requestDeviceCode,
   resolveConfig,
-  waitForDeviceTokens,
 } from "@opencoredev/loginwithchatgpt-core"
+import { decryptOAuthToken, setTokenUtil } from "better-auth/oauth2"
 
-export async function createChatGPTSubscription(dataDirectory: string) {
-  const tokenPath = resolve(dataDirectory, "chatgpt.json")
-  const config = resolveConfig()
-  let tokens = await readTokens(tokenPath)
+import type { AppAuth } from "./auth.js"
+import { CHATGPT_PROVIDER_ID } from "./auth/chatgpt-plugin.js"
 
-  if (!tokens) {
-    const device = await requestDeviceCode(config)
-    console.log(
-      `ChatGPT sign-in required.\nOpen ${device.verificationUrl}\nEnter code: ${device.userCode}`
-    )
-    tokens = await waitForDeviceTokens(config, device)
-    await writeTokens(tokenPath, tokens)
+export async function createChatGPTSubscription(auth: AppAuth, userId: string) {
+  const context = await auth.$context
+  const account = (
+    await context.internalAdapter.findAccountByUserId(userId)
+  ).find(({ providerId }) => providerId === CHATGPT_PROVIDER_ID)
+  if (!account?.accessToken) {
+    throw new Error("The user has not connected a ChatGPT account")
   }
 
-  // Refresh tokens rotate on use, so serialize refreshes within this process.
+  const config = resolveConfig()
+  let tokens: ChatGPTTokens = {
+    accessToken: await decryptOAuthToken(account.accessToken, context),
+    refreshToken: account.refreshToken
+      ? await decryptOAuthToken(account.refreshToken, context)
+      : undefined,
+    idToken: account.idToken ?? undefined,
+    expiresAt: account.accessTokenExpiresAt?.getTime(),
+  }
+
+  // Refresh tokens rotate on use, so serialize refreshes for this user.
   let refreshQueue = Promise.resolve()
   const getAuth = (): Promise<CodexAuth> => {
     const result = refreshQueue.then(async () => {
-      tokens = await ensureFreshTokens(config, tokens, {
-        onRefresh: (fresh) => writeTokens(tokenPath, fresh),
+      const previous = tokens
+      const fresh = await ensureFreshTokens(config, tokens, {
+        onRefresh: async (refreshed) => {
+          const complete = {
+            ...refreshed,
+            idToken: refreshed.idToken ?? previous.idToken,
+          }
+          await context.internalAdapter.updateAccount(account.id, {
+            accessToken: await setTokenUtil(complete.accessToken, context),
+            refreshToken: await setTokenUtil(complete.refreshToken, context),
+            idToken: complete.idToken,
+            accessTokenExpiresAt: complete.expiresAt
+              ? new Date(complete.expiresAt)
+              : undefined,
+          })
+        },
       })
+      tokens = { ...fresh, idToken: fresh.idToken ?? previous.idToken }
       if (!tokens.accountId) {
         throw new Error("The connected ChatGPT account has no account id")
       }
@@ -51,7 +69,10 @@ export async function createChatGPTSubscription(dataDirectory: string) {
   }
 
   const models = await listCodexModels({ config, getAuth })
-  const modelId = process.env.CHATGPT_MODEL!
+  const modelId = selectChatGPTModel(
+    models,
+    process.env.CHATGPT_MODEL || undefined
+  )
   const chatgpt = createOpenAI({
     name: "chatgpt",
     baseURL: config.codexBaseUrl,
@@ -79,52 +100,4 @@ export function selectChatGPTModel(
   }
   if (models[0]) return models[0]
   throw new Error("The connected ChatGPT account has no available Codex models")
-}
-
-export function parseChatGPTTokens(value: string): ChatGPTTokens {
-  const tokens: unknown = JSON.parse(value)
-  if (!tokens || typeof tokens !== "object") {
-    throw new Error("Invalid saved ChatGPT credentials")
-  }
-  const record = tokens as Record<string, unknown>
-  if (typeof record.accessToken !== "string" || !record.accessToken) {
-    throw new Error("Invalid saved ChatGPT credentials")
-  }
-
-  for (const field of ["refreshToken", "idToken", "accountId"] as const) {
-    if (field in record && typeof record[field] !== "string") {
-      throw new Error("Invalid saved ChatGPT credentials")
-    }
-  }
-  if (
-    "expiresAt" in record &&
-    (typeof record.expiresAt !== "number" || !Number.isFinite(record.expiresAt))
-  ) {
-    throw new Error("Invalid saved ChatGPT credentials")
-  }
-
-  return record as unknown as ChatGPTTokens
-}
-
-async function readTokens(path: string) {
-  try {
-    return parseChatGPTTokens(await readFile(path, "utf8"))
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return undefined
-    }
-    throw error
-  }
-}
-
-async function writeTokens(path: string, tokens: ChatGPTTokens) {
-  await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
-  try {
-    await writeFile(temporaryPath, JSON.stringify(tokens), { mode: 0o600 })
-    await rename(temporaryPath, path)
-    await chmod(path, 0o600)
-  } finally {
-    await rm(temporaryPath, { force: true })
-  }
 }

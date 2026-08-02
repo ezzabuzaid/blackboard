@@ -20,10 +20,12 @@ import {
 } from "@deepagents/experimental/zukhruf"
 import { simulateReadableStream } from "ai"
 import { MockLanguageModelV4 } from "ai/test"
+import { betterAuth, type BetterAuthOptions } from "better-auth"
+import { decryptOAuthToken } from "better-auth/oauth2"
 import { InMemoryFs } from "just-bash"
 
 import { createApp, type AppDependencies } from "./app.js"
-import { parseChatGPTTokens } from "./chatgpt.js"
+import { chatGPTAuthPlugin, parseDeviceAttempt } from "./auth/chatgpt-plugin.js"
 import type { OpenArtifact } from "./chat/routes.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import { createWhatsAppSandbox, shareSandboxInstance } from "./group/sandbox.js"
@@ -68,7 +70,7 @@ function testGroupDependencies(resources: AsyncDisposableStack) {
 
 function memoryRuntime(participants: WhatsAppParticipant[]) {
   return new WhatsAppChatRuntime({
-    participants,
+    participantsForUser: async () => participants,
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: ":memory:",
@@ -81,7 +83,7 @@ function durableRuntime(
   directory: string
 ) {
   return new WhatsAppChatRuntime({
-    participants,
+    participantsForUser: async () => participants,
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: join(directory, "group.sqlite"),
@@ -108,39 +110,166 @@ const unusedRuntime: ChatRuntime = {
 }
 
 const noArtifact: OpenArtifact = async () => null
+const authenticatedAuth: AppDependencies["auth"] = {
+  handler: async () => new Response(null, { status: 404 }),
+  getSession: async () => ({ user: { id: "local-user" } }),
+}
+
 function testApp({
+  auth = authenticatedAuth,
   runtime = unusedRuntime,
   openArtifact = noArtifact,
 }: {
+  auth?: AppDependencies["auth"]
   runtime?: ChatRuntime
   openArtifact?: OpenArtifact
 } = {}) {
-  return createApp({ runtime, openArtifact })
+  return createApp({ auth, runtime, openArtifact })
+}
+
+function responseCookies(response: Response) {
+  return response.headers
+    .getSetCookie()
+    .map((cookie) => cookie.split(";", 1)[0])
+    .join("; ")
+}
+
+function testIdToken(claims: Record<string, unknown>) {
+  const encode = (value: object) =>
+    Buffer.from(JSON.stringify(value)).toString("base64url")
+  return `${encode({ alg: "none" })}.${encode(claims)}.signature`
 }
 
 const app = testApp()
 
-test("saved ChatGPT credentials are validated before use", () => {
+test("ChatGPT device attempts are validated before use", () => {
   assert.deepEqual(
-    parseChatGPTTokens(
+    parseDeviceAttempt(
       JSON.stringify({
-        accessToken: "access",
-        refreshToken: "refresh",
-        accountId: "account",
-        expiresAt: 1,
+        deviceAuthId: "device-1",
+        userCode: "ABCD-EFGH",
       })
     ),
     {
-      accessToken: "access",
-      refreshToken: "refresh",
-      accountId: "account",
-      expiresAt: 1,
+      deviceAuthId: "device-1",
+      userCode: "ABCD-EFGH",
     }
   )
-  assert.throws(
-    () => parseChatGPTTokens('{"accessToken":42}'),
-    /Invalid saved ChatGPT credentials/
-  )
+  assert.equal(parseDeviceAttempt('{"deviceAuthId":42}'), null)
+})
+
+test("ChatGPT device approval creates an encrypted Better Auth session", async () => {
+  const database = new DatabaseSync(":memory:")
+  const idToken = testIdToken({
+    sub: "openai-user-1",
+    email: "person@example.com",
+    email_verified: true,
+    name: "Test Person",
+    "https://api.openai.com/auth": {
+      chatgpt_account_id: "chatgpt-account-1",
+      chatgpt_plan_type: "plus",
+    },
+  })
+  const providerFetch: typeof fetch = async (input) => {
+    const url = String(input)
+    if (url.endsWith("/api/accounts/deviceauth/usercode")) {
+      return Response.json({
+        device_auth_id: "device-1",
+        user_code: "ABCD-EFGH",
+        interval: 1,
+      })
+    }
+    if (url.endsWith("/api/accounts/deviceauth/token")) {
+      return Response.json({
+        authorization_code: "authorization-1",
+        code_verifier: "verifier-1",
+        code_challenge: "challenge-1",
+      })
+    }
+    if (url.endsWith("/oauth/token")) {
+      return Response.json({
+        access_token: "access-token-1",
+        refresh_token: "refresh-token-1",
+        id_token: idToken,
+        expires_in: 3_600,
+      })
+    }
+    return new Response(null, { status: 404 })
+  }
+  const options: BetterAuthOptions = {
+    database,
+    baseURL: "http://localhost:3001",
+    secret: "test-secret-that-is-at-least-32-characters",
+    trustedOrigins: ["http://localhost:5173"],
+    account: { encryptOAuthTokens: true },
+    plugins: [
+      chatGPTAuthPlugin({
+        issuer: "https://auth.example.com",
+        fetch: providerFetch,
+      }),
+    ],
+  }
+  const auth = betterAuth(options)
+
+  try {
+    await (await auth.$context).runMigrations()
+    const start = await auth.handler(
+      new Request("http://localhost:3001/api/auth/chatgpt/device", {
+        method: "POST",
+        headers: {
+          Origin: "http://localhost:5173",
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      })
+    )
+    assert.equal(start.status, 200)
+    const started = (await start.json()) as Record<string, unknown>
+    assert.equal(
+      started.verificationUrl,
+      "https://auth.example.com/codex/device"
+    )
+    assert.equal(started.userCode, "ABCD-EFGH")
+    assert.equal(started.interval, 1)
+    assert.equal(typeof started.expiresAt, "number")
+
+    const poll = await auth.handler(
+      new Request("http://localhost:3001/api/auth/chatgpt/device/poll", {
+        method: "POST",
+        headers: {
+          Origin: "http://localhost:5173",
+          "Content-Type": "application/json",
+          Cookie: responseCookies(start),
+        },
+        body: "{}",
+      })
+    )
+    assert.equal(poll.status, 200)
+    const result = (await poll.json()) as { status?: unknown; user?: unknown }
+    assert.equal(result.status, "complete")
+
+    const session = await auth.handler(
+      new Request("http://localhost:3001/api/auth/get-session", {
+        headers: { Cookie: responseCookies(poll) },
+      })
+    )
+    const body = (await session.json()) as {
+      user?: { id?: unknown; email?: unknown }
+    }
+    assert.equal(body.user?.email, "person@example.com")
+
+    const context = await auth.$context
+    const account = (
+      await context.internalAdapter.findAccountByUserId(String(body.user?.id))
+    )[0]
+    assert.notEqual(account?.accessToken, "access-token-1")
+    assert.equal(
+      await decryptOAuthToken(account?.accessToken ?? "", context),
+      "access-token-1"
+    )
+  } finally {
+    database.close()
+  }
 })
 
 test("health reports the WhatsApp group service", async () => {
@@ -148,6 +277,18 @@ test("health reports the WhatsApp group service", async () => {
 
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), { status: "ok" })
+})
+
+test("chat routes require a Better Auth session", async () => {
+  const response = await testApp({
+    auth: {
+      ...authenticatedAuth,
+      getSession: async () => null,
+    },
+  }).request("/api/chat/chat-1/state")
+
+  assert.equal(response.status, 401)
+  assert.deepEqual(await response.json(), { error: "Unauthorized." })
 })
 
 test("agent telemetry is grouped into complete chat-scoped turns", async () => {
@@ -570,6 +711,7 @@ test("development CORS accepts a local fallback port", async () => {
     response.headers.get("Access-Control-Allow-Origin"),
     "http://localhost:5174"
   )
+  assert.equal(response.headers.get("Access-Control-Allow-Credentials"), "true")
 })
 
 test("publishes a group reply before slower members finish", async () => {

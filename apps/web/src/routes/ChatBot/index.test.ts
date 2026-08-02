@@ -25,20 +25,66 @@ import { loader } from "./loader"
 const sentAt = "2026-07-31T12:00:00.000Z"
 
 test("loader adds a chat id to the URL", async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (input) => {
+    assert.ok(String(input).endsWith("/api/auth/get-session"))
+    return Response.json({ user: { id: "user-1" } })
+  }
   const request = new Request("http://localhost/?source=test")
 
-  await assert.rejects(
-    loader({ request } as LoaderFunctionArgs),
-    (error: unknown) => {
-      assert.ok(error instanceof Response)
-      assert.equal(error.status, 302)
+  try {
+    await assert.rejects(
+      loader({ request } as LoaderFunctionArgs),
+      (error: unknown) => {
+        assert.ok(error instanceof Response)
+        assert.equal(error.status, 302)
 
-      const location = new URL(error.headers.get("location") ?? "", request.url)
-      assert.equal(location.searchParams.get("source"), "test")
-      assert.ok(location.searchParams.get("chatId"))
-      return true
-    }
-  )
+        const location = new URL(
+          error.headers.get("location") ?? "",
+          request.url
+        )
+        assert.equal(location.searchParams.get("source"), "test")
+        assert.ok(location.searchParams.get("chatId"))
+        return true
+      }
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("loader sends unauthenticated users to login", async () => {
+  const originalFetch = globalThis.fetch
+  const requests: string[] = []
+  globalThis.fetch = async (input) => {
+    const url = String(input)
+    requests.push(url)
+    if (url.endsWith("/api/auth/get-session")) return Response.json(null)
+    return new Response(null, { status: 500 })
+  }
+
+  const request = new Request("http://localhost/?source=test")
+  try {
+    await assert.rejects(
+      loader({ request } as LoaderFunctionArgs),
+      (error: unknown) => {
+        assert.ok(error instanceof Response)
+        const location = new URL(
+          error.headers.get("location") ?? "",
+          request.url
+        )
+        assert.equal(location.pathname, "/login")
+        assert.equal(
+          location.searchParams.get("redirect"),
+          "/?source=test"
+        )
+        return true
+      }
+    )
+    assert.deepEqual(requests, ["http://localhost:3001/api/auth/get-session"])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test("loader hydrates the selected chat and reports API state", async () => {
@@ -48,6 +94,9 @@ test("loader hydrates the selected chat and reports API state", async () => {
   globalThis.fetch = async (input) => {
     if (!online) throw new Error("offline")
     const url = String(input)
+    if (url.endsWith("/api/auth/get-session")) {
+      return Response.json({ user: { id: "user-1" } })
+    }
     if (url.endsWith("/api/health")) {
       return Response.json({ status: "ok" })
     }
@@ -125,16 +174,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
       },
     })
     online = false
-    assert.deepEqual(await loader(args), {
-      apiStatus: "offline",
-      chatId: "test-chat",
-      initialState: {
-        messages: [],
-        participants: [],
-        activity: initialGroupActivity,
-        cursor: 0,
-      },
-    })
+    await assert.rejects(loader(args), /offline/)
   } finally {
     globalThis.fetch = originalFetch
   }

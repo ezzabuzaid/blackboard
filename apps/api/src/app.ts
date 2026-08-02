@@ -7,6 +7,10 @@ import type { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 const configuredOrigin = process.env.WEB_ORIGIN
 
 export interface AppDependencies {
+  auth: {
+    handler(request: Request): Promise<Response>
+    getSession(headers: Headers): Promise<{ user: { id: string } } | null>
+  }
   runtime: Pick<
     WhatsAppChatRuntime,
     "post" | "snapshot" | "stop" | "subscribe" | "traces"
@@ -14,11 +18,12 @@ export interface AppDependencies {
   openArtifact: OpenArtifact
 }
 
-export function createApp({ runtime, openArtifact }: AppDependencies) {
-  return new Hono()
+export function createApp({ auth, runtime, openArtifact }: AppDependencies) {
+  return new Hono<{ Variables: { userId: string } }>()
     .use(
       "/api/*",
       cors({
+        credentials: true,
         origin: (origin) => {
           if (configuredOrigin) {
             return origin === configuredOrigin ? origin : null
@@ -37,5 +42,15 @@ export function createApp({ runtime, openArtifact }: AppDependencies) {
       })
     )
     .get("/api/health", (context) => context.json({ status: "ok" }))
+    .on(["GET", "POST"], "/api/auth/*", (context) =>
+      auth.handler(context.req.raw)
+    )
+    .use("/api/chat/*", async (context, next) => {
+      const session = await auth.getSession(context.req.raw.headers)
+      if (!session) return context.json({ error: "Unauthorized." }, 401)
+
+      context.set("userId", session.user.id)
+      await next()
+    })
     .route("/api/chat", createChatRoutes(runtime, openArtifact))
 }

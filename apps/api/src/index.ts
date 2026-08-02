@@ -6,8 +6,10 @@ import { serve } from "@hono/node-server"
 import { serveStatic } from "@hono/node-server/serve-static"
 
 import { createApp } from "./app.js"
+import { createAuthentication } from "./auth.js"
+import { createChatGPTSubscription } from "./chatgpt.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
-import { whatsappParticipants } from "./group/participants.js"
+import { createWhatsAppParticipants } from "./group/participants.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
 import { openArtifact } from "./sandbox.js"
 
@@ -20,12 +22,34 @@ if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) {
   throw new Error("PORT must be a valid TCP port")
 }
 
+const authSecret = process.env.BETTER_AUTH_SECRET
+if (!authSecret || authSecret.length < 32) {
+  throw new Error("BETTER_AUTH_SECRET must contain at least 32 characters")
+}
+
+const baseURL = process.env.BETTER_AUTH_URL ?? `http://localhost:${port}`
+const trustedOrigins = process.env.WEB_ORIGIN
+  ? [process.env.WEB_ORIGIN]
+  : ["http://localhost:5173", "http://127.0.0.1:5173"]
+
 await using resources = new AsyncDisposableStack()
 
+const authentication = resources.use(
+  await createAuthentication({
+    databasePath: resolve(dataDirectory, "auth.sqlite"),
+    baseURL,
+    secret: authSecret,
+    trustedOrigins,
+  })
+)
 const sandboxResources = resources.use(new AsyncDisposableStack())
 const runtime = resources.use(
   new WhatsAppChatRuntime({
-    participants: whatsappParticipants,
+    participantsForUser: async ({ userId }) =>
+      createWhatsAppParticipants(
+        resolve(dataDirectory, "users", userId),
+        await createChatGPTSubscription(authentication.auth, userId)
+      ),
     limits: {
       notifications: 25,
       agentMessages: 100,
@@ -38,6 +62,10 @@ const runtime = resources.use(
 )
 
 const app = createApp({
+  auth: {
+    handler: authentication.auth.handler,
+    getSession: (headers) => authentication.auth.api.getSession({ headers }),
+  },
   runtime,
   openArtifact: (conversation, path) =>
     openArtifact(dataDirectory, conversation, path),

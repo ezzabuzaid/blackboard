@@ -17,6 +17,13 @@ export const router = createBrowserRouter([
         },
       },
       {
+        path: "login",
+        lazy: async () => {
+          const route = await import("./routes/Login")
+          return { Component: route.default, loader: route.loader }
+        },
+      },
+      {
         path: "*",
         loader: () => {
           throw new Response("Not Found", { status: 404 })

@@ -6,7 +6,7 @@ import {
   useState,
 } from "react"
 
-import { apiUrl } from "./api"
+import { apiFetch, apiUrl } from "./api"
 import {
   addGroupMessage,
   isGroupChatEvent,
@@ -56,7 +56,8 @@ export function GroupChatProvider({
 
   useEffect(() => {
     const source = new EventSource(
-      `${apiUrl}/api/chat/${encodeURIComponent(chatId)}/events?after=${initialState.cursor}`
+      `${apiUrl}/api/chat/${encodeURIComponent(chatId)}/events?after=${initialState.cursor}`,
+      { withCredentials: true }
     )
     const receive = ({ data }: MessageEvent<string>) => {
       try {
@@ -77,8 +78,8 @@ export function GroupChatProvider({
     setPosting(true)
     setError(null)
     try {
-      const response = await fetch(
-        `${apiUrl}/api/chat/${encodeURIComponent(chatId)}/messages`,
+      const response = await apiFetch(
+        `/api/chat/${encodeURIComponent(chatId)}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -116,8 +117,8 @@ export function GroupChatProvider({
     setStopping(true)
     setError(null)
     try {
-      const response = await fetch(
-        `${apiUrl}/api/chat/${encodeURIComponent(chatId)}/stop`,
+      const response = await apiFetch(
+        `/api/chat/${encodeURIComponent(chatId)}/stop`,
         { method: "POST" }
       )
       const state: unknown = await response.json()

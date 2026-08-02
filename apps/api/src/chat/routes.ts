@@ -23,9 +23,12 @@ export function createChatRoutes(
   >,
   openArtifact: OpenArtifact
 ) {
-  return new Hono()
+  return new Hono<{ Variables: { userId: string } }>()
     .get("/:chatId/state", async (context) => {
-      const conversation = conversationFrom(context.req.param("chatId"))
+      const conversation = conversationFrom(
+        context.get("userId"),
+        context.req.param("chatId")
+      )
       if (!conversation) {
         return context.json({ error: "Invalid chat id." }, 400)
       }
@@ -33,7 +36,10 @@ export function createChatRoutes(
       return context.json(await chats.snapshot(conversation))
     })
     .get("/:chatId/events", async (context) => {
-      const conversation = conversationFrom(context.req.param("chatId"))
+      const conversation = conversationFrom(
+        context.get("userId"),
+        context.req.param("chatId")
+      )
       const after = eventCursor(
         context.req.header("Last-Event-ID") ?? context.req.query("after") ?? "0"
       )
@@ -58,7 +64,10 @@ export function createChatRoutes(
       })
     })
     .get("/:chatId/agents/:agent/traces", async (context) => {
-      const conversation = conversationFrom(context.req.param("chatId"))
+      const conversation = conversationFrom(
+        context.get("userId"),
+        context.req.param("chatId")
+      )
       if (!conversation) {
         return context.json({ error: "Invalid chat id." }, 400)
       }
@@ -72,7 +81,10 @@ export function createChatRoutes(
         : context.json({ error: "Agent not found." }, 404)
     })
     .get("/:chatId/artifacts/:path{.+}", async (context) => {
-      const conversation = conversationFrom(context.req.param("chatId"))
+      const conversation = conversationFrom(
+        context.get("userId"),
+        context.req.param("chatId")
+      )
       const path = artifactPath(context.req.param("path"))
       if (!conversation || !path) {
         return context.json({ error: "Invalid artifact path." }, 400)
@@ -97,7 +109,10 @@ export function createChatRoutes(
       return context.body(artifact.body)
     })
     .post("/:chatId/stop", async (context) => {
-      const conversation = conversationFrom(context.req.param("chatId"))
+      const conversation = conversationFrom(
+        context.get("userId"),
+        context.req.param("chatId")
+      )
       if (!conversation) {
         return context.json({ error: "Invalid chat id." }, 400)
       }
@@ -112,7 +127,10 @@ export function createChatRoutes(
           context.json({ error: "Chat message is too large." }, 413),
       }),
       async (context) => {
-        const conversation = conversationFrom(context.req.param("chatId"))
+        const conversation = conversationFrom(
+          context.get("userId"),
+          context.req.param("chatId")
+        )
         const body = await context.req.json().catch(() => null)
         const id =
           body && typeof body === "object" && "id" in body ? body.id : null
