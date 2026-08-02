@@ -2,9 +2,16 @@ import { randomUUID } from "node:crypto"
 
 import {
   type AgentModel,
+  type ContextFragment,
   type ContextStore,
   type StreamManager,
-  role,
+  guardrail,
+  persona,
+  policy,
+  principle,
+  quirk,
+  styleGuide,
+  workflow,
 } from "@deepagents/context"
 import {
   AgentRuntime,
@@ -24,7 +31,7 @@ import { PgBoss, fromPglite } from "pg-boss"
 export interface WhatsAppParticipant {
   name: string
   source: string
-  instructions?: string
+  instructions?: readonly ContextFragment[]
   model: AgentModel
   tools?: ToolSet
   telemetry?: AgentDeclaration["telemetry"]
@@ -269,22 +276,65 @@ export class WhatsAppGroup implements AsyncDisposable {
           telemetry: participant.telemetry,
           sandbox: options.sandbox,
           instructions: [
-            role(
-              [
-                `You are ${participant.name} in a WhatsApp-style group chat. You own this data source: ${participant.source}. ${participant.instructions ?? ""}`,
-                "Every turn is a notification containing new public group messages.",
-                "New public messages may also arrive as mailbox communications between model steps; reconsider your planned contribution when they do.",
-                "Read them and decide autonomously whether to participate.",
-                "For casual or social messages, you may respond briefly; silence is also natural, and the group should not answer in chorus.",
-                "For substantive messages, reply only when your owned data source gives you something useful and non-duplicative to add.",
-                `When the user explicitly asks for exactly one answer, only the named participant may reply; if nobody is named, only ${options.participants[0]!.name} may reply. Every other participant must stay silent.`,
-                "A short, unaddressed user follow-up or acknowledgment belongs to the participant who authored the immediately preceding public reply. If that was not you, stay silent. An explicit participant name or request to the whole group overrides this.",
+            persona({
+              name: participant.name,
+              role: `Owner of ${participant.source} in a WhatsApp-style group chat`,
+              objective:
+                "Contribute only useful, non-duplicative information from the owned source.",
+              tone: "Concise, natural, and selective",
+            }),
+            ...(participant.instructions ?? []),
+            principle({
+              title: "Voluntary, source-owned participation",
+              description:
+                "Read each notification and decide autonomously whether you have a useful public contribution.",
+              policies: [
+                policy({
+                  rule: "For casual or social messages, you may respond briefly; silence is also natural, and the group should not answer in chorus.",
+                }),
+                policy({
+                  rule: "For substantive messages, reply only when your owned data source gives you something useful and non-duplicative to add.",
+                }),
+                policy({
+                  rule: `When the user explicitly asks for exactly one answer, only the named participant may reply; if nobody is named, only ${options.participants[0]!.name} may reply. Every other participant must stay silent.`,
+                }),
+                policy({
+                  rule: "A short, unaddressed user follow-up or acknowledgment belongs to the participant who authored the immediately preceding public reply. If that was not you, stay silent. An explicit participant name or request to the whole group overrides this.",
+                }),
+              ],
+            }),
+            workflow({
+              task: "Handle a group notification",
+              triggers: ["new public group messages"],
+              steps: [
+                "Read the new public messages and any mailbox communications received between model steps.",
+                "Decide whether your owned source gives you a useful, non-duplicative contribution.",
                 "If yes, call reply_to_group with the concise message you want everyone to see.",
+                "Omit replyToMessageId for ordinary responses to the latest user message or current discussion. Set it only to emphasize a particular earlier message or directly reply to another participant's message.",
                 "If reply_to_group reports transcript_changed, reconsider the new messages and either retry with a distinct contribution or remain silent.",
-                "If no, do not call reply_to_group. Do not reply merely to agree, repeat, or announce silence.",
-                "Your ordinary assistant text is private and never appears in the group.",
-              ].join(" ")
-            ),
+                "If no useful contribution remains, do not call reply_to_group.",
+              ],
+              notes:
+                "Every turn is a notification containing new public group messages. replyToMessageId is an optional UI pointer, not the message you are answering.",
+            }),
+            quirk({
+              issue:
+                "New public messages may arrive as mailbox communications between model steps while you are preparing a contribution.",
+              workaround:
+                "Reconsider the planned contribution when they arrive; reply_to_group also reports transcript_changed when the public transcript advanced.",
+            }),
+            guardrail({
+              rule: "Never use ordinary assistant text as a public group reply.",
+              reason:
+                "Ordinary assistant text is private and never appears in the group.",
+              action: "Use reply_to_group for every public contribution.",
+            }),
+            styleGuide({
+              prefer: "One concise, natural, useful contribution at a time.",
+              always:
+                "Cite web sources with standard Markdown links containing full URLs.",
+              never: "Reply merely to agree, repeat, or announce silence.",
+            }),
           ],
           tools: {
             ...participant.tools,

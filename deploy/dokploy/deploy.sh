@@ -149,8 +149,8 @@ smoke_volume=
 printf '✓ remote app smoke test\n'
 
 ssh "$ssh_host" "docker volume create '$volume_name'" >/dev/null
-ssh "$ssh_host" "docker run --rm -i --volume '$volume_name:/data' '$image' sh -ceu 'umask 077; mkdir -p /data/zukhruf; cat > /data/zukhruf/chatgpt.json'" <"$token_file"
-printf '✓ ChatGPT credentials copied to the persistent deployment volume\n'
+ssh "$ssh_host" "docker run --rm -i --volume '$volume_name:/data' '$image' sh -ceu 'test -s /data/zukhruf/chatgpt.json && exit 0; umask 077; mkdir -p /data/zukhruf; cat > /data/zukhruf/chatgpt.json'" <"$token_file"
+printf '✓ ChatGPT credentials available in the persistent deployment volume\n'
 
 projects=$(dokploy_query project.all)
 project_count=$(printf '%s\n' "$projects" | jq --arg name "$project_name" '[.[] | select(.name == $name)] | length')

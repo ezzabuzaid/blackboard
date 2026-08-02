@@ -47,14 +47,17 @@ export function ChatComposer() {
           <div className="overflow-hidden rounded-[26px] bg-card">
             {replyingTo && (
               <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">
-                <div className="min-w-0 flex-1 border-l-2 border-primary pl-2 text-left">
+                <div className="min-w-0 flex-1 border-l-2 border-primary pl-2 text-start">
                   <p className="text-xs font-medium text-foreground">
                     Replying to{" "}
                     {replyingTo.author === "user"
                       ? "yourself"
                       : replyingTo.author}
                   </p>
-                  <p className="truncate text-xs font-normal text-muted-foreground">
+                  <p
+                    dir="auto"
+                    className="truncate text-start text-xs font-normal text-muted-foreground [unicode-bidi:plaintext]"
+                  >
                     {replyingTo.content}
                   </p>
                 </div>
@@ -70,6 +73,7 @@ export function ChatComposer() {
             )}
             <InputGroup className="min-h-[52px] rounded-none border-transparent bg-transparent has-disabled:!bg-transparent has-disabled:!opacity-100 has-[[data-slot=input-group-control]:focus-visible]:!border-transparent has-[[data-slot=input-group-control]:focus-visible]:!ring-0">
               <InputGroupTextarea
+                dir="auto"
                 id="message"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
@@ -83,7 +87,7 @@ export function ChatComposer() {
                 disabled={posting}
                 aria-invalid={!!error}
                 rows={1}
-                className="max-h-40 min-h-10 px-4 py-[9px] text-[15px] leading-[22px]"
+                className="max-h-40 min-h-10 px-4 py-[9px] text-start text-[15px] leading-[22px] [unicode-bidi:plaintext]"
               />
               <InputGroupAddon align="inline-end" className="self-end p-1">
                 <InputGroupButton

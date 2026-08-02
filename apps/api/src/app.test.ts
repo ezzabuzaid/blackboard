@@ -963,23 +963,22 @@ test("quoted replies persist resolved context and emit real presence", async () 
 
 test("ordinary agent contributions do not quote their triggering message", async () => {
   let calls = 0
+  let systemInstructions: string | undefined
   const participant = new MockLanguageModelV4({
     doStream: async ({ prompt }) => {
       calls++
       if (calls > 1) return groupTextResponse("Nothing else to add.")
 
-      const instructions = JSON.stringify(prompt)
-      const messageId = instructions.match(/\[([\da-f-]{36})\] user:/u)?.[1]
+      const notification = JSON.stringify(prompt)
+      const messageId = notification.match(/\[([\da-f-]{36})\] user:/u)?.[1]
       assert.ok(messageId)
-      const quoteIsOptional =
-        instructions.includes("Omit replyToMessageId by default") &&
-        instructions.includes("emphasize that message") &&
-        instructions.includes("directly replying to another participant") &&
-        instructions.includes("ordinary response to the latest user message")
+      systemInstructions = prompt
+        .filter((message) => message.role === "system")
+        .map((message) => message.content)
+        .join("\n")
 
       return groupToolResponse("reply_to_group", "introduction", {
         message: "I'm Maya. I own the research evidence.",
-        ...(quoteIsOptional ? {} : { replyToMessageId: messageId }),
       })
     },
   })
@@ -999,6 +998,18 @@ test("ordinary agent contributions do not quote their triggering message", async
   const messages = await group.send("Introduce yourself.")
   const reply = messages.find(({ author }) => author === "Maya")
   assert.ok(reply)
+  assert.match(
+    systemInstructions ?? "",
+    /replyToMessageId is an optional UI pointer, not the message you are answering/u
+  )
+  assert.match(
+    systemInstructions ?? "",
+    /Omit replyToMessageId for ordinary responses to the latest user message or current discussion/u
+  )
+  assert.match(
+    systemInstructions ?? "",
+    /Set it only to emphasize a particular earlier message or directly reply to another participant/u
+  )
   assert.equal(reply.replyToMessageId, null)
 })
 

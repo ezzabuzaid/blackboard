@@ -121,7 +121,7 @@ function UserMessageCluster({
                       : undefined
                   }
                 />
-                <p>
+                <p dir="auto" className="text-start [unicode-bidi:plaintext]">
                   {message.content}
                   <MessageTimestamp sentAt={message.sentAt} />
                 </p>
@@ -175,12 +175,14 @@ function GroupReplyCluster({
                     : undefined
                 }
               />
-              <AssistantMarkdown
-                active={false}
-                chatId={chatId}
-                text={message.content}
-              />
-              <MessageTimestamp sentAt={message.sentAt} />
+              <div dir="auto" className="text-start [unicode-bidi:plaintext]">
+                <AssistantMarkdown
+                  active={false}
+                  chatId={chatId}
+                  text={message.content}
+                />
+                <MessageTimestamp sentAt={message.sentAt} />
+              </div>
             </BubbleContent>
           </Bubble>
         ))}
@@ -231,7 +233,10 @@ function ReplyQuote({ message }: { message?: GroupMessage }) {
       >
         {message.author === "user" ? "You" : message.author}
       </p>
-      <p className="line-clamp-2 text-xs text-muted-foreground">
+      <p
+        dir="auto"
+        className="line-clamp-2 text-start text-xs text-muted-foreground [unicode-bidi:plaintext]"
+      >
         {message.content}
       </p>
     </div>
@@ -242,9 +247,10 @@ function MessageTimestamp({ sentAt }: { sentAt: string }) {
   const date = new Date(sentAt)
   return (
     <time
+      dir="ltr"
       dateTime={sentAt}
       title={date.toLocaleString()}
-      className="ml-2 inline-block align-baseline text-[10px] leading-none whitespace-nowrap text-muted-foreground"
+      className="ms-2 inline-block align-baseline text-[10px] leading-none whitespace-nowrap text-muted-foreground"
     >
       {messageTime.format(date)}
     </time>
