@@ -22,18 +22,9 @@ import { simulateReadableStream } from "ai"
 import { MockLanguageModelV4 } from "ai/test"
 import { InMemoryFs } from "just-bash"
 
-import agentSandbox, {
-  disposeSandboxes,
-  removeSandbox,
-} from "./agent/sandbox.js"
-import { scheduleTask } from "./agent/tools/schedule-task.js"
 import { createApp, type AppDependencies } from "./app.js"
 import { parseChatGPTTokens } from "./chatgpt.js"
-import type {
-  ListQueuedTurns,
-  OpenArtifact,
-  QueuedTurn,
-} from "./chat/routes.js"
+import type { OpenArtifact } from "./chat/routes.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import { createWhatsAppSandbox, shareSandboxInstance } from "./group/sandbox.js"
 import {
@@ -116,18 +107,15 @@ const unusedRuntime: ChatRuntime = {
   },
 }
 
-const noQueuedTurns = async (): Promise<QueuedTurn[]> => []
 const noArtifact: OpenArtifact = async () => null
 function testApp({
   runtime = unusedRuntime,
-  listQueuedTurns = noQueuedTurns,
   openArtifact = noArtifact,
 }: {
   runtime?: ChatRuntime
-  listQueuedTurns?: ListQueuedTurns
   openArtifact?: OpenArtifact
 } = {}) {
-  return createApp({ runtime, listQueuedTurns, openArtifact })
+  return createApp({ runtime, openArtifact })
 }
 
 const app = testApp()
@@ -155,14 +143,11 @@ test("saved ChatGPT credentials are validated before use", () => {
   )
 })
 
-test("health reports the linked agent", async () => {
+test("health reports the WhatsApp group service", async () => {
   const response = await app.request("/api/health")
 
   assert.equal(response.status, 200)
-  assert.deepEqual(await response.json(), {
-    status: "ok",
-    agent: "zukhruf",
-  })
+  assert.deepEqual(await response.json(), { status: "ok" })
 })
 
 test("agent telemetry is grouped into complete chat-scoped turns", async () => {
@@ -525,6 +510,7 @@ test("chat message and event cursors are validated at the boundary", async () =>
     400
   )
   assert.equal((await app.request("/api/chat/chat-1/stream")).status, 404)
+  assert.equal((await app.request("/api/chat/chat-1/turns")).status, 404)
   assert.equal(
     (
       await app.request("/api/chat", {
@@ -575,34 +561,6 @@ test("chat message and event cursors are validated at the boundary", async () =>
   assert.equal(missingReply.status, 400)
 })
 
-test("queued turns endpoint uses the requested chat", async () => {
-  let received: { chatId: string; userId: string } | undefined
-  const response = await testApp({
-    listQueuedTurns: async (conversation) => {
-      received = conversation
-      return [
-        {
-          id: "turn-2",
-          kind: "ask",
-          input: "Self-scheduled task:\nResearch the side lead.",
-        },
-      ]
-    },
-  }).request("/api/chat/chat-1/turns")
-
-  assert.equal(response.status, 200)
-  assert.deepEqual(received, { chatId: "chat-1", userId: "local-user" })
-  assert.deepEqual(await response.json(), {
-    turns: [
-      {
-        id: "turn-2",
-        kind: "ask",
-        input: "Self-scheduled task:\nResearch the side lead.",
-      },
-    ],
-  })
-})
-
 test("development CORS accepts a local fallback port", async () => {
   const response = await app.request("/api/health", {
     headers: { Origin: "http://localhost:5174" },
@@ -612,82 +570,6 @@ test("development CORS accepts a local fallback port", async () => {
     response.headers.get("Access-Control-Allow-Origin"),
     "http://localhost:5174"
   )
-})
-
-test("schedule_task enqueues work for the same conversation", async () => {
-  let received:
-    | [{ chatId: string; userId: string }, { id: string; input: string }]
-    | undefined
-  const executeOptions = {
-    toolCallId: "tool-call-1",
-    messages: [],
-    abortSignal: new AbortController().signal,
-    context: {
-      actor: {
-        thread: {
-          conversation: { chatId: "chat-1", userId: "local-user" },
-        },
-      },
-      controlPlane: {
-        async enqueue(
-          conversation: { chatId: string; userId: string },
-          turn: { id: string; input: string }
-        ) {
-          received = [conversation, turn]
-          return "turn-2"
-        },
-      },
-    },
-  } as Parameters<typeof scheduleTask.execute>[1]
-
-  const result = await scheduleTask.execute(
-    { task: " Research the side lead. " },
-    executeOptions
-  )
-
-  assert.deepEqual(received, [
-    { chatId: "chat-1", userId: "local-user" },
-    {
-      id: "tool-call-1",
-      input: "Self-scheduled task:\nResearch the side lead.",
-    },
-  ])
-  assert.deepEqual(result, { turnId: "turn-2" })
-})
-
-test("virtual sandbox persists its workspace", async () => {
-  const conversation = { chatId: "chat-1", userId: "local-user" }
-
-  try {
-    const firstTurn = await agentSandbox(conversation)
-    await firstTurn.sandbox.writeFiles([
-      { path: "/workspace/probe.txt", content: "sandbox" },
-    ])
-
-    const secondTurn = await agentSandbox(conversation)
-    assert.equal(
-      await secondTurn.sandbox.readFile("/workspace/probe.txt"),
-      "sandbox"
-    )
-    const workingDirectory = await secondTurn.sandbox.executeCommand("pwd")
-    assert.deepEqual(workingDirectory, {
-      stdout: "/workspace\n",
-      stderr: "",
-      exitCode: 0,
-    })
-
-    const inventory = await secondTurn.sandbox.executeCommand(
-      "find /workspace -maxdepth 1 -type f -print | sort"
-    )
-    assert.deepEqual(inventory, {
-      stdout: "/workspace/probe.txt\n",
-      stderr: "",
-      exitCode: 0,
-    })
-  } finally {
-    await disposeSandboxes()
-    await removeSandbox(conversation)
-  }
 })
 
 test("publishes a group reply before slower members finish", async () => {

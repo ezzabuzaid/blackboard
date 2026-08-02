@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto"
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir } from "node:fs/promises"
 import { resolve } from "node:path"
 
 import { createVirtualSandbox } from "@deepagents/context"
@@ -79,14 +79,4 @@ export async function openArtifact(
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null
     throw error
   }
-}
-
-export async function removeVirtualSandbox(
-  dataDirectory: string,
-  conversation: ConversationId
-) {
-  await rm(sandboxRoot(dataDirectory, conversation), {
-    recursive: true,
-    force: true,
-  })
 }

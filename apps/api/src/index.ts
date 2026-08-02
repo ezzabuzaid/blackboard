@@ -39,7 +39,6 @@ const runtime = resources.use(
 
 const app = createApp({
   runtime,
-  listQueuedTurns: async () => [],
   openArtifact: (conversation, path) =>
     openArtifact(dataDirectory, conversation, path),
 })

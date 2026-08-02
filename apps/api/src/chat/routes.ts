@@ -1,4 +1,4 @@
-import type { ConversationId, TurnRef } from "@deepagents/experimental/zukhruf"
+import type { ConversationId } from "@deepagents/experimental/zukhruf"
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { streamSSE } from "hono/streaming"
@@ -11,16 +11,6 @@ import {
 } from "../group/whatsapp.js"
 import { conversationFrom } from "./conversation.js"
 
-export interface QueuedTurn {
-  id: string
-  kind: TurnRef["kind"]
-  input: string | null
-}
-
-export type ListQueuedTurns = (
-  conversation: ConversationId
-) => Promise<QueuedTurn[]>
-
 export type OpenArtifact = (
   conversation: ConversationId,
   path: string
@@ -31,7 +21,6 @@ export function createChatRoutes(
     WhatsAppChatRuntime,
     "post" | "snapshot" | "stop" | "subscribe" | "traces"
   >,
-  listQueuedTurns: ListQueuedTurns,
   openArtifact: OpenArtifact
 ) {
   return new Hono()
@@ -66,16 +55,6 @@ export function createChatRoutes(
               .catch(() => undefined)
         )
         await new Promise<void>((resolve) => output.onAbort(resolve))
-      })
-    })
-    .get("/:chatId/turns", async (context) => {
-      const conversation = conversationFrom(context.req.param("chatId"))
-      if (!conversation) {
-        return context.json({ error: "Invalid chat id." }, 400)
-      }
-
-      return context.json({
-        turns: await listQueuedTurns(conversation),
       })
     })
     .get("/:chatId/agents/:agent/traces", async (context) => {
