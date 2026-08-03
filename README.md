@@ -16,8 +16,47 @@ Agents use an in-process virtual Bash sandbox with persistent workspaces under
 `ZUKHRUF_DATA_DIR`; it does not require KVM or a container runtime. Open the web
 app and choose **Continue with ChatGPT** to connect your subscription. Better
 Auth stores the user session and encrypted OAuth tokens in `auth.sqlite` under
-`ZUKHRUF_DATA_DIR`. Set `CHATGPT_MODEL` only to override the first model
-available to that account.
+`ZUKHRUF_DATA_DIR`.
+
+## Agents
+
+Every chat includes a built-in **Factory** agent. Factory remains silent until
+the human starts a request with `Factory` or `@Factory`; immediate human replies
+to Factory continue that request. For example:
+
+```text
+Factory, create a customer researcher named Maya.
+```
+
+Factory creates and updates the same file-based agent definitions that can be
+edited directly:
+
+```text
+$ZUKHRUF_DATA_DIR/agents/<agent>/
+├── identity.json
+├── SOUL.md
+├── AGENTS.md
+└── MEMORY.md
+```
+
+`identity.json` contains the host-visible identity:
+
+```json
+{
+  "name": "Maya"
+}
+```
+
+Agent identities are loaded when a new chat is created. At the start of each
+turn, an agent discovers and reads its own `SOUL.md` for persona and voice,
+`AGENTS.md` for operating instructions, and `MEMORY.md` for durable knowledge.
+The shared agent directory is read-only inside chat sandboxes. Ordinary agents
+can update only their own `MEMORY.md` through a scoped tool; Factory alone can
+create or replace `identity.json`, `SOUL.md`, and `AGENTS.md`. Factory preserves
+an existing `MEMORY.md` unless the human asks to replace it. Updates are visible
+on the agent's next turn, while newly created agents join new chats. The host
+does not read or inject the Markdown workspace files, and a missing or invalid
+`identity.json` is rejected as invalid configuration.
 
 ## Checks
 

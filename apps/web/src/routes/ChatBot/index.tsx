@@ -16,10 +16,15 @@ import {
 export { loader }
 
 export default function ChatBot() {
-  const { chatId, initialState } = useLoaderData<typeof loader>()
+  const { apiStatus, chatId, initialState } = useLoaderData<typeof loader>()
 
   return (
-    <GroupChatProvider key={chatId} chatId={chatId} initialState={initialState}>
+    <GroupChatProvider
+      key={chatId}
+      apiStatus={apiStatus}
+      chatId={chatId}
+      initialState={initialState}
+    >
       <AgentTraceProvider>
         <main className="relative flex h-svh flex-col bg-background">
           <GroupHeader />
@@ -33,7 +38,7 @@ export default function ChatBot() {
 }
 
 function GroupHeader() {
-  const { activity, participants, stop, stopping } = useGroupChat()
+  const { apiStatus, activity, participants, stop, stopping } = useGroupChat()
   const location = useLocation()
   const navigate = useNavigate()
   const presence = groupPresenceLabel(activity)
@@ -53,9 +58,11 @@ function GroupHeader() {
           className="truncate text-xs text-muted-foreground"
           aria-live="polite"
         >
-          {presence ??
-            (participants.map(({ name }) => name).join(", ") ||
-              "Loading group…")}
+          {apiStatus === "offline"
+            ? "Group unavailable"
+            : (presence ??
+              (participants.map(({ name }) => name).join(", ") ||
+                "No agents yet"))}
         </p>
       </div>
       {activity.phase === "active" && (

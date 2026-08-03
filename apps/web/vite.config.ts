@@ -4,6 +4,7 @@ import { defineConfig } from "vite"
 
 export default defineConfig({
   envDir: "../..",
+  server: { forwardConsole: true },
   resolve: { tsconfigPaths: true },
   plugins: [react(), tailwindcss()],
 })

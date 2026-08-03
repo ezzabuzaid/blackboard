@@ -30,7 +30,7 @@ import { PgBoss, fromPglite } from "pg-boss"
 
 export interface WhatsAppParticipant {
   name: string
-  source: string
+  activation?: "explicit"
   instructions?: readonly ContextFragment[]
   model: AgentModel
   tools?: ToolSet
@@ -107,7 +107,7 @@ export type WhatsAppChatEvent =
 
 export interface WhatsAppGroupSnapshot {
   messages: WhatsAppMessage[]
-  participants: { name: string; source: string }[]
+  participants: { name: string }[]
   activity: WhatsAppGroupActivityState
   cursor: number
 }
@@ -149,6 +149,7 @@ export class WhatsAppReplyTargetError extends Error {
 
 interface RunningParticipant {
   name: string
+  activation: "always" | "explicit"
   conversation: ConversationId
   runtime: AgentRuntime
   active: boolean
@@ -175,7 +176,7 @@ interface GroupSubscriber extends Pick<
 export class WhatsAppGroup implements AsyncDisposable {
   readonly #resources: AsyncDisposableStack
   readonly #participants: RunningParticipant[]
-  readonly #profiles: { name: string; source: string }[]
+  readonly #profiles: { name: string }[]
   readonly #user: ConversationId
   readonly #subscribers = new Set<GroupSubscriber>()
   readonly #messages: WhatsAppMessage[] = []
@@ -210,10 +211,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     this.#resources = resources.disposables
     this.#participants = resources.participants
     this.#user = options.conversation
-    this.#profiles = options.participants.map(({ name, source }) => ({
-      name,
-      source,
-    }))
+    this.#profiles = options.participants.map(({ name }) => ({ name }))
     this.#limits = options.limits
     this.#persist = options.persist
     for (const event of structuredClone(options.events)) {
@@ -278,14 +276,14 @@ export class WhatsAppGroup implements AsyncDisposable {
           instructions: [
             persona({
               name: participant.name,
-              role: `Owner of ${participant.source} in a WhatsApp-style group chat`,
+              role: "Participant in a WhatsApp-style group chat",
               objective:
-                "Contribute only useful, non-duplicative information from the owned source.",
+                "Contribute only useful, non-duplicative information grounded in your role-specific instructions.",
               tone: "Concise, natural, and selective",
             }),
             ...(participant.instructions ?? []),
             principle({
-              title: "Voluntary, source-owned participation",
+              title: "Voluntary participation",
               description:
                 "Read each notification and decide autonomously whether you have a useful public contribution.",
               policies: [
@@ -293,7 +291,7 @@ export class WhatsAppGroup implements AsyncDisposable {
                   rule: "For casual or social messages, you may respond briefly; silence is also natural, and the group should not answer in chorus.",
                 }),
                 policy({
-                  rule: "For substantive messages, reply only when your owned data source gives you something useful and non-duplicative to add.",
+                  rule: "For substantive messages, reply only when your role-specific instructions give you something useful and non-duplicative to add.",
                 }),
                 policy({
                   rule: `When the user explicitly asks for exactly one answer, only the named participant may reply; if nobody is named, only ${options.participants[0]!.name} may reply. Every other participant must stay silent.`,
@@ -308,7 +306,7 @@ export class WhatsAppGroup implements AsyncDisposable {
               triggers: ["new public group messages"],
               steps: [
                 "Read the new public messages and any mailbox communications received between model steps.",
-                "Decide whether your owned source gives you a useful, non-duplicative contribution.",
+                "Decide whether your role-specific instructions give you a useful, non-duplicative contribution.",
                 "If yes, call reply_to_group with the concise message you want everyone to see.",
                 "Omit replyToMessageId for ordinary responses to the latest user message or current discussion. Set it only to emphasize a particular earlier message or directly reply to another participant's message.",
                 "If reply_to_group reports transcript_changed, reconsider the new messages and either retry with a distinct contribution or remain silent.",
@@ -384,6 +382,7 @@ export class WhatsAppGroup implements AsyncDisposable {
 
       participants.push({
         name: participant.name,
+        activation: participant.activation ?? "always",
         conversation: {
           chatId: `${options.conversation.chatId}:participant:${index}`,
           userId: options.conversation.userId,
@@ -609,9 +608,11 @@ export class WhatsAppGroup implements AsyncDisposable {
       const batches = this.#participants.map((participant) => ({
         participant,
         notifications: pending.filter(
-          ({ id, author }) =>
-            author !== participant.name &&
-            !this.#mailboxRecipients.get(id)?.has(participant.name)
+          (message) =>
+            this.#shouldNotify(message, participant) &&
+            !this.#mailboxRecipients
+              .get(message.id)
+              ?.has(participant.name)
         ),
       }))
       const recipients = batches
@@ -838,7 +839,8 @@ export class WhatsAppGroup implements AsyncDisposable {
 
   async #deliverToActiveParticipants(message: WhatsAppMessage) {
     const recipients = this.#participants.filter(
-      ({ active, name }) => active && name !== message.author
+      (participant) =>
+        participant.active && this.#shouldNotify(message, participant)
     )
     if (recipients.length === 0) return
 
@@ -884,15 +886,24 @@ export class WhatsAppGroup implements AsyncDisposable {
     )
   }
 
+  #shouldNotify(message: WhatsAppMessage, participant: RunningParticipant) {
+    if (message.author === participant.name) return false
+    if (participant.activation === "always") return true
+    if (message.author !== "user") return false
+    if (explicitlyAddresses(message.content, participant.name)) return true
+
+    const target = message.replyToMessageId
+      ? this.#messagesById.get(message.replyToMessageId)
+      : this.#messages[message.sequence - 2]
+    return target?.author === participant.name
+  }
+
   static #validate(options: WhatsAppGroupOptions) {
     if (!options.conversation.userId.trim()) {
       throw new Error("WhatsAppGroup userId cannot be empty")
     }
     if (!options.conversation.chatId.trim()) {
       throw new Error("WhatsAppGroup chatId cannot be empty")
-    }
-    if (options.participants.length === 0) {
-      throw new Error("WhatsAppGroup requires at least one participant")
     }
     const names = new Set<string>()
     for (const participant of options.participants) {
@@ -904,15 +915,6 @@ export class WhatsAppGroup implements AsyncDisposable {
       ) {
         throw new Error(
           "WhatsAppGroup participant names must be valid, unpadded text"
-        )
-      }
-      if (
-        !participant.source.trim() ||
-        participant.source !== participant.source.trim() ||
-        participant.source.length > 200
-      ) {
-        throw new Error(
-          "WhatsAppGroup participant sources must be valid, unpadded text"
         )
       }
       if (participant.name.toLowerCase() === "user") {
@@ -934,6 +936,18 @@ export class WhatsAppGroup implements AsyncDisposable {
       }
     }
   }
+}
+
+function explicitlyAddresses(content: string, name: string) {
+  const text = content.trimStart()
+  const address = text.startsWith("@") ? text.slice(1) : text
+  return (
+    address
+      .slice(0, name.length)
+      .localeCompare(name, "en", { sensitivity: "accent" }) === 0 &&
+    (address.length === name.length ||
+      /[\s,.:;!?\-\u2013\u2014]/u.test(address[name.length]!))
+  )
 }
 
 function reduceActivity(

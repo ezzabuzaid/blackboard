@@ -4,16 +4,17 @@ import { resolve } from "node:path"
 
 import { createVirtualSandbox } from "@deepagents/context"
 import type { ConversationId } from "@deepagents/experimental/zukhruf"
-import { MountableFs, ReadWriteFs } from "just-bash"
+import { MountableFs, OverlayFs, ReadWriteFs } from "just-bash"
 
 interface WorkspaceMount {
   path: string
   root: string
+  readOnly?: boolean
 }
 
-const workspaceId = ({ chatId, userId }: ConversationId) =>
+const workspaceId = ({ chatId }: ConversationId) =>
   createHash("sha256")
-    .update(JSON.stringify([userId, chatId]))
+    .update(chatId)
     .digest("hex")
     .slice(0, 32)
 
@@ -44,9 +45,11 @@ export async function createPersistentVirtualSandbox(
 
   const filesystem = new MountableFs({
     base: new ReadWriteFs({ root }),
-    mounts: mounts.map(({ path, root }) => ({
+    mounts: mounts.map(({ path, root, readOnly }) => ({
       mountPoint: path,
-      filesystem: new ReadWriteFs({ root }),
+      filesystem: readOnly
+        ? new OverlayFs({ root, mountPoint: "/", readOnly: true })
+        : new ReadWriteFs({ root }),
     })),
   })
   const sandbox = await createVirtualSandbox({

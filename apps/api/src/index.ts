@@ -9,7 +9,7 @@ import { createApp } from "./app.js"
 import { createAuthentication } from "./auth.js"
 import { createChatGPTSubscription } from "./chatgpt.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
-import { createWhatsAppParticipants } from "./group/participants.js"
+import { AgentDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
 import { openArtifact } from "./sandbox.js"
 
@@ -43,13 +43,19 @@ const authentication = resources.use(
   })
 )
 const sandboxResources = resources.use(new AsyncDisposableStack())
+const agents = new AgentDirectory(
+  dataDirectory,
+  async (userId) => {
+    const chatgpt = await createChatGPTSubscription(authentication.auth, userId)
+    return {
+      model: chatgpt.model,
+      tools: { web_search: chatgpt.webSearch },
+    }
+  }
+)
 const runtime = resources.use(
   new WhatsAppChatRuntime({
-    participantsForUser: async ({ userId }) =>
-      createWhatsAppParticipants(
-        resolve(dataDirectory, "users", userId),
-        await createChatGPTSubscription(authentication.auth, userId)
-      ),
+    loadParticipants: (userId) => agents.participants(userId),
     limits: {
       notifications: 25,
       agentMessages: 100,

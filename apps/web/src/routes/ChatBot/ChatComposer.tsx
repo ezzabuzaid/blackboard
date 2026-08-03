@@ -14,13 +14,22 @@ import { SendIcon, X } from "lucide-react"
 import { useGroupChat } from "./GroupChat"
 
 export function ChatComposer() {
-  const { cancelReply, clearError, error, postMessage, posting, replyingTo } =
-    useGroupChat()
+  const {
+    apiStatus,
+    cancelReply,
+    clearError,
+    error,
+    participants,
+    postMessage,
+    posting,
+    replyingTo,
+  } = useGroupChat()
   const [draft, setDraft] = useState("")
+  const disabled = apiStatus === "offline" || participants.length === 0
 
   async function sendMessage() {
     const text = draft.trim()
-    if (!text || posting) return
+    if (!text || posting || disabled) return
 
     clearError()
     try {
@@ -83,8 +92,14 @@ export function ChatComposer() {
                     event.currentTarget.form?.requestSubmit()
                   }
                 }}
-                placeholder="Message the group…"
-                disabled={posting}
+                placeholder={
+                  apiStatus === "offline"
+                    ? "Group unavailable"
+                    : participants.length === 0
+                      ? "Add an agent to start chatting"
+                      : "Message the group…"
+                }
+                disabled={posting || disabled}
                 aria-invalid={!!error}
                 rows={1}
                 className="max-h-40 min-h-10 px-4 py-[9px] text-start text-[15px] leading-[22px] [unicode-bidi:plaintext]"
@@ -94,7 +109,7 @@ export function ChatComposer() {
                   type="submit"
                   variant="default"
                   size="icon-sm"
-                  disabled={posting || !draft.trim()}
+                  disabled={posting || disabled || !draft.trim()}
                   aria-label={posting ? "Sending" : "Send"}
                   className="size-10 rounded-full"
                 >

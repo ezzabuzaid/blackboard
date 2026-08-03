@@ -4,7 +4,6 @@ import {
   type CodexAuth,
   createCodexFetch,
   ensureFreshTokens,
-  listCodexModels,
   resolveConfig,
 } from "@opencoredev/loginwithchatgpt-core"
 import { decryptOAuthToken, setTokenUtil } from "better-auth/oauth2"
@@ -68,11 +67,7 @@ export async function createChatGPTSubscription(auth: AppAuth, userId: string) {
     return result
   }
 
-  const models = await listCodexModels({ config, getAuth })
-  const modelId = selectChatGPTModel(
-    models,
-    process.env.CHATGPT_MODEL || undefined
-  )
+  const modelId = "gpt-5.6-terra"
   const chatgpt = createOpenAI({
     name: "chatgpt",
     baseURL: config.codexBaseUrl,
@@ -85,19 +80,4 @@ export async function createChatGPTSubscription(auth: AppAuth, userId: string) {
     model: chatgpt.responses(modelId),
     webSearch: chatgpt.tools.webSearch(),
   }
-}
-
-export function selectChatGPTModel(
-  models: readonly string[],
-  requested?: string
-) {
-  if (requested) {
-    console.log(`Requested ChatGPT model: ${requested}`)
-    if (models.includes(requested)) return requested
-    throw new Error(
-      `CHATGPT_MODEL=${requested} is unavailable; choose one of: ${models.join(", ")}`
-    )
-  }
-  if (models[0]) return models[0]
-  throw new Error("The connected ChatGPT account has no available Codex models")
 }

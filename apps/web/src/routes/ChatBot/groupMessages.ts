@@ -17,7 +17,6 @@ export interface GroupMessage {
 
 export interface GroupParticipant {
   name: string
-  source: string
 }
 
 export interface GroupChatState {
@@ -129,13 +128,7 @@ export function isGroupChatEvent(value: unknown): value is GroupChatEvent {
 }
 
 function isGroupParticipant(value: unknown): value is GroupParticipant {
-  return (
-    isRecord(value) &&
-    typeof value.name === "string" &&
-    !!value.name &&
-    typeof value.source === "string" &&
-    !!value.source
-  )
+  return isRecord(value) && typeof value.name === "string" && !!value.name
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

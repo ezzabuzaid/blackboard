@@ -19,6 +19,7 @@ import {
 
 interface GroupChat extends GroupChatState {
   chatId: string
+  apiStatus: "ready" | "offline"
   posting: boolean
   stopping: boolean
   replyingTo: GroupMessage | null
@@ -40,11 +41,13 @@ export function useGroupChat() {
 
 interface GroupChatProviderProps extends PropsWithChildren {
   chatId: string
+  apiStatus: "ready" | "offline"
   initialState: GroupChatState
 }
 
 export function GroupChatProvider({
   chatId,
+  apiStatus,
   initialState,
   children,
 }: GroupChatProviderProps) {
@@ -75,6 +78,11 @@ export function GroupChatProvider({
   }, [chatId, initialState.cursor])
 
   async function postMessage(content: string) {
+    if (apiStatus === "offline") throw new Error("The group is unavailable.")
+    if (chat.participants.length === 0) {
+      throw new Error("Add an agent before sending a message.")
+    }
+
     setPosting(true)
     setError(null)
     try {
@@ -143,6 +151,7 @@ export function GroupChatProvider({
       value={{
         ...chat,
         chatId,
+        apiStatus,
         posting,
         stopping,
         replyingTo,

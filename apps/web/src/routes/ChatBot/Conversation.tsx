@@ -37,7 +37,8 @@ const messageTime = new Intl.DateTimeFormat(undefined, {
 })
 
 export function Conversation() {
-  const { activity, chatId, messages, replyTo } = useGroupChat()
+  const { apiStatus, activity, chatId, messages, participants, replyTo } =
+    useGroupChat()
   const messagesById = useMemo(
     () => new Map(messages.map((message) => [message.id, message])),
     [messages]
@@ -54,7 +55,10 @@ export function Conversation() {
             >
               {messages.length === 0 && (
                 <MessageScrollerItem>
-                  <WelcomeMessage />
+                  <WelcomeMessage
+                    apiStatus={apiStatus}
+                    participants={participants.map(({ name }) => name)}
+                  />
                 </MessageScrollerItem>
               )}
 
@@ -161,9 +165,7 @@ function GroupReplyCluster({
             >
               {index === 0 && (
                 <MessageHeader
-                  className={`px-0 text-[13px] leading-[22px] font-medium ${groupMemberNameClass(
-                    cluster.author
-                  )}`}
+                  className={`px-0 text-[13px] leading-[22px] font-medium ${groupMemberNameClass}`}
                 >
                   {cluster.author}
                 </MessageHeader>
@@ -226,9 +228,7 @@ function ReplyQuote({ message }: { message?: GroupMessage }) {
       <p
         className={cn(
           "text-xs font-medium",
-          message.author === "user"
-            ? "text-primary"
-            : groupMemberNameClass(message.author)
+          message.author === "user" ? "text-primary" : groupMemberNameClass
         )}
       >
         {message.author === "user" ? "You" : message.author}
@@ -290,18 +290,25 @@ export function AssistantMarkdown({
   )
 }
 
-function WelcomeMessage() {
+function WelcomeMessage({
+  apiStatus,
+  participants,
+}: {
+  apiStatus: "ready" | "offline"
+  participants: readonly string[]
+}) {
   return (
     <Message className="items-start gap-3 max-sm:flex-col">
-      <GroupAvatarStack className="mt-1 max-sm:mt-0" />
+      <GroupAvatarStack members={participants} className="mt-1 max-sm:mt-0" />
       <MessageContent className="gap-1">
-        <MessageHeader className="text-foreground">
-          Baseera
-        </MessageHeader>
+        <MessageHeader className="text-foreground">Baseera</MessageHeader>
         <Bubble variant="ghost">
           <BubbleContent className="max-w-[65ch] text-base leading-relaxed whitespace-pre-wrap">
-            Message the group. Specialists reply only when they have something
-            useful to add.
+            {apiStatus === "offline"
+              ? "The group is unavailable. Try again when the API is online."
+              : participants.length === 0
+                ? "No agents yet. Add an agent folder with identity.json, SOUL.md, AGENTS.md, and MEMORY.md to start."
+                : "Message the group. Specialists reply only when they have something useful to add."}
           </BubbleContent>
         </Bubble>
       </MessageContent>
