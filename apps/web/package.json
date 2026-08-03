@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sdk-it/client": "*",
     "@stdlib/shadcn": "*",
     "lucide-react": "^1.26.0",
     "mdast-util-directive": "^3.1.0",

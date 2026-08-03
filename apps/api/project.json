@@ -1,0 +1,15 @@
+{
+  "name": "api",
+  "targets": {
+    "sdk": {
+      "command": "npx @sdk-it/cli generate",
+      "cache": true,
+      "inputs": [
+        "default",
+        "{workspaceRoot}/sdk-it.config.ts",
+        "{workspaceRoot}/package-lock.json"
+      ],
+      "outputs": ["{workspaceRoot}/.sdk-it"]
+    }
+  }
+}

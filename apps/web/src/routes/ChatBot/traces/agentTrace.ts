@@ -1,4 +1,4 @@
-import { apiFetch } from "../api"
+import { api } from "../api"
 
 export interface AgentTraceUsage {
   inputTokens: number
@@ -47,12 +47,12 @@ export async function fetchAgentTraces(
   agent: string,
   signal: AbortSignal
 ) {
-  const response = await apiFetch(
-    `/api/chat/${encodeURIComponent(chatId)}/agents/${encodeURIComponent(agent)}/traces`,
+  const value: unknown = await api.request(
+    "GET /api/chat/{chatId}/agents/{agent}/traces",
+    { chatId, agent },
     { signal }
   )
-  const value: unknown = await response.json()
-  if (!response.ok || !isAgentTraceResponse(value)) {
+  if (!isAgentTraceResponse(value)) {
     throw new Error("Agent traces could not be loaded.")
   }
   return value.turns

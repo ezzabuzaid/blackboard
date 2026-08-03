@@ -77,6 +77,17 @@ const app = createApp({
   auth: {
     handler: authentication.auth.handler,
     getSession: (headers) => authentication.auth.api.getSession({ headers }),
+    getSessionResponse: (request) =>
+      authentication.auth.api.getSession({
+        headers: request.headers,
+        asResponse: true,
+      }),
+    startDevice: (request) =>
+      authentication.auth.api.device({ request, asResponse: true }),
+    pollDevice: (request) =>
+      authentication.auth.api.poll({ request, asResponse: true }),
+    cancelDevice: (request) =>
+      authentication.auth.api.cancel({ request, asResponse: true }),
   },
   runtime,
   openArtifact: (conversation, path) =>

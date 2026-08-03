@@ -1,7 +1,7 @@
 import { redirect, type LoaderFunctionArgs } from "react-router"
 
 import { requireIdentity } from "../../auth"
-import { apiFetch } from "./api"
+import { api } from "./api"
 import { initialGroupActivity } from "./groupActivity"
 import { isGroupChatState } from "./groupMessages"
 
@@ -17,17 +17,14 @@ export async function loader(args: LoaderFunctionArgs) {
   }
 
   try {
-    const [healthResponse, stateResponse] = await Promise.all([
-      apiFetch("/api/health", { signal: request.signal }),
-      apiFetch(`/api/chat/${encodeURIComponent(chatId)}/state`, {
-        signal: request.signal,
-      }),
+    const [, state] = await Promise.all([
+      api.request("GET /api/health", {}, { signal: request.signal }),
+      api.request(
+        "GET /api/chat/{chatId}/state",
+        { chatId },
+        { signal: request.signal }
+      ),
     ])
-    if (!healthResponse.ok || !stateResponse.ok) {
-      throw new Error("Chat API is unavailable")
-    }
-
-    const state: unknown = await stateResponse.json()
     if (!isGroupChatState(state)) {
       throw new Error("Invalid chat state")
     }

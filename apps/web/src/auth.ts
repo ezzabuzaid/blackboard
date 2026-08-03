@@ -1,14 +1,13 @@
 import { replace, type LoaderFunctionArgs } from "react-router"
 
-import { apiFetch } from "./routes/ChatBot/api"
+import { api } from "./routes/ChatBot/api"
 
 export async function requireIdentity({ request }: LoaderFunctionArgs) {
-  const response = await apiFetch("/api/auth/get-session", {
-    signal: request.signal,
-  })
-  if (!response.ok) throw new Error("Identity could not be checked")
-
-  const session: unknown = await response.json()
+  const session: unknown = await api.request(
+    "GET /api/auth/get-session",
+    {},
+    { signal: request.signal }
+  )
   if (!hasIdentity(session)) {
     const url = new URL(request.url)
     const redirect = `${url.pathname}${url.search}`

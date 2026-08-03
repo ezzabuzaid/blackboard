@@ -15,7 +15,7 @@ import {
 } from "react-router"
 
 import { hasIdentity, redirectDestination } from "../../auth"
-import { apiFetch } from "../ChatBot/api"
+import { api } from "../ChatBot/api"
 
 interface DeviceLogin {
   verificationUrl: string
@@ -26,10 +26,11 @@ interface DeviceLogin {
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const response = await apiFetch("/api/auth/get-session", {
-      signal: request.signal,
-    })
-    const session: unknown = response.ok ? await response.json() : null
+    const session: unknown = await api.request(
+      "GET /api/auth/get-session",
+      {},
+      { signal: request.signal }
+    )
     if (hasIdentity(session)) throw replace(redirectDestination(request.url))
   } catch (error) {
     if (error instanceof Response || request.signal.aborted) throw error
@@ -61,12 +62,12 @@ export default function Login() {
       }
 
       try {
-        const response = await authPost(
-          "/api/auth/chatgpt/device/poll",
-          controller.signal
+        const result: unknown = await api.request(
+          "POST /api/auth/chatgpt/device/poll",
+          {},
+          { signal: controller.signal }
         )
-        const result: unknown = await response.json()
-        if (!response.ok || !isPollResult(result)) {
+        if (!isPollResult(result)) {
           throw new Error("ChatGPT approval could not be checked.")
         }
         if (result.status === "complete") {
@@ -102,9 +103,11 @@ export default function Login() {
     setStarting(true)
     setError(null)
     try {
-      const response = await authPost("/api/auth/chatgpt/device")
-      const result: unknown = await response.json()
-      if (!response.ok || !isDeviceLogin(result)) {
+      const result: unknown = await api.request(
+        "POST /api/auth/chatgpt/device",
+        {}
+      )
+      if (!isDeviceLogin(result)) {
         throw new Error("ChatGPT sign-in could not be started.")
       }
       setDevice(result)
@@ -122,7 +125,9 @@ export default function Login() {
   function cancel() {
     setDevice(null)
     setError(null)
-    void authPost("/api/auth/chatgpt/device/cancel").catch(() => undefined)
+    void api
+      .request("POST /api/auth/chatgpt/device/cancel", {})
+      .catch(() => undefined)
   }
 
   async function copyCode() {
@@ -298,13 +303,4 @@ function isPollResult(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null
-}
-
-function authPost(path: string, signal?: AbortSignal) {
-  return apiFetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: "{}",
-    signal,
-  })
 }

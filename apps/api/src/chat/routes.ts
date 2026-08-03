@@ -3,6 +3,8 @@ import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { streamSSE } from "hono/streaming"
 import { getMimeType } from "hono/utils/mime"
+import { validate } from "@sdk-it/hono/runtime"
+import { z } from "zod"
 
 import type { WhatsAppChatRuntime } from "../group/chat-runtime.js"
 import {
@@ -17,31 +19,52 @@ export type OpenArtifact = (
 ) => Promise<{ body: Uint8Array<ArrayBuffer>; size: number } | null>
 
 export function createChatRoutes(
+  app: Hono<{ Variables: { userId: string } }>,
   chats: Pick<
     WhatsAppChatRuntime,
     "post" | "snapshot" | "stop" | "subscribe" | "traces"
   >,
   openArtifact: OpenArtifact
 ) {
-  return new Hono<{ Variables: { userId: string } }>()
-    .get("/:chatId/state", async (context) => {
+  /**
+   * @openapi getChatState
+   * @tags chat
+   */
+  app.get(
+    "/api/chat/:chatId/state",
+    validate((payload) => ({
+      chatId: { select: payload.params.chatId, against: z.string() },
+    })),
+    async (context) => {
       const conversation = conversationFrom(
         context.get("userId"),
-        context.req.param("chatId")
+        context.var.input.chatId
       )
       if (!conversation) {
         return context.json({ error: "Invalid chat id." }, 400)
       }
 
       return context.json(await chats.snapshot(conversation))
-    })
-    .get("/:chatId/events", async (context) => {
+    }
+  )
+
+  /**
+   * @openapi getChatEvents
+   * @tags chat
+   */
+  app.get(
+    "/api/chat/:chatId/events",
+    validate((payload) => ({
+      chatId: { select: payload.params.chatId, against: z.string() },
+      after: { select: payload.query.after, against: z.string().optional() },
+    })),
+    async (context) => {
       const conversation = conversationFrom(
         context.get("userId"),
-        context.req.param("chatId")
+        context.var.input.chatId
       )
       const after = eventCursor(
-        context.req.header("Last-Event-ID") ?? context.req.query("after") ?? "0"
+        context.req.header("Last-Event-ID") ?? context.var.input.after ?? "0"
       )
       if (!conversation || after === null) {
         return context.json({ error: "Invalid chat event cursor." }, 400)
@@ -62,30 +85,52 @@ export function createChatRoutes(
         )
         await new Promise<void>((resolve) => output.onAbort(resolve))
       })
-    })
-    .get("/:chatId/agents/:agent/traces", async (context) => {
+    }
+  )
+
+  /**
+   * @openapi getAgentTraces
+   * @tags chat
+   */
+  app.get(
+    "/api/chat/:chatId/agents/:agent/traces",
+    validate((payload) => ({
+      chatId: { select: payload.params.chatId, against: z.string() },
+      agent: { select: payload.params.agent, against: z.string() },
+    })),
+    async (context) => {
       const conversation = conversationFrom(
         context.get("userId"),
-        context.req.param("chatId")
+        context.var.input.chatId
       )
       if (!conversation) {
         return context.json({ error: "Invalid chat id." }, 400)
       }
 
-      const traces = await chats.traces(
-        conversation,
-        context.req.param("agent")
-      )
-      return traces
-        ? context.json(traces)
-        : context.json({ error: "Agent not found." }, 404)
-    })
-    .get("/:chatId/artifacts/:path{.+}", async (context) => {
+      const traces = await chats.traces(conversation, context.var.input.agent)
+      if (!traces) {
+        return context.json({ error: "Agent not found." }, 404)
+      }
+      return context.json(traces)
+    }
+  )
+
+  /**
+   * @openapi getArtifact
+   * @tags chat
+   */
+  app.get(
+    "/api/chat/:chatId/artifacts/:path{.+}",
+    validate((payload) => ({
+      chatId: { select: payload.params.chatId, against: z.string() },
+      path: { select: payload.params.path, against: z.string() },
+    })),
+    async (context) => {
       const conversation = conversationFrom(
         context.get("userId"),
-        context.req.param("chatId")
+        context.var.input.chatId
       )
-      const path = artifactPath(context.req.param("path"))
+      const path = artifactPath(context.var.input.path)
       if (!conversation || !path) {
         return context.json({ error: "Invalid artifact path." }, 400)
       }
@@ -107,77 +152,95 @@ export function createChatRoutes(
       context.header("X-Content-Type-Options", "nosniff")
 
       return context.body(artifact.body)
-    })
-    .post("/:chatId/stop", async (context) => {
+    }
+  )
+
+  /**
+   * @openapi stopChat
+   * @tags chat
+   */
+  app.post(
+    "/api/chat/:chatId/stop",
+    validate((payload) => ({
+      chatId: { select: payload.params.chatId, against: z.string() },
+    })),
+    async (context) => {
       const conversation = conversationFrom(
         context.get("userId"),
-        context.req.param("chatId")
+        context.var.input.chatId
       )
       if (!conversation) {
         return context.json({ error: "Invalid chat id." }, 400)
       }
 
       return context.json(await chats.stop(conversation))
-    })
-    .post(
-      "/:chatId/messages",
-      bodyLimit({
-        maxSize: 10 * 1024,
-        onError: (context) =>
-          context.json({ error: "Chat message is too large." }, 413),
-      }),
-      async (context) => {
-        const conversation = conversationFrom(
-          context.get("userId"),
-          context.req.param("chatId")
-        )
-        const body = await context.req.json().catch(() => null)
-        const id =
-          body && typeof body === "object" && "id" in body ? body.id : null
-        const content =
-          body && typeof body === "object" && "content" in body
-            ? body.content
-            : null
-        const replyToMessageId =
-          body && typeof body === "object" && "replyToMessageId" in body
-            ? body.replyToMessageId
-            : undefined
-        if (
-          !conversation ||
-          typeof id !== "string" ||
-          !id.trim() ||
-          id.length > 200 ||
-          typeof content !== "string" ||
-          !content.trim() ||
-          content.length > 8_000 ||
-          (replyToMessageId !== undefined &&
-            (typeof replyToMessageId !== "string" ||
-              !replyToMessageId.trim() ||
-              replyToMessageId.length > 200))
-        ) {
-          return context.json({ error: "Invalid chat message." }, 400)
-        }
+    }
+  )
 
-        try {
-          const message = await chats.post(conversation, {
-            id,
-            content: content.trim(),
-            ...(replyToMessageId
-              ? { replyToMessageId: replyToMessageId.trim() }
-              : {}),
-          })
-          return context.json({ message }, 201)
-        } catch (error) {
-          if (error instanceof WhatsAppGroupLimitError) {
-            return context.json({ error: error.message }, 409)
-          }
-          if (error instanceof WhatsAppReplyTargetError) {
-            return context.json({ error: error.message }, 400)
-          }
-          throw error
-        }
+  /**
+   * @openapi postChatMessage
+   * @tags chat
+   */
+  app.post(
+    "/api/chat/:chatId/messages",
+    bodyLimit({
+      maxSize: 10 * 1024,
+      onError: (context) =>
+        context.json({ error: "Chat message is too large." }, 413),
+    }),
+    async (context, next) => {
+      const body = await context.req.json().catch(() => null)
+      if (!body || typeof body !== "object") {
+        return context.json({ error: "Invalid chat message." }, 400)
       }
-    )
+      await next()
+    },
+    validate((payload) => ({
+      chatId: { select: payload.params.chatId, against: z.string() },
+      id: { select: payload.body.id, against: z.string() },
+      content: { select: payload.body.content, against: z.string() },
+      replyToMessageId: {
+        select: payload.body.replyToMessageId,
+        against: z.string().optional(),
+      },
+    })),
+    async (context) => {
+      const { chatId, id, content, replyToMessageId } = context.var.input
+      const conversation = conversationFrom(context.get("userId"), chatId)
+      if (
+        !conversation ||
+        !id.trim() ||
+        id.length > 200 ||
+        !content.trim() ||
+        content.length > 8_000 ||
+        (replyToMessageId !== undefined &&
+          (!replyToMessageId.trim() || replyToMessageId.length > 200))
+      ) {
+        return context.json({ error: "Invalid chat message." }, 400)
+      }
+
+      try {
+        const message = await chats.post(conversation, {
+          id,
+          content: content.trim(),
+          ...(replyToMessageId
+            ? { replyToMessageId: replyToMessageId.trim() }
+            : {}),
+        })
+        return context.json({ message }, 201)
+      } catch (error) {
+        if (error instanceof WhatsAppGroupLimitError) {
+          return context.json({ error: error.message }, 409)
+        }
+        if (error instanceof WhatsAppReplyTargetError) {
+          return context.json({ error: error.message }, 400)
+        }
+        throw error
+      }
+    }
+  )
+
+  return app
 }
 
 function eventCursor(value: string) {

@@ -6,7 +6,7 @@ import {
   useState,
 } from "react"
 
-import { apiFetch, apiUrl } from "./api"
+import { api, apiUrl } from "./api"
 import {
   addGroupMessage,
   isGroupChatEvent,
@@ -86,22 +86,18 @@ export function GroupChatProvider({
     setPosting(true)
     setError(null)
     try {
-      const response = await apiFetch(
-        `/api/chat/${encodeURIComponent(chatId)}/messages`,
+      const body: unknown = await api.request(
+        "POST /api/chat/{chatId}/messages",
         {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: crypto.randomUUID(),
-            content,
-            ...(replyingTo ? { replyToMessageId: replyingTo.id } : {}),
-          }),
+          chatId,
+          id: crypto.randomUUID(),
+          content,
+          ...(replyingTo ? { replyToMessageId: replyingTo.id } : {}),
         }
       )
-      const body: unknown = await response.json()
       const message =
         isRecord(body) && isGroupMessage(body.message) ? body.message : null
-      if (!response.ok || !message) {
+      if (!message) {
         throw new Error("The group could not receive your message.")
       }
       setChat((current) => ({
@@ -125,12 +121,11 @@ export function GroupChatProvider({
     setStopping(true)
     setError(null)
     try {
-      const response = await apiFetch(
-        `/api/chat/${encodeURIComponent(chatId)}/stop`,
-        { method: "POST" }
+      const state: unknown = await api.request(
+        "POST /api/chat/{chatId}/stop",
+        { chatId }
       )
-      const state: unknown = await response.json()
-      if (!response.ok || !isGroupChatState(state)) {
+      if (!isGroupChatState(state)) {
         throw new Error("The group could not be stopped.")
       }
       setChat(state)

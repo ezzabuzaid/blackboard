@@ -13,6 +13,11 @@ import { CHATGPT_PROVIDER_ID } from "./auth/chatgpt-plugin.js"
 
 export async function createChatGPTSubscription(auth: AppAuth, userId: string) {
   const context = await auth.$context
+  // Better Auth's OAuth helpers only read these shared context fields, but their
+  // declarations erase the concrete auth-options generic.
+  const tokenContext = context as unknown as Parameters<
+    typeof decryptOAuthToken
+  >[1]
   const account = (
     await context.internalAdapter.findAccountByUserId(userId)
   ).find(({ providerId }) => providerId === CHATGPT_PROVIDER_ID)
@@ -22,9 +27,9 @@ export async function createChatGPTSubscription(auth: AppAuth, userId: string) {
 
   const config = resolveConfig()
   let tokens: ChatGPTTokens = {
-    accessToken: await decryptOAuthToken(account.accessToken, context),
+    accessToken: await decryptOAuthToken(account.accessToken, tokenContext),
     refreshToken: account.refreshToken
-      ? await decryptOAuthToken(account.refreshToken, context)
+      ? await decryptOAuthToken(account.refreshToken, tokenContext)
       : undefined,
     idToken: account.idToken ?? undefined,
     expiresAt: account.accessTokenExpiresAt?.getTime(),
@@ -42,8 +47,11 @@ export async function createChatGPTSubscription(auth: AppAuth, userId: string) {
             idToken: refreshed.idToken ?? previous.idToken,
           }
           await context.internalAdapter.updateAccount(account.id, {
-            accessToken: await setTokenUtil(complete.accessToken, context),
-            refreshToken: await setTokenUtil(complete.refreshToken, context),
+            accessToken: await setTokenUtil(complete.accessToken, tokenContext),
+            refreshToken: await setTokenUtil(
+              complete.refreshToken,
+              tokenContext
+            ),
             idToken: complete.idToken,
             accessTokenExpiresAt: complete.expiresAt
               ? new Date(complete.expiresAt)

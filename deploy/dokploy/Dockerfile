@@ -10,6 +10,7 @@ RUN npm ci
 
 COPY apps apps
 COPY packages packages
+COPY sdk-it.config.ts sdk-it.config.ts
 RUN npx nx run api:build \
   && VITE_API_URL= npx nx run web:build \
   && npm prune --omit=dev

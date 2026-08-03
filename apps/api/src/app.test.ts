@@ -114,6 +114,11 @@ const noArtifact: OpenArtifact = async () => null
 const authenticatedAuth: AppDependencies["auth"] = {
   handler: async () => new Response(null, { status: 404 }),
   getSession: async () => ({ user: { id: "local-user" } }),
+  getSessionResponse: async () =>
+    Response.json({ user: { id: "local-user" } }),
+  startDevice: async () => new Response(null, { status: 404 }),
+  pollDevice: async () => new Response(null, { status: 404 }),
+  cancelDevice: async () => new Response(null, { status: 404 }),
 }
 
 function testApp({
@@ -278,6 +283,28 @@ test("health reports the WhatsApp group service", async () => {
 
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), { status: "ok" })
+})
+
+test("SDK auth routes preserve Better Auth response headers", async () => {
+  const response = await testApp({
+    auth: {
+      ...authenticatedAuth,
+      getSessionResponse: async () =>
+        Response.json(null, {
+          headers: {
+            "Set-Cookie": "session=test-session; HttpOnly; Path=/",
+            "X-Auth-Result": "checked",
+          },
+        }),
+    },
+  }).request("/api/auth/get-session")
+
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get("X-Auth-Result"), "checked")
+  assert.deepEqual(response.headers.getSetCookie(), [
+    "session=test-session; HttpOnly; Path=/",
+  ])
+  assert.equal(await response.json(), null)
 })
 
 test("chat routes require a Better Auth session", async () => {

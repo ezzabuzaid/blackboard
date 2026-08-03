@@ -1,0 +1,15 @@
+{
+  "name": "web",
+  "implicitDependencies": ["api"],
+  "targets": {
+    "build": {
+      "dependsOn": ["^build", { "projects": ["api"], "target": "sdk" }]
+    },
+    "dev": {
+      "dependsOn": [{ "projects": ["api"], "target": "sdk" }]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck", { "projects": ["api"], "target": "sdk" }]
+    }
+  }
+}

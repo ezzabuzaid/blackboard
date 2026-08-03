@@ -27,7 +27,8 @@ const sentAt = "2026-07-31T12:00:00.000Z"
 test("loader adds a chat id to the URL", async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (input) => {
-    assert.ok(String(input).endsWith("/api/auth/get-session"))
+    const url = input instanceof Request ? input.url : String(input)
+    assert.ok(url.endsWith("/api/auth/get-session"))
     return Response.json({ user: { id: "user-1" } })
   }
   const request = new Request("http://localhost/?source=test")
@@ -57,7 +58,7 @@ test("loader sends unauthenticated users to login", async () => {
   const originalFetch = globalThis.fetch
   const requests: string[] = []
   globalThis.fetch = async (input) => {
-    const url = String(input)
+    const url = input instanceof Request ? input.url : String(input)
     requests.push(url)
     if (url.endsWith("/api/auth/get-session")) return Response.json(null)
     return new Response(null, { status: 500 })
@@ -93,7 +94,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
   let hasHistory = true
   globalThis.fetch = async (input) => {
     if (!online) throw new Error("offline")
-    const url = String(input)
+    const url = input instanceof Request ? input.url : String(input)
     if (url.endsWith("/api/auth/get-session")) {
       return Response.json({ user: { id: "user-1" } })
     }

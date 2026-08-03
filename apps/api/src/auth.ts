@@ -11,7 +11,7 @@ export async function createAuthentication(options: {
   trustedOrigins: string[]
 }) {
   const database = new DatabaseSync(options.databasePath)
-  const authOptions: BetterAuthOptions = {
+  const authOptions = {
     appName: "Baseera",
     database,
     baseURL: options.baseURL,
@@ -25,7 +25,7 @@ export async function createAuthentication(options: {
       },
     },
     plugins: [chatGPTAuthPlugin()],
-  }
+  } satisfies BetterAuthOptions
   const auth = betterAuth(authOptions)
 
   await (await auth.$context).runMigrations()
