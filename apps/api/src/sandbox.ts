@@ -4,29 +4,57 @@ import { resolve } from "node:path"
 
 import { createVirtualSandbox } from "@deepagents/context"
 import type { ConversationId } from "@deepagents/experimental/zukhruf"
-import { MountableFs, OverlayFs, ReadWriteFs } from "just-bash"
+import {
+  MountableFs,
+  OverlayFs,
+  ReadWriteFs,
+  type IFileSystem,
+} from "just-bash"
 
-interface WorkspaceMount {
+interface RealWorkspaceMount {
   path: string
   root: string
   readOnly?: boolean
 }
 
+interface VirtualWorkspaceMount {
+  path: string
+  filesystem: IFileSystem
+}
+
+type WorkspaceMount = RealWorkspaceMount | VirtualWorkspaceMount
+
+function mountFilesystem(mount: WorkspaceMount) {
+  if ("filesystem" in mount) return mount.filesystem
+  if (mount.readOnly) {
+    return new OverlayFs({
+      root: mount.root,
+      mountPoint: "/",
+      readOnly: true,
+    })
+  }
+  return new ReadWriteFs({ root: mount.root })
+}
+
 const workspaceId = ({ chatId }: ConversationId) =>
-  createHash("sha256")
-    .update(chatId)
-    .digest("hex")
-    .slice(0, 32)
+  createHash("sha256").update(chatId).digest("hex").slice(0, 32)
 
-const sandboxRoot = (
-  dataDirectory: string,
-  conversation: ConversationId
-) => resolve(dataDirectory, "sandboxes", workspaceId(conversation))
+export const userDataRoot = (dataDirectory: string, userId: string) =>
+  resolve(
+    dataDirectory,
+    "users",
+    createHash("sha256").update(userId).digest("hex")
+  )
 
-const artifactRoot = (
-  dataDirectory: string,
-  conversation: ConversationId
-) => resolve(sandboxRoot(dataDirectory, conversation), "workspace", "output")
+const sandboxRoot = (dataDirectory: string, conversation: ConversationId) =>
+  resolve(
+    userDataRoot(dataDirectory, conversation.userId),
+    "sandboxes",
+    workspaceId(conversation)
+  )
+
+const artifactRoot = (dataDirectory: string, conversation: ConversationId) =>
+  resolve(sandboxRoot(dataDirectory, conversation), "workspace", "output")
 
 export async function createPersistentVirtualSandbox(
   resources: AsyncDisposableStack,
@@ -39,17 +67,15 @@ export async function createPersistentVirtualSandbox(
     [
       resolve(root, "workspace"),
       artifactRoot(dataDirectory, conversation),
-      ...mounts.map(({ root }) => root),
+      ...mounts.flatMap((mount) => ("root" in mount ? [mount.root] : [])),
     ].map((path) => mkdir(path, { recursive: true, mode: 0o700 }))
   )
 
   const filesystem = new MountableFs({
     base: new ReadWriteFs({ root }),
-    mounts: mounts.map(({ path, root, readOnly }) => ({
-      mountPoint: path,
-      filesystem: readOnly
-        ? new OverlayFs({ root, mountPoint: "/", readOnly: true })
-        : new ReadWriteFs({ root }),
+    mounts: mounts.map((mount) => ({
+      mountPoint: mount.path,
+      filesystem: mountFilesystem(mount),
     })),
   })
   const sandbox = await createVirtualSandbox({

@@ -25,7 +25,7 @@ const CHAT_EVENT_TYPE = "data-whatsapp-chat-event"
 
 interface ChatSession {
   group: WhatsAppGroup
-  participants: readonly WhatsAppParticipant[]
+  participants: WhatsAppParticipant[]
 }
 
 export class WhatsAppChatRuntime implements AsyncDisposable {
@@ -44,7 +44,9 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   ) => AgentDeclaration["sandbox"]
 
   constructor(options: {
-    loadParticipants: (userId: string) => Promise<readonly WhatsAppParticipant[]>
+    loadParticipants: (
+      userId: string
+    ) => Promise<readonly WhatsAppParticipant[]>
     limits: WhatsAppGroupLimits
     sandboxForChat: (
       conversation: ConversationId
@@ -98,7 +100,9 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
 
   async traces(conversation: ConversationId, participantName: string) {
     const { participants } = await this.#chat(conversation)
-    const participant = participants.find(({ name }) => name === participantName)
+    const participant = participants.find(
+      ({ name }) => name === participantName
+    )
     if (!participant?.tracePath) return null
     return {
       agent: participant.name,
@@ -140,21 +144,24 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     const events = (await this.#streamStore.getChunks(streamId)).map(
       ({ seq, data, createdAt }) => chatEvent(data, seq, createdAt)
     )
-    const participants = (await this.#loadParticipants(conversation.userId)).map(
-      (participant) =>
-        participant.telemetry
-          ? {
-              ...participant,
-              telemetry: {
-                ...participant.telemetry,
-                functionId: `${conversation.chatId}:${participant.name}`,
-              },
-            }
-          : participant
-    )
+    const participants = [...(await this.#loadChatParticipants(conversation))]
+    const loadParticipants = async () => {
+      const loaded = await this.#loadChatParticipants(conversation)
+      const names = new Set(
+        participants.map(({ name }) => name.toLocaleLowerCase("en"))
+      )
+      for (const participant of loaded) {
+        const name = participant.name.toLocaleLowerCase("en")
+        if (names.has(name)) continue
+        participants.push(participant)
+        names.add(name)
+      }
+      return loaded
+    }
     const group = await WhatsAppGroup.create({
       conversation,
       participants,
+      loadParticipants,
       sandbox: this.#sandboxForChat(conversation),
       store: this.#store,
       streams: this.#streams,
@@ -174,6 +181,21 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     this.#resources.use(group)
     await group.recoverInterrupted()
     return { group, participants }
+  }
+
+  async #loadChatParticipants(conversation: ConversationId) {
+    return (await this.#loadParticipants(conversation.userId)).map(
+      (participant) =>
+        participant.telemetry
+          ? {
+              ...participant,
+              telemetry: {
+                ...participant.telemetry,
+                functionId: `${conversation.chatId}:${participant.name}`,
+              },
+            }
+          : participant
+    )
   }
 }
 

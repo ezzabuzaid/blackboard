@@ -4,6 +4,7 @@ services:
     pull_policy: never
     restart: unless-stopped
     environment:
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       CHATGPT_MODEL: ${CHATGPT_MODEL:-gpt-5.6-sol}
       HOME: /data/home
       PORT: "3001"

@@ -236,31 +236,10 @@ export function isGroupActivityState(
   )
 }
 
-export function groupPresenceLabel(state: GroupActivityState) {
-  const typing = state.presence.filter(({ state }) => state === "typing")
-  if (typing.length > 0)
-    return presenceNames(
-      typing.map(({ name }) => name),
-      "typing"
-    )
-
-  const reading = state.presence.filter(({ state }) => state === "reading")
-  if (reading.length > 0) {
-    return presenceNames(
-      reading.map(({ name }) => name),
-      "reading"
-    )
-  }
-
-  return state.phase === "settled" && state.notification > 0
-    ? "Seen by all"
-    : null
-}
-
-function presenceNames(names: string[], action: "reading" | "typing") {
-  if (names.length === 1) return `${names[0]} is ${action}…`
-  if (names.length === 2) return `${names[0]} and ${names[1]} are ${action}…`
-  return `${names[0]} and ${names.length - 1} others are ${action}…`
+export function groupTypingParticipants(state: GroupActivityState) {
+  return state.presence
+    .filter(({ state }) => state === "typing")
+    .map(({ name }) => name)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -25,6 +25,7 @@ import {
   groupMemberNameClass,
 } from "./GroupAvatar"
 import { useGroupChat } from "./GroupChat"
+import { groupTypingParticipants } from "./groupActivity"
 import {
   groupMessageClusters,
   type GroupMessage,
@@ -43,6 +44,7 @@ export function Conversation() {
     () => new Map(messages.map((message) => [message.id, message])),
     [messages]
   )
+  const typingParticipants = groupTypingParticipants(activity)
 
   return (
     <section aria-label="Conversation" className="min-h-0 flex-1 bg-muted/60">
@@ -84,12 +86,52 @@ export function Conversation() {
                   )}
                 </MessageScrollerItem>
               ))}
+
+              {typingParticipants.length > 0 && (
+                <MessageScrollerItem className="animate-in duration-200 fade-in slide-in-from-bottom-1">
+                  <GroupTypingIndicator participants={typingParticipants} />
+                </MessageScrollerItem>
+              )}
             </MessageScrollerContent>
           </MessageScrollerViewport>
           <MessageScrollerButton />
         </MessageScroller>
       </MessageScrollerProvider>
     </section>
+  )
+}
+
+function GroupTypingIndicator({
+  participants,
+}: {
+  participants: readonly string[]
+}) {
+  const label =
+    participants.length === 1
+      ? `${participants[0]} is typing`
+      : `${participants.length} people are typing`
+
+  return (
+    <Message role="status" className="items-start gap-2">
+      <GroupAvatarStack members={participants} className="mt-0.5" />
+      <Bubble variant="outline">
+        <BubbleContent className="relative flex h-8 items-center gap-1 !overflow-visible rounded-[8px] rounded-tl-none !border-transparent !bg-card px-3 before:absolute before:top-0 before:-left-2 before:size-2 before:bg-inherit before:content-[''] before:[clip-path:polygon(100%_0,100%_100%,0_0)]">
+          <span className="sr-only">{label}</span>
+          <span
+            aria-hidden="true"
+            className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-300ms] motion-reduce:animate-none"
+          />
+          <span
+            aria-hidden="true"
+            className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-150ms] motion-reduce:animate-none"
+          />
+          <span
+            aria-hidden="true"
+            className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 motion-reduce:animate-none"
+          />
+        </BubbleContent>
+      </Bubble>
+    </Message>
   )
 }
 

@@ -8,7 +8,7 @@ import { Streamdown } from "streamdown"
 
 import { artifactRemarkPlugins, sandboxArtifactUrl } from "./artifactLinks"
 import {
-  groupPresenceLabel,
+  groupTypingParticipants,
   initialGroupActivity,
   reduceGroupActivity,
   type GroupActivityEvent,
@@ -339,7 +339,7 @@ test("group activity tracks decisions, replies, and settlement", () => {
   })
 })
 
-test("group presence reports real reading, typing, and seen states", () => {
+test("typing presence excludes reading and seen states", () => {
   const started = reduceGroupActivity(initialGroupActivity, {
     type: "started",
     participants: ["Maya", "Omar"],
@@ -350,7 +350,7 @@ test("group presence reports real reading, typing, and seen states", () => {
     participant: "Maya",
     state: "reading",
   })
-  assert.equal(groupPresenceLabel(reading), "Maya is reading…")
+  assert.deepEqual(groupTypingParticipants(reading), [])
 
   const typing = reduceGroupActivity(reading, {
     type: "presence",
@@ -358,12 +358,12 @@ test("group presence reports real reading, typing, and seen states", () => {
     participant: "Omar",
     state: "typing",
   })
-  assert.equal(groupPresenceLabel(typing), "Omar is typing…")
-  assert.equal(
-    groupPresenceLabel(
+  assert.deepEqual(groupTypingParticipants(typing), ["Omar"])
+  assert.deepEqual(
+    groupTypingParticipants(
       reduceGroupActivity(typing, { type: "settled", notifications: 1 })
     ),
-    "Seen by all"
+    []
   )
 })
 

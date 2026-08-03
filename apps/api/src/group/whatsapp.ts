@@ -6,10 +6,12 @@ import {
   type ContextStore,
   type StreamManager,
   guardrail,
+  once,
   persona,
   policy,
   principle,
   quirk,
+  reminder,
   styleGuide,
   workflow,
 } from "@deepagents/context"
@@ -30,7 +32,6 @@ import { PgBoss, fromPglite } from "pg-boss"
 
 export interface WhatsAppParticipant {
   name: string
-  activation?: "explicit"
   instructions?: readonly ContextFragment[]
   model: AgentModel
   tools?: ToolSet
@@ -121,6 +122,7 @@ export interface WhatsAppGroupLimits {
 export interface WhatsAppGroupOptions {
   conversation: ConversationId
   participants: readonly WhatsAppParticipant[]
+  loadParticipants?: () => Promise<readonly WhatsAppParticipant[]>
   sandbox: AgentDeclaration["sandbox"]
   store: ContextStore
   streams: StreamManager
@@ -149,13 +151,17 @@ export class WhatsAppReplyTargetError extends Error {
 
 interface RunningParticipant {
   name: string
-  activation: "always" | "explicit"
   conversation: ConversationId
   runtime: AgentRuntime
   active: boolean
   seenThroughSequence: number
   turnId?: string
 }
+
+type StartParticipant = (
+  participant: WhatsAppParticipant,
+  joining: boolean
+) => Promise<RunningParticipant>
 
 type WhatsAppReplyResult =
   | { posted: true }
@@ -177,6 +183,8 @@ export class WhatsAppGroup implements AsyncDisposable {
   readonly #resources: AsyncDisposableStack
   readonly #participants: RunningParticipant[]
   readonly #profiles: { name: string }[]
+  readonly #loadParticipants?: WhatsAppGroupOptions["loadParticipants"]
+  readonly #startParticipant: StartParticipant
   readonly #user: ConversationId
   readonly #subscribers = new Set<GroupSubscriber>()
   readonly #messages: WhatsAppMessage[] = []
@@ -206,10 +214,13 @@ export class WhatsAppGroup implements AsyncDisposable {
     resources: {
       disposables: AsyncDisposableStack
       participants: RunningParticipant[]
+      startParticipant: StartParticipant
     }
   ) {
     this.#resources = resources.disposables
     this.#participants = resources.participants
+    this.#loadParticipants = options.loadParticipants
+    this.#startParticipant = resources.startParticipant
     this.#user = options.conversation
     this.#profiles = options.participants.map(({ name }) => ({ name }))
     this.#limits = options.limits
@@ -252,6 +263,8 @@ export class WhatsAppGroup implements AsyncDisposable {
     boss.on("error", (error) => console.error("[queue error]", error))
     resources.defer(() => boss.stop({ close: false, graceful: true }))
     const participants: RunningParticipant[] = []
+    let participantNumber = 0
+    let participantResources = resources
     let publishReply: (
       author: string,
       content: string,
@@ -259,9 +272,9 @@ export class WhatsAppGroup implements AsyncDisposable {
     ) => Promise<WhatsAppReplyResult>
 
     await boss.start()
-    for (const [index, participant] of options.participants.entries()) {
+    const startParticipant: StartParticipant = async (participant, joining) => {
       const queue = new PgBossTurnQueue(boss, {
-        queue: `zukhruf-whatsapp-${index}`,
+        queue: `zukhruf-whatsapp-${participantNumber++}`,
         schema: "pgboss",
         pollingIntervalSeconds: 0.5,
       })
@@ -282,13 +295,41 @@ export class WhatsAppGroup implements AsyncDisposable {
               tone: "Concise, natural, and selective",
             }),
             ...(participant.instructions ?? []),
+            ...(joining
+              ? [
+                  reminder(
+                    "You just joined an ongoing group chat. Read the full public conversation included in this notification, then greet the group once with a brief, natural introduction.",
+                    {
+                      asPart: true,
+                      when: once("whatsapp-participant-joined"),
+                    }
+                  ),
+                ]
+              : []),
+            ...(options.participants.length === 1
+              ? [
+                  reminder(
+                    "Before deciding whether to reply to the first human message, use bash to list all participant directories under /workspace/participants. If your own directory is the only participant directory, the human is speaking directly to you even when they do not name you.",
+                    {
+                      asPart: true,
+                      when: once("whatsapp-participant-roster"),
+                    }
+                  ),
+                ]
+              : []),
             principle({
               title: "Voluntary participation",
               description:
                 "Read each notification and decide autonomously whether you have a useful public contribution.",
               policies: [
                 policy({
-                  rule: "For casual or social messages, you may respond briefly; silence is also natural, and the group should not answer in chorus.",
+                  rule: "When the human clearly addresses one participant, only that participant may call reply_to_group. Every other participant must remain silent.",
+                }),
+                policy({
+                  rule: "When the human greets or addresses the whole group, every participant must reply once with a brief, natural acknowledgment, even if another participant has already acknowledged.",
+                }),
+                policy({
+                  rule: "For other casual or social messages, you may respond briefly; silence is also natural.",
                 }),
                 policy({
                   rule: "For substantive messages, reply only when your role-specific instructions give you something useful and non-duplicative to add.",
@@ -309,7 +350,7 @@ export class WhatsAppGroup implements AsyncDisposable {
                 "Decide whether your role-specific instructions give you a useful, non-duplicative contribution.",
                 "If yes, call reply_to_group with the concise message you want everyone to see.",
                 "Omit replyToMessageId for ordinary responses to the latest user message or current discussion. Set it only to emphasize a particular earlier message or directly reply to another participant's message.",
-                "If reply_to_group reports transcript_changed, reconsider the new messages and either retry with a distinct contribution or remain silent.",
+                "If reply_to_group reports transcript_changed, reconsider the new messages. When the human addressed the whole group and you have not replied yet, retry your brief acknowledgment; otherwise retry only with a distinct contribution or remain silent.",
                 "If no useful contribution remains, do not call reply_to_group.",
               ],
               notes:
@@ -380,23 +421,30 @@ export class WhatsAppGroup implements AsyncDisposable {
         }
       )
 
-      participants.push({
+      const running = {
         name: participant.name,
-        activation: participant.activation ?? "always",
         conversation: {
-          chatId: `${options.conversation.chatId}:participant:${index}`,
+          chatId: `${options.conversation.chatId}:participant:${encodeURIComponent(participant.name)}`,
           userId: options.conversation.userId,
         },
         runtime,
         active: false,
         seenThroughSequence: 0,
-      })
-      resources.use(await runtime.work())
+      }
+      participantResources.use(await runtime.work())
+      return running
     }
 
+    for (const participant of options.participants) {
+      participants.push(await startParticipant(participant, false))
+    }
+
+    const disposables = resources.move()
+    participantResources = disposables
     const group = new WhatsAppGroup(options, {
-      disposables: resources.move(),
+      disposables,
       participants,
+      startParticipant,
     })
     publishReply = async (author, content, replyToMessageId) => {
       return group.#postParticipant(author, content, replyToMessageId)
@@ -566,7 +614,14 @@ export class WhatsAppGroup implements AsyncDisposable {
     }
 
     this.#agentMessages++
-    await this.#post(author, content, randomUUID(), replyToMessageId)
+    await this.#post(
+      author,
+      content,
+      randomUUID(),
+      replyToMessageId && this.#messagesById.has(replyToMessageId)
+        ? replyToMessageId
+        : undefined
+    )
     return { posted: true }
   }
 
@@ -609,144 +664,190 @@ export class WhatsAppGroup implements AsyncDisposable {
         participant,
         notifications: pending.filter(
           (message) =>
-            this.#shouldNotify(message, participant) &&
-            !this.#mailboxRecipients
-              .get(message.id)
-              ?.has(participant.name)
+            message.author !== participant.name &&
+            !this.#mailboxRecipients.get(message.id)?.has(participant.name)
         ),
       }))
       const recipients = batches
         .filter(({ notifications }) => notifications.length > 0)
         .map(({ participant }) => participant.name)
-      if (recipients.length === 0) {
-        for (const { id } of pending) this.#mailboxRecipients.delete(id)
-        continue
-      }
-
-      notification++
-      await this.#emitActivity({
-        type: "notification",
-        notification,
-        messageCount: pending.length,
-        recipients,
-      })
-
-      await Promise.all(
-        batches.map(async ({ participant, notifications }) => {
-          if (notifications.length === 0) return
-
-          participant.seenThroughSequence = Math.max(
-            participant.seenThroughSequence,
-            notifications.at(-1)!.sequence
-          )
-          participant.active = true
-          try {
-            await this.#emitActivity({
-              type: "participant",
-              notification,
-              participant: participant.name,
-              state: "considering",
-            })
-            await this.#emitActivity({
-              type: "presence",
-              notification,
-              participant: participant.name,
-              state: "reading",
-            })
-            const repliesBefore = this.#replyCounts.get(participant.name) ?? 0
-            const turn = await participant.runtime.enqueue(
-              participant.conversation,
-              {
-                id: randomUUID(),
-                input: this.#notification(notifications),
-              }
-            )
-            participant.turnId = turn.id
-            let failure: string | undefined
-            const typingCalls = new Set<string>()
-            await turn.stream.pipeTo(
-              new WritableStream({
-                write: async (part) => {
-                  if (part.type === "error") failure = part.errorText
-                  if (
-                    (part.type === "tool-input-start" ||
-                      part.type === "tool-input-available") &&
-                    part.toolName === "reply_to_group" &&
-                    !typingCalls.has(part.toolCallId)
-                  ) {
-                    typingCalls.add(part.toolCallId)
-                    await this.#emitActivity({
-                      type: "presence",
-                      notification,
-                      participant: participant.name,
-                      state: "typing",
-                    })
-                  }
-                  if (
-                    part.type === "tool-output-available" &&
-                    typingCalls.delete(part.toolCallId)
-                  ) {
-                    await this.#emitActivity({
-                      type: "presence",
-                      notification,
-                      participant: participant.name,
-                      state: "reading",
-                    })
-                  }
-                },
-              })
-            )
-            if (failure) throw new Error(failure)
-            if (this.#stopRequested) return
-            const replies =
-              (this.#replyCounts.get(participant.name) ?? 0) - repliesBefore
-            await this.#emitActivity({
-              type: "participant",
-              notification,
-              participant: participant.name,
-              state: replies > 0 ? "replied" : "passed",
-              ...(replies > 0 ? { replies } : {}),
-            })
-            await this.#emitActivity({
-              type: "presence",
-              notification,
-              participant: participant.name,
-              state: "seen",
-            })
-          } catch (error) {
-            if (!this.#stopRequested) {
-              await this.#emitActivity({
-                type: "participant",
-                notification,
-                participant: participant.name,
-                state: "failed",
-              })
-              await this.#emitActivity({
-                type: "presence",
-                notification,
-                participant: participant.name,
-                state: "seen",
-              })
-              console.error(
-                `[group participant failed] ${participant.name}`,
-                error
-              )
-            }
-          } finally {
-            participant.active = false
-            participant.turnId = undefined
-          }
+      if (recipients.length > 0) {
+        notification++
+        await this.#emitActivity({
+          type: "notification",
+          notification,
+          messageCount: pending.length,
+          recipients,
         })
-      )
+        await Promise.all(
+          batches.map(({ participant, notifications }) =>
+            notifications.length > 0
+              ? this.#runParticipant(participant, notifications, notification)
+              : undefined
+          )
+        )
+      }
       for (const { id } of pending) this.#mailboxRecipients.delete(id)
       if (this.#stopRequested) {
         this.#pending.length = 0
         await this.#emitStopped(this.#stopRequested)
         return
       }
+
+      let joined = await this.#joinParticipants()
+      while (joined.length > 0) {
+        if (
+          this.#stopRequested ||
+          notification >= this.#limits.notifications ||
+          this.#agentMessages >= this.#limits.agentMessages
+        ) {
+          const reason = this.#stopRequested ?? "limit"
+          this.#pending.length = 0
+          await this.#emitStopped(reason)
+          return
+        }
+
+        notification++
+        const transcript = [...this.#messages]
+        await this.#emitActivity({
+          type: "notification",
+          notification,
+          messageCount: transcript.length,
+          recipients: joined.map(({ name }) => name),
+        })
+        await Promise.all(
+          joined.map((participant) =>
+            this.#runParticipant(participant, transcript, notification)
+          )
+        )
+        joined = await this.#joinParticipants()
+      }
     }
 
     await this.#emitActivity({ type: "settled", notifications: notification })
+  }
+
+  async #joinParticipants() {
+    if (!this.#loadParticipants) return []
+    const definitions = await this.#loadParticipants()
+    WhatsAppGroup.#validateParticipants(definitions)
+    const names = new Set(
+      this.#participants.map(({ name }) => name.toLocaleLowerCase("en"))
+    )
+    const joined: RunningParticipant[] = []
+    for (const definition of definitions) {
+      const normalizedName = definition.name.toLocaleLowerCase("en")
+      if (names.has(normalizedName)) continue
+      const participant = await this.#startParticipant(definition, true)
+      participant.seenThroughSequence = this.#sequence
+      this.#participants.push(participant)
+      this.#profiles.push({ name: participant.name })
+      names.add(normalizedName)
+      joined.push(participant)
+    }
+    return joined
+  }
+
+  async #runParticipant(
+    participant: RunningParticipant,
+    notifications: WhatsAppMessage[],
+    notification: number
+  ) {
+    participant.seenThroughSequence = Math.max(
+      participant.seenThroughSequence,
+      notifications.at(-1)?.sequence ?? 0
+    )
+    participant.active = true
+    try {
+      await this.#emitActivity({
+        type: "participant",
+        notification,
+        participant: participant.name,
+        state: "considering",
+      })
+      await this.#emitActivity({
+        type: "presence",
+        notification,
+        participant: participant.name,
+        state: "reading",
+      })
+      const repliesBefore = this.#replyCounts.get(participant.name) ?? 0
+      const turn = await participant.runtime.enqueue(participant.conversation, {
+        id: randomUUID(),
+        input: this.#notification(notifications),
+      })
+      participant.turnId = turn.id
+      let failure: string | undefined
+      const typingCalls = new Set<string>()
+      await turn.stream.pipeTo(
+        new WritableStream({
+          write: async (part) => {
+            if (part.type === "error") failure = part.errorText
+            if (
+              (part.type === "tool-input-start" ||
+                part.type === "tool-input-available") &&
+              part.toolName === "reply_to_group" &&
+              !typingCalls.has(part.toolCallId)
+            ) {
+              typingCalls.add(part.toolCallId)
+              await this.#emitActivity({
+                type: "presence",
+                notification,
+                participant: participant.name,
+                state: "typing",
+              })
+            }
+            if (
+              part.type === "tool-output-available" &&
+              typingCalls.delete(part.toolCallId)
+            ) {
+              await this.#emitActivity({
+                type: "presence",
+                notification,
+                participant: participant.name,
+                state: "reading",
+              })
+            }
+          },
+        })
+      )
+      if (failure) throw new Error(failure)
+      if (this.#stopRequested) return
+      const replies =
+        (this.#replyCounts.get(participant.name) ?? 0) - repliesBefore
+      await this.#emitActivity({
+        type: "participant",
+        notification,
+        participant: participant.name,
+        state: replies > 0 ? "replied" : "passed",
+        ...(replies > 0 ? { replies } : {}),
+      })
+      await this.#emitActivity({
+        type: "presence",
+        notification,
+        participant: participant.name,
+        state: "seen",
+      })
+    } catch (error) {
+      if (!this.#stopRequested) {
+        await this.#emitActivity({
+          type: "participant",
+          notification,
+          participant: participant.name,
+          state: "failed",
+        })
+        await this.#emitActivity({
+          type: "presence",
+          notification,
+          participant: participant.name,
+          state: "seen",
+        })
+        console.error(`[group participant failed] ${participant.name}`, error)
+      }
+    } finally {
+      participant.active = false
+      participant.turnId = undefined
+    }
   }
 
   async #whenSettled() {
@@ -760,12 +861,10 @@ export class WhatsAppGroup implements AsyncDisposable {
       message,
     }
     this.#events.push(event)
-    await this.#persist(event)
-    await Promise.all(
-      [...this.#subscribers].map((subscriber) =>
-        this.#deliver(subscriber, event, () => subscriber.onMessage?.(message))
-      )
+    const deliveries = [...this.#subscribers].map((subscriber) =>
+      this.#deliver(subscriber, event, () => subscriber.onMessage?.(message))
     )
+    await Promise.all([...deliveries, this.#persist(event)])
   }
 
   async #emitActivity(activity: WhatsAppGroupActivity) {
@@ -776,14 +875,10 @@ export class WhatsAppGroup implements AsyncDisposable {
       activity,
     }
     this.#events.push(event)
-    await this.#persist(event)
-    await Promise.all(
-      [...this.#subscribers].map((subscriber) =>
-        this.#deliver(subscriber, event, () =>
-          subscriber.onActivity?.(activity)
-        )
-      )
+    const deliveries = [...this.#subscribers].map((subscriber) =>
+      this.#deliver(subscriber, event, () => subscriber.onActivity?.(activity))
     )
+    await Promise.all([...deliveries, this.#persist(event)])
   }
 
   async #emitStopped(reason: "user" | "limit" | "interrupted") {
@@ -839,8 +934,7 @@ export class WhatsAppGroup implements AsyncDisposable {
 
   async #deliverToActiveParticipants(message: WhatsAppMessage) {
     const recipients = this.#participants.filter(
-      (participant) =>
-        participant.active && this.#shouldNotify(message, participant)
+      (participant) => participant.active && participant.name !== message.author
     )
     if (recipients.length === 0) return
 
@@ -886,18 +980,6 @@ export class WhatsAppGroup implements AsyncDisposable {
     )
   }
 
-  #shouldNotify(message: WhatsAppMessage, participant: RunningParticipant) {
-    if (message.author === participant.name) return false
-    if (participant.activation === "always") return true
-    if (message.author !== "user") return false
-    if (explicitlyAddresses(message.content, participant.name)) return true
-
-    const target = message.replyToMessageId
-      ? this.#messagesById.get(message.replyToMessageId)
-      : this.#messages[message.sequence - 2]
-    return target?.author === participant.name
-  }
-
   static #validate(options: WhatsAppGroupOptions) {
     if (!options.conversation.userId.trim()) {
       throw new Error("WhatsAppGroup userId cannot be empty")
@@ -905,8 +987,17 @@ export class WhatsAppGroup implements AsyncDisposable {
     if (!options.conversation.chatId.trim()) {
       throw new Error("WhatsAppGroup chatId cannot be empty")
     }
+    WhatsAppGroup.#validateParticipants(options.participants)
+    for (const [name, limit] of Object.entries(options.limits)) {
+      if (!Number.isSafeInteger(limit) || limit <= 0) {
+        throw new Error(`WhatsAppGroup ${name} limit must be positive`)
+      }
+    }
+  }
+
+  static #validateParticipants(participants: readonly WhatsAppParticipant[]) {
     const names = new Set<string>()
-    for (const participant of options.participants) {
+    for (const participant of participants) {
       if (
         !participant.name.trim() ||
         participant.name !== participant.name.trim() ||
@@ -930,24 +1021,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       }
       names.add(normalizedName)
     }
-    for (const [name, limit] of Object.entries(options.limits)) {
-      if (!Number.isSafeInteger(limit) || limit <= 0) {
-        throw new Error(`WhatsAppGroup ${name} limit must be positive`)
-      }
-    }
   }
-}
-
-function explicitlyAddresses(content: string, name: string) {
-  const text = content.trimStart()
-  const address = text.startsWith("@") ? text.slice(1) : text
-  return (
-    address
-      .slice(0, name.length)
-      .localeCompare(name, "en", { sensitivity: "accent" }) === 0 &&
-    (address.length === name.length ||
-      /[\s,.:;!?\-\u2013\u2014]/u.test(address[name.length]!))
-  )
 }
 
 function reduceActivity(
@@ -969,17 +1043,29 @@ function reduceActivity(
   }
   if (event.type === "notification") {
     const recipients = new Set(event.recipients)
+    const participantNames = new Set(state.participants.map(({ name }) => name))
+    const presenceNames = new Set(state.presence.map(({ name }) => name))
     return {
       ...state,
       phase: "active",
       notification: event.notification,
       messageCount: event.messageCount,
-      participants: state.participants.map((participant) =>
+      participants: [
+        ...state.participants,
+        ...event.recipients
+          .filter((name) => !participantNames.has(name))
+          .map((name) => ({ name, state: "notified" as const, replies: 0 })),
+      ].map((participant) =>
         recipients.has(participant.name)
           ? { ...participant, state: "notified" }
           : participant
       ),
-      presence: state.presence.map((participant) =>
+      presence: [
+        ...state.presence,
+        ...event.recipients
+          .filter((name) => !presenceNames.has(name))
+          .map((name) => ({ name, state: "idle" as const })),
+      ].map((participant) =>
         recipients.has(participant.name)
           ? { ...participant, state: "idle" }
           : participant

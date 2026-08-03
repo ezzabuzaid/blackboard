@@ -1,1 +1,1 @@
-export { AgentDirectory } from "./agent-directory.js"
+export { ParticipantDirectory } from "./participant-directory.js"

@@ -9,7 +9,7 @@ import { createApp } from "./app.js"
 import { createAuthentication } from "./auth.js"
 import { createChatGPTSubscription } from "./chatgpt.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
-import { AgentDirectory } from "./group/participants/index.js"
+import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
 import { openArtifact } from "./sandbox.js"
 
@@ -43,25 +43,31 @@ const authentication = resources.use(
   })
 )
 const sandboxResources = resources.use(new AsyncDisposableStack())
-const agents = new AgentDirectory(
-  dataDirectory,
-  async (userId) => {
+const participants = new ParticipantDirectory({
+  databasePath: resolve(dataDirectory, "participants.sqlite"),
+  builtinsDirectory: resolve(import.meta.dirname, "../../../participants"),
+  telemetryDirectory: resolve(dataDirectory, "group-telemetry"),
+  loadDefaults: async (userId) => {
     const chatgpt = await createChatGPTSubscription(authentication.auth, userId)
     return {
       model: chatgpt.model,
       tools: { web_search: chatgpt.webSearch },
     }
-  }
-)
+  },
+})
 const runtime = resources.use(
   new WhatsAppChatRuntime({
-    loadParticipants: (userId) => agents.participants(userId),
+    loadParticipants: (userId) => participants.participants(userId),
     limits: {
       notifications: 25,
       agentMessages: 100,
       transcriptMessages: 500,
     },
-    sandboxForChat: createWhatsAppSandbox(sandboxResources, dataDirectory),
+    sandboxForChat: createWhatsAppSandbox(
+      sandboxResources,
+      dataDirectory,
+      (userId) => participants.filesystem(userId)
+    ),
     databasePath: resolve(dataDirectory, "group.sqlite"),
     mailboxPath: resolve(dataDirectory, "mailbox.sqlite"),
   })

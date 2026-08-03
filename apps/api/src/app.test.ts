@@ -28,6 +28,7 @@ import { createApp, type AppDependencies } from "./app.js"
 import { chatGPTAuthPlugin, parseDeviceAttempt } from "./auth/chatgpt-plugin.js"
 import type { OpenArtifact } from "./chat/routes.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
+import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox, shareSandboxInstance } from "./group/sandbox.js"
 import {
   WhatsAppGroup,
@@ -322,7 +323,7 @@ test("a user with no participants gets an empty group", async () => {
   assert.equal(body.message?.content, "Anyone here?")
 })
 
-test("participant rosters are loaded once per chat", async () => {
+test("snapshots reuse the active chat roster", async () => {
   let loads = 0
   await using runtime = new WhatsAppChatRuntime({
     loadParticipants: async () => {
@@ -340,6 +341,88 @@ test("participant rosters are loaded once per chat", async () => {
   await runtime.snapshot({ userId: "user-1", chatId: "chat-2" })
 
   assert.equal(loads, 2)
+})
+
+test("new participants join an active chat, read its transcript, and greet once", async () => {
+  const conversation = { userId: "user-1", chatId: "active-roster" }
+  const joinReminder =
+    "You just joined an ongoing group chat. Read the full public conversation included in this notification, then greet the group once with a brief, natural introduction."
+  const newcomerPrompts: unknown[] = []
+  let greeted = false
+  const newcomer: WhatsAppParticipant = {
+    name: "Researcher",
+    model: new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        newcomerPrompts.push(prompt)
+        const context = JSON.stringify(prompt)
+        if (!greeted && context.includes(joinReminder)) {
+          greeted = true
+          return groupToolResponse("reply_to_group", "newcomer-greeting", {
+            message: "Hi everyone—Researcher here.",
+          })
+        }
+        return groupTextResponse("Nothing distinct to add.")
+      },
+    }),
+  }
+  const roster: WhatsAppParticipant[] = []
+  let created = false
+  roster.push({
+    name: "Factory",
+    model: new MockLanguageModelV4({
+      doStream: async () => {
+        if (!created) {
+          created = true
+          roster.push(newcomer)
+        }
+        return groupTextResponse("Nothing distinct to add.")
+      },
+    }),
+  })
+
+  await using runtime = new WhatsAppChatRuntime({
+    loadParticipants: async () => roster,
+    limits: testGroupLimits,
+    sandboxForChat: () => testGroupSandbox,
+    databasePath: ":memory:",
+    mailboxPath: ":memory:",
+  })
+
+  await runtime.post(conversation, {
+    id: "message-1",
+    content: "Factory, create a researcher for this conversation.",
+  })
+  let snapshot = await waitForChat(runtime, conversation, "settled")
+
+  assert.deepEqual(snapshot.participants, [
+    { name: "Factory" },
+    { name: "Researcher" },
+  ])
+  assert.deepEqual(
+    snapshot.messages.map(({ author, content }) => ({ author, content })),
+    [
+      {
+        author: "user",
+        content: "Factory, create a researcher for this conversation.",
+      },
+      { author: "Researcher", content: "Hi everyone—Researcher here." },
+    ]
+  )
+  assert.match(
+    JSON.stringify(newcomerPrompts[0]),
+    /Factory, create a researcher for this conversation\./
+  )
+
+  await runtime.post(conversation, {
+    id: "message-2",
+    content: "Thanks.",
+  })
+  snapshot = await waitForChat(runtime, conversation, "settled")
+
+  assert.equal(
+    snapshot.messages.filter(({ author }) => author === "Researcher").length,
+    1
+  )
 })
 
 test("agent telemetry is grouped into complete chat-scoped turns", async () => {
@@ -460,29 +543,41 @@ test("group members share one sandbox instance", async () => {
   assert.equal(mayaSandbox.sandbox, paulSandbox.sandbox)
 })
 
-test("group chats isolate virtual workspaces and share agent workspaces and GTM sources", async () => {
+test("group chats share writable per-user participants and isolate other users", async () => {
   const directory = await mkdtemp(join(tmpdir(), "whatsapp-sandbox-"))
   const firstChat = { chatId: "chat-1", userId: "local-user" }
   const secondChat = { chatId: "chat-2", userId: "local-user" }
+  const otherUserChat = { chatId: "chat-1", userId: "other-user" }
 
   try {
-    await mkdir(resolve(directory, "agents", "maya"), { recursive: true })
+    const builtins = resolve(directory, "builtins", "factory")
+    await mkdir(builtins, { recursive: true })
     await Promise.all([
       writeFile(
-        resolve(directory, "agents", "maya", "SOUL.md"),
-        "Be candid and concise."
+        resolve(builtins, "identity.json"),
+        JSON.stringify({ name: "Factory" })
       ),
-      writeFile(
-        resolve(directory, "agents", "maya", "AGENTS.md"),
-        "Own the business profile."
-      ),
-      writeFile(
-        resolve(directory, "agents", "maya", "MEMORY.md"),
-        "No durable knowledge yet."
-      ),
+      writeFile(resolve(builtins, "SOUL.md"), "Build useful participants."),
+      writeFile(resolve(builtins, "AGENTS.md"), "Create them with bash."),
+      writeFile(resolve(builtins, "MEMORY.md"), "# Memory"),
     ])
     await using resources = new AsyncDisposableStack()
-    const sandboxForChat = createWhatsAppSandbox(resources, directory)
+    const participants = new ParticipantDirectory({
+      databasePath: resolve(directory, "participants.sqlite"),
+      builtinsDirectory: resolve(directory, "builtins"),
+      telemetryDirectory: resolve(directory, "group-telemetry"),
+      loadDefaults: async () => ({
+        model: new MockLanguageModelV4({
+          doStream: async () => groupTextResponse("unused"),
+        }),
+        tools: {},
+      }),
+    })
+    const sandboxForChat = createWhatsAppSandbox(
+      resources,
+      directory,
+      (userId) => participants.filesystem(userId)
+    )
     const sandboxForFirstChat = sandboxForChat(firstChat)
     const first = await sandboxForFirstChat({
       chatId: "chat-1:participant:0",
@@ -493,28 +588,34 @@ test("group chats isolate virtual workspaces and share agent workspaces and GTM 
       userId: firstChat.userId,
     })
     assert.equal(first.sandbox, firstPeer.sandbox)
-    assert.deepEqual(
-      await Promise.all(
-        ["SOUL.md", "AGENTS.md", "MEMORY.md"].map((file) =>
-          first.sandbox.readFile(`/workspace/agents/maya/${file}`)
-        )
+    assert.equal(
+      await first.sandbox.readFile(
+        "/workspace/participants/factory/identity.json"
       ),
-      [
-        "Be candid and concise.",
-        "Own the business profile.",
-        "No durable knowledge yet.",
-      ]
+      JSON.stringify({ name: "Factory" })
     )
 
-    await assert.rejects(
-      first.sandbox.writeFiles([
-        {
-          path: "/workspace/agents/maya/MEMORY.md",
-          content: "The user prefers concise answers.",
-        },
-      ]),
-      /read-only/i
+    const created = await first.sandbox.executeCommand(
+      [
+        "mkdir -p /workspace/participants/maya",
+        `printf '%s' '{"name":"Maya"}' > /workspace/participants/maya/identity.json`,
+        `printf '%s' 'Be candid and concise.' > /workspace/participants/maya/SOUL.md`,
+        `printf '%s' 'Own the business profile.' > /workspace/participants/maya/AGENTS.md`,
+        `printf '%s' 'No durable knowledge yet.' > /workspace/participants/maya/MEMORY.md`,
+      ].join(" && ")
     )
+    assert.equal(created.exitCode, 0)
+    assert.deepEqual(
+      (await participants.participants(firstChat.userId)).map(
+        ({ name }) => name
+      ),
+      ["Maya", "Factory"]
+    )
+
+    const updated = await firstPeer.sandbox.executeCommand(
+      `printf '%s' 'The user prefers concise answers.' > /workspace/participants/maya/MEMORY.md`
+    )
+    assert.equal(updated.exitCode, 0)
 
     await first.sandbox.writeFiles([
       { path: "/workspace/business/README.md", content: "shared profile" },
@@ -531,11 +632,37 @@ test("group chats isolate virtual workspaces and share agent workspaces and GTM 
       "shared profile"
     )
     assert.equal(
-      await second.sandbox.readFile("/workspace/agents/maya/MEMORY.md"),
-      "No durable knowledge yet."
+      await second.sandbox.readFile("/workspace/participants/maya/MEMORY.md"),
+      "The user prefers concise answers."
     )
     assert.equal(
       (await second.sandbox.executeCommand("cat /workspace/private.txt"))
+        .exitCode,
+      1
+    )
+
+    const otherUser = await sandboxForChat(otherUserChat)({
+      chatId: "chat-1:participant:0",
+      userId: otherUserChat.userId,
+    })
+    assert.equal(
+      (
+        await otherUser.sandbox.executeCommand(
+          "cat /workspace/participants/maya/MEMORY.md"
+        )
+      ).exitCode,
+      1
+    )
+    assert.equal(
+      (
+        await otherUser.sandbox.executeCommand(
+          "cat /workspace/business/README.md"
+        )
+      ).exitCode,
+      1
+    )
+    assert.equal(
+      (await otherUser.sandbox.executeCommand("cat /workspace/private.txt"))
         .exitCode,
       1
     )
@@ -715,6 +842,51 @@ test("chat message POST returns before active participants settle", async () => 
   } finally {
     releaseParticipant.resolve()
   }
+})
+
+test("activity subscribers do not wait for persistence", async () => {
+  const persistenceStarted = Promise.withResolvers<void>()
+  const releasePersistence = Promise.withResolvers<void>()
+  let delivered = false
+
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        {
+          name: "Maya",
+          model: new MockLanguageModelV4({
+            doStream: groupTextResponse("Nothing to add."),
+          }),
+        },
+      ],
+      persist: async (event) => {
+        if (event.type !== "activity" || event.activity.type !== "started") {
+          return
+        }
+        persistenceStarted.resolve()
+        await releasePersistence.promise
+      },
+    })
+  )
+  using subscription = group.subscribe({
+    onEvent(event) {
+      if (event.type === "activity" && event.activity.type === "started") {
+        delivered = true
+      }
+    },
+  })
+
+  const posting = group.post("Hello")
+  await persistenceStarted.promise
+
+  const deliveredBeforePersistence = delivered
+  releasePersistence.resolve()
+  await posting
+  assert.equal(deliveredBeforePersistence, true)
 })
 
 test("chat message and event cursors are validated at the boundary", async () => {
@@ -1039,9 +1211,7 @@ test("quoted replies persist resolved context and emit real presence", async () 
       ...testGroupDependencies(resources),
       conversation: testGroupConversation,
       sandbox: testGroupSandbox,
-      participants: [
-        { name: "Maya", model: participant },
-      ],
+      participants: [{ name: "Maya", model: participant }],
     })
   )
 
@@ -1094,6 +1264,7 @@ test("ordinary agent contributions do not quote their triggering message", async
 
       return groupToolResponse("reply_to_group", "introduction", {
         message: "I'm Maya. I own the research evidence.",
+        replyToMessageId: "not-a-message",
       })
     },
   })
@@ -1104,9 +1275,7 @@ test("ordinary agent contributions do not quote their triggering message", async
       ...testGroupDependencies(resources),
       conversation: testGroupConversation,
       sandbox: testGroupSandbox,
-      participants: [
-        { name: "Maya", model: participant },
-      ],
+      participants: [{ name: "Maya", model: participant }],
     })
   )
 
@@ -1204,9 +1373,7 @@ test("coalesces human interventions posted while a batch is running", async () =
       ...testGroupDependencies(resources),
       conversation: testGroupConversation,
       sandbox: testGroupSandbox,
-      participants: [
-        { name: "member", model: member },
-      ],
+      participants: [{ name: "member", model: member }],
     })
   )
 
@@ -1258,7 +1425,9 @@ test("coalesces human interventions posted while a batch is running", async () =
   }
 })
 
-test("every group member receives greetings concurrently and social replies stay voluntary", async () => {
+test("every group member answers a greeting addressed to the whole group", async () => {
+  const wholeGroupGreetingRule =
+    "When the human greets or addresses the whole group, every participant must reply once with a brief, natural acknowledgment, even if another participant has already acknowledged."
   const firstNotificationStarted = Promise.withResolvers<void>()
   const firstParticipants = new Set<string>()
   let activeParticipationChecks = 0
@@ -1281,34 +1450,30 @@ test("every group member receives greetings concurrently and social replies stay
     activeParticipationChecks--
   }
 
-  let researcherCalls = 0
   let researcherTools: unknown
-  const researcher = new MockLanguageModelV4({
-    doStream: async ({ prompt, tools }) => {
-      researcherTools = tools
-      researcherCalls++
-      if (researcherCalls === 1) {
-        await enterFirstNotification("researcher")
-        return JSON.stringify(prompt).includes("casual or social messages")
-          ? groupToolResponse("reply_to_group", "social-reply", {
-              message: "Hey! Good to see you.",
-            })
-          : groupTextResponse("Greetings are outside my role.")
-      }
-      return groupTextResponse("Reply posted.")
-    },
-  })
+  const participant = (name: string, message: string) => {
+    let firstCall = true
+    let replied = false
+    return new MockLanguageModelV4({
+      doStream: async ({ prompt, tools }) => {
+        if (name === "researcher") researcherTools = tools
+        if (firstCall) {
+          firstCall = false
+          await enterFirstNotification(name)
+        }
 
-  let criticCalls = 0
-  const criticPrompts: unknown[] = []
-  const critic = new MockLanguageModelV4({
-    doStream: async ({ prompt }) => {
-      criticCalls++
-      criticPrompts.push(prompt)
-      if (criticCalls === 1) await enterFirstNotification("critic")
-      return groupTextResponse("I have nothing useful to add.")
-    },
-  })
+        const context = JSON.stringify(prompt)
+        if (!context.includes(wholeGroupGreetingRule)) {
+          return groupTextResponse("Greetings are outside my role.")
+        }
+        if (context.includes('"posted":true')) replied = true
+        if (replied) return groupTextResponse("Reply posted.")
+        return groupToolResponse("reply_to_group", `${name}-greeting`, {
+          message,
+        })
+      },
+    })
+  }
 
   await using resources = new AsyncDisposableStack()
   const group = resources.use(
@@ -1319,14 +1484,14 @@ test("every group member receives greetings concurrently and social replies stay
       participants: [
         {
           name: "researcher",
-          model: researcher,
+          model: participant("researcher", "Researcher here!"),
           tools: {
             web_search: openai.tools.webSearch(),
           },
         },
         {
           name: "critic",
-          model: critic,
+          model: participant("critic", "Critic here!"),
         },
       ],
     })
@@ -1337,38 +1502,47 @@ test("every group member receives greetings concurrently and social replies stay
   assert.equal(maxActiveParticipationChecks, 2)
   assert.match(JSON.stringify(researcherTools), /openai\.web_search/)
   assert.deepEqual(
-    messages.map(({ author, content }) => ({ author, content })),
+    messages
+      .filter(({ author }) => author !== "user")
+      .map(({ author, content }) => ({ author, content }))
+      .sort((left, right) => left.author.localeCompare(right.author)),
     [
       {
-        author: "user",
-        content: "Hi everyone!",
+        author: "critic",
+        content: "Critic here!",
       },
       {
         author: "researcher",
-        content: "Hey! Good to see you.",
+        content: "Researcher here!",
       },
     ]
   )
-  assert.equal(
-    JSON.stringify(criticPrompts.at(-1)).includes("Hey! Good to see you."),
-    true,
-    "the social reply is broadcast back to the other group member"
-  )
 })
 
-test("explicit participants receive addressed messages and direct human follow-ups", async () => {
-  let factoryCalls = 0
+test("only Factory replies when the user greets Factory naturally", async () => {
+  const directAddressRule =
+    "When the human clearly addresses one participant, only that participant may call reply_to_group."
+  let factoryReplied = false
   const factory = new MockLanguageModelV4({
     doStream: async () => {
-      factoryCalls++
-      return factoryCalls % 2 === 1
-        ? groupToolResponse("reply_to_group", `factory-reply-${factoryCalls}`, {
-            message:
-              factoryCalls === 1
-                ? "Which agents should I build?"
-                : "I will build Paul Graham and Ibn Arabi.",
-          })
-        : groupTextResponse("Reply posted.")
+      if (factoryReplied) return groupTextResponse("Reply posted.")
+      factoryReplied = true
+      return groupToolResponse("reply_to_group", "factory-reply", {
+        message: "Yep—I’m here.",
+      })
+    },
+  })
+  let paulReplied = false
+  const paul = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      if (JSON.stringify(prompt).includes(directAddressRule)) {
+        return groupTextResponse("The user addressed Factory.")
+      }
+      if (paulReplied) return groupTextResponse("Reply posted.")
+      paulReplied = true
+      return groupToolResponse("reply_to_group", "paul-reply", {
+        message: "Yep—I’m here.",
+      })
     },
   })
 
@@ -1380,26 +1554,73 @@ test("explicit participants receive addressed messages and direct human follow-u
       sandbox: testGroupSandbox,
       participants: [
         {
+          name: "Paul Graham",
+          model: paul,
+        },
+        {
           name: "Factory",
-          activation: "explicit",
           model: factory,
         },
       ],
     })
   )
 
-  await group.send("What should we focus on today?")
-  assert.equal(factoryCalls, 0)
+  const messages = await group.send("Hey Factory. can you hear me?")
 
-  const messages = await group.send("Factory, create a research agent.")
-  assert.equal(factoryCalls, 2)
-  assert.equal(messages.at(-1)?.author, "Factory")
-
-  const followUp = await group.send(
-    "I want one for Paul Graham and one for Ibn Arabi."
+  assert.deepEqual(
+    messages
+      .filter(({ author }) => author !== "user")
+      .map(({ author }) => author),
+    ["Factory"]
   )
-  assert.equal(factoryCalls, 4)
-  assert.equal(followUp.at(-1)?.author, "Factory")
+})
+
+test("the sole participant treats the first human message as direct", async () => {
+  const rosterReminder =
+    "use bash to list all participant directories under /workspace/participants"
+  let inspectedRoster = false
+  let replied = false
+  const factory = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      if (!JSON.stringify(prompt).includes(rosterReminder)) {
+        return groupTextResponse("The greeting was not addressed to me.")
+      }
+      if (!inspectedRoster) {
+        inspectedRoster = true
+        return groupToolResponse("bash", "inspect-participants", {
+          command:
+            "find /workspace/participants -mindepth 1 -maxdepth 1 -type d -print 2>/dev/null",
+          reasoning: "Check who else is participating in this group.",
+        })
+      }
+      if (replied) return groupTextResponse("Reply posted.")
+      replied = true
+      return groupToolResponse("reply_to_group", "factory-reply", {
+        message: "Hey brother!",
+      })
+    },
+  })
+
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [{ name: "Factory", model: factory }],
+    })
+  )
+
+  const messages = await group.send("Hey brother")
+
+  assert.equal(inspectedRoster, true)
+  assert.deepEqual(
+    messages.map(({ author, content }) => ({ author, content })),
+    [
+      { author: "user", content: "Hey brother" },
+      { author: "Factory", content: "Hey brother!" },
+    ]
+  )
 })
 
 test("group prompt selects one responder for an explicitly single-answer request", async () => {
@@ -1566,6 +1787,61 @@ test("a chat survives a runtime restart and replays persisted events", async () 
     )
     await replayComplete.promise
     assert.deepEqual(replayed, [snapshot.cursor - 1, snapshot.cursor])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test("participant conversations stay attached to their identity when the roster changes", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zukhruf-roster-"))
+  const conversation = { chatId: "roster-chat", userId: "local-user" }
+  const factoryPrompts: unknown[] = []
+  const asymmetryPrompts: unknown[] = []
+  const model = (prompts: unknown[]) =>
+    new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        prompts.push(prompt)
+        return groupTextResponse("Nothing distinct to add.")
+      },
+    })
+  const factory = model(factoryPrompts)
+
+  try {
+    {
+      await using runtime = durableRuntime(
+        [{ name: "Factory", model: factory }],
+        directory
+      )
+      await runtime.post(conversation, {
+        id: "message-1",
+        content: "Factory should remember this.",
+      })
+      await waitForChat(runtime, conversation, "settled")
+    }
+
+    await using runtime = durableRuntime(
+      [
+        { name: "Asymmetry", model: model(asymmetryPrompts) },
+        { name: "Factory", model: factory },
+      ],
+      directory
+    )
+    await runtime.post(conversation, {
+      id: "message-2",
+      content: "The roster changed.",
+    })
+    await waitForChat(runtime, conversation, "settled")
+
+    assert.equal(asymmetryPrompts.length, 1)
+    assert.equal(factoryPrompts.length, 2)
+    assert.doesNotMatch(
+      JSON.stringify(asymmetryPrompts.at(-1)),
+      /Factory should remember this\./
+    )
+    assert.match(
+      JSON.stringify(factoryPrompts.at(-1)),
+      /Factory should remember this\./
+    )
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
@@ -1812,7 +2088,7 @@ async function waitForChat(
   conversation: { chatId: string; userId: string },
   phase: "settled" | "stopped"
 ) {
-  for (let attempt = 0; attempt < 200; attempt++) {
+  for (let attempt = 0; attempt < 500; attempt++) {
     const snapshot = await runtime.snapshot(conversation)
     if (snapshot.activity.phase === phase) return snapshot
     await sleep(10)

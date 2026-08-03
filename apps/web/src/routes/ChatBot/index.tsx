@@ -6,7 +6,6 @@ import { ChatComposer } from "./ChatComposer"
 import { Conversation } from "./Conversation"
 import { GroupAvatarStack } from "./GroupAvatar"
 import { GroupChatProvider, useGroupChat } from "./GroupChat"
-import { groupPresenceLabel } from "./groupActivity"
 import { loader } from "./loader"
 import {
   AgentTraceProvider,
@@ -41,7 +40,6 @@ function GroupHeader() {
   const { apiStatus, activity, participants, stop, stopping } = useGroupChat()
   const location = useLocation()
   const navigate = useNavigate()
-  const presence = groupPresenceLabel(activity)
 
   function newGroup() {
     const search = new URLSearchParams(location.search)
@@ -54,15 +52,11 @@ function GroupHeader() {
       <GroupAvatarStack members={participants.map(({ name }) => name)} />
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-sm font-semibold">Baseera</h1>
-        <p
-          className="truncate text-xs text-muted-foreground"
-          aria-live="polite"
-        >
+        <p className="truncate text-xs text-muted-foreground">
           {apiStatus === "offline"
             ? "Group unavailable"
-            : (presence ??
-              (participants.map(({ name }) => name).join(", ") ||
-                "No agents yet"))}
+            : participants.map(({ name }) => name).join(", ") ||
+              "No agents yet"}
         </p>
       </div>
       {activity.phase === "active" && (

@@ -5,33 +5,35 @@ import {
   type AgentDeclaration,
   type ConversationId,
 } from "@deepagents/experimental/zukhruf"
+import type { IFileSystem } from "just-bash"
 
-import { createPersistentVirtualSandbox } from "../sandbox.js"
+import { createPersistentVirtualSandbox, userDataRoot } from "../sandbox.js"
 
 export function createWhatsAppSandbox(
   resources: AsyncDisposableStack,
-  dataDirectory: string
+  dataDirectory: string,
+  participantsFilesystem: (userId: string) => IFileSystem
 ) {
   return (conversation: ConversationId) => {
+    const userDirectory = userDataRoot(dataDirectory, conversation.userId)
     return shareSandboxInstance(
       defineSandbox(() =>
         createPersistentVirtualSandbox(resources, dataDirectory, conversation, [
           {
-            path: "/workspace/agents",
-            root: resolve(dataDirectory, "agents"),
-            readOnly: true,
+            path: "/workspace/participants",
+            filesystem: participantsFilesystem(conversation.userId),
           },
           {
             path: "/workspace/business",
-            root: resolve(dataDirectory, "business-profile"),
+            root: resolve(userDirectory, "business-profile"),
           },
           {
             path: "/workspace/backlog",
-            root: resolve(dataDirectory, "gtm-backlog"),
+            root: resolve(userDirectory, "gtm-backlog"),
           },
           {
             path: "/workspace/product",
-            root: resolve(dataDirectory, "product-signals"),
+            root: resolve(userDirectory, "product-signals"),
           },
         ])
       )

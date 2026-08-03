@@ -7,6 +7,7 @@ volume_name=baseera-data
 dokploy_url=${DOKPLOY_URL:-https://dokploy.limerence.sh}
 ssh_host=${DOKPLOY_SSH_HOST:-root@167.233.88.12}
 chatgpt_model=${CHATGPT_MODEL:-gpt-5.6-sol}
+BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
 token_file=${CHATGPT_TOKEN_FILE:-apps/api/.data/zukhruf/chatgpt.json}
 deploy_domain=${DEPLOY_DOMAIN:-}
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -35,11 +36,19 @@ for command in curl git jq node npx ssh tar; do
   command -v "$command" >/dev/null || fail "$command is required"
 done
 
-if [[ -z ${DOKPLOY_API_KEY:-} && -f $root/apps/api/.env ]]; then
-  DOKPLOY_API_KEY=$(node --env-file="$root/apps/api/.env" \
-    --print 'process.env.DOKPLOY_API_KEY ?? ""')
+if [[ -f $root/apps/api/.env ]]; then
+  if [[ -z ${DOKPLOY_API_KEY:-} ]]; then
+    DOKPLOY_API_KEY=$(node --env-file="$root/apps/api/.env" \
+      --print 'process.env.DOKPLOY_API_KEY ?? ""')
+  fi
+  if [[ -z ${BETTER_AUTH_SECRET:-} ]]; then
+    BETTER_AUTH_SECRET=$(node --env-file="$root/apps/api/.env" \
+      --print 'process.env.BETTER_AUTH_SECRET ?? ""')
+  fi
 fi
 [[ -n ${DOKPLOY_API_KEY:-} ]] || fail "DOKPLOY_API_KEY is required"
+[[ ${#BETTER_AUTH_SECRET} -ge 32 ]] \
+  || fail "BETTER_AUTH_SECRET must contain at least 32 characters"
 [[ -s $token_file ]] || fail "ChatGPT credentials not found at $token_file"
 
 dokploy_url=${dokploy_url%/}
@@ -133,7 +142,8 @@ smoke_container=baseera-smoke-$deployment_id
 smoke_volume=baseera-smoke-$deployment_id
 ssh "$ssh_host" "docker volume create '$smoke_volume'" >/dev/null
 ssh "$ssh_host" "docker run --rm -i --volume '$smoke_volume:/data' '$image' sh -ceu 'umask 077; mkdir -p /data/zukhruf; cat > /data/zukhruf/chatgpt.json'" <"$token_file"
-ssh "$ssh_host" "docker run --detach --rm --name '$smoke_container' --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' '$image'" >/dev/null
+printf 'BETTER_AUTH_SECRET=%s\n' "$BETTER_AUTH_SECRET" \
+  | ssh "$ssh_host" "docker run --detach --rm --name '$smoke_container' --env-file /dev/stdin --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' '$image'" >/dev/null
 for _ in {1..30}; do
   if ssh "$ssh_host" "docker exec '$smoke_container' node --input-type=module --eval 'const [health, html] = await Promise.all([fetch(\"http://127.0.0.1:3001/api/health\"), fetch(\"http://127.0.0.1:3001/\")]); if (!health.ok || !(await html.text()).includes(\"<div id=\\\"root\\\"></div>\")) process.exit(1)'" >/dev/null 2>&1; then
     break
@@ -200,8 +210,8 @@ if [[ -z $deploy_domain ]]; then
   fi
 fi
 web_origin=https://$deploy_domain
-compose_env=$(printf 'DEPLOY_IMAGE=%s\nWEB_ORIGIN=%s\nCHATGPT_MODEL=%s\n' \
-  "$image" "$web_origin" "$chatgpt_model")
+compose_env=$(printf 'DEPLOY_IMAGE=%s\nWEB_ORIGIN=%s\nCHATGPT_MODEL=%s\nBETTER_AUTH_SECRET=%s\n' \
+  "$image" "$web_origin" "$chatgpt_model" "$BETTER_AUTH_SECRET")
 dokploy_post compose.saveEnvironment "$(jq -cn \
   --arg composeId "$compose_id" \
   --arg env "$compose_env" \

@@ -7,13 +7,14 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --env-file=.env --import tsx --watch src/index.ts",
     "start": "node --env-file=.env dist/index.js",
-    "test": "node --test dist/app.test.js dist/group/participants/agent-directory.test.js",
+    "test": "node --test dist/app.test.js dist/group/participants/participant-directory.test.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.23",
     "@deepagents/context": "6.0.0",
     "@deepagents/experimental": "6.0.0",
+    "@deepagents/text2sql": "6.0.0",
     "@electric-sql/pglite": "0.5.4",
     "@godaddy/terminus": "^4.12.1",
     "@hono/node-server": "2.0.12",
