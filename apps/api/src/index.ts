@@ -8,13 +8,13 @@ import { createFsDrain } from "evlog/fs"
 
 import { createApp } from "./app.js"
 import { createAuthentication } from "./auth.js"
-import { createChatGPTSubscription } from "./chatgpt.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import { GroupStore } from "./group/group-store.js"
 import { MarketplaceGroupTemplateStore } from "./group/marketplace-group-template-store.js"
 import { loadAgentCatalog } from "./group/participants/agent-catalog.js"
 import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
+import { createParticipantDefaults } from "./participant-defaults.js"
 import { openArtifact } from "./sandbox.js"
 
 const dataDirectory = process.env.ZUKHRUF_DATA_DIR
@@ -44,7 +44,18 @@ if (!authSecret || authSecret.length < 32) {
   throw new Error("BETTER_AUTH_SECRET must contain at least 32 characters")
 }
 
-const baseURL = process.env.BETTER_AUTH_URL ?? `http://localhost:${port}`
+const openRouterAPIKey = process.env.OPENROUTER_API_KEY?.trim()
+if (!openRouterAPIKey) throw new Error("OPENROUTER_API_KEY is required")
+const participantDefaults = createParticipantDefaults({
+  apiKey: openRouterAPIKey,
+  modelId: process.env.OPENROUTER_MODEL?.trim() || undefined,
+  appUrl: process.env.WEB_ORIGIN,
+})
+
+const baseURL =
+  process.env.BETTER_AUTH_URL ??
+  process.env.WEB_ORIGIN ??
+  `http://localhost:${port}`
 const trustedOrigins = process.env.WEB_ORIGIN
   ? [process.env.WEB_ORIGIN]
   : ["http://localhost:5173", "http://127.0.0.1:5173"]
@@ -78,13 +89,7 @@ const participants = new ParticipantDirectory({
   builtinsDirectory: resolve(import.meta.dirname, "../../../participants"),
   catalogDirectory: resolve(import.meta.dirname, "../../../catalog/agents"),
   telemetryDirectory: resolve(dataDirectory, "group-telemetry"),
-  loadDefaults: async (userId) => {
-    const chatgpt = await createChatGPTSubscription(authentication.auth, userId)
-    return {
-      model: chatgpt.model,
-      tools: { web_search: chatgpt.webSearch },
-    }
-  },
+  loadDefaults: async () => participantDefaults,
 })
 const groupAgentIds = (conversation: { userId: string; chatId: string }) => {
   const agentIds = groups.get(
@@ -137,12 +142,6 @@ const app = createApp({
         headers: request.headers,
         asResponse: true,
       }),
-    startDevice: (headers) =>
-      authentication.auth.api.device({ headers, asResponse: true }),
-    pollDevice: (headers) =>
-      authentication.auth.api.poll({ headers, asResponse: true }),
-    cancelDevice: (headers) =>
-      authentication.auth.api.cancel({ headers, asResponse: true }),
   },
   runtime,
   openArtifact: (conversation, path) =>
@@ -156,8 +155,12 @@ await using server = serve(
   {
     fetch: app.fetch,
     port,
+    ...(process.env.PORTLESS_URL ? { hostname: "127.0.0.1" } : {}),
   },
-  ({ port }) => console.log(`API listening on http://localhost:${port}`)
+  ({ port }) =>
+    console.log(
+      `API listening on ${process.env.PORTLESS_URL ?? `http://localhost:${port}`}`
+    )
 )
 
 createTerminus(server, {

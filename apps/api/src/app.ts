@@ -41,9 +41,6 @@ export interface AppDependencies {
     handler(request: Request): Promise<Response>
     getSession(headers: Headers): Promise<{ user: { id: string } } | null>
     getSessionResponse(request: Request): Promise<Response>
-    startDevice(headers: Headers): Promise<Response>
-    pollDevice(headers: Headers): Promise<Response>
-    cancelDevice(headers: Headers): Promise<Response>
   }
   runtime: Pick<
     WhatsAppChatRuntime,

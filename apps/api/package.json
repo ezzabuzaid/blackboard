@@ -11,14 +11,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@ai-sdk/openai": "4.0.23",
+    "@better-auth/passkey": "^1.6.25",
     "@deepagents/context": "6.0.0",
     "@deepagents/experimental": "6.0.0",
     "@deepagents/text2sql": "6.0.0",
     "@electric-sql/pglite": "0.5.4",
     "@godaddy/terminus": "^4.12.1",
     "@hono/node-server": "2.0.12",
-    "@opencoredev/loginwithchatgpt-core": "0.2.0",
+    "@openrouter/ai-sdk-provider": "^3.0.0",
     "@sdk-it/hono": "0.46.1",
     "ai": "7.0.41",
     "better-auth": "1.6.25",

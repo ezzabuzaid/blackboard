@@ -8,6 +8,13 @@
     "dev": {
       "dependsOn": [{ "projects": ["api"], "target": "sdk" }]
     },
+    "portless": {
+      "command": "portless --name frontend.baseera -- nx run web:dev",
+      "continuous": true,
+      "options": {
+        "env": { "VITE_API_URL": "" }
+      }
+    },
     "typecheck": {
       "dependsOn": ["^typecheck", { "projects": ["api"], "target": "sdk" }]
     }

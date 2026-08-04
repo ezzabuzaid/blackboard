@@ -7,17 +7,6 @@ interface AuthSession {
   user: { id: string }
 }
 
-interface DeviceLogin {
-  verificationUrl: string
-  userCode: string
-  interval: number
-  expiresAt: number
-}
-
-type DevicePoll =
-  | { status: "pending" | "expired" }
-  | { status: "complete"; user: { id: string } }
-
 export default function (router: Hono<AppEnv>) {
   /**
    * @openapi getSession
@@ -34,60 +23,6 @@ export default function (router: Hono<AppEnv>) {
       const session = (await response.json()) as AuthSession | null
       copyAuthHeaders(context, response.headers)
       return context.json(session)
-    }
-  )
-
-  /**
-   * @openapi startChatGPTDevice
-   * @tags auth
-   * @description Starts ChatGPT device authentication.
-   */
-  router.post(
-    "/auth/chatgpt/device",
-    validate(() => ({})),
-    async (context) => {
-      const { auth } = context.var.dependencies
-      const response = await auth.startDevice(context.req.raw.headers)
-      if (!response.ok) return response
-      const device = (await response.json()) as DeviceLogin
-      copyAuthHeaders(context, response.headers)
-      return context.json(device)
-    }
-  )
-
-  /**
-   * @openapi pollChatGPTDevice
-   * @tags auth
-   * @description Polls a ChatGPT device authentication attempt.
-   */
-  router.post(
-    "/auth/chatgpt/device/poll",
-    validate(() => ({})),
-    async (context) => {
-      const { auth } = context.var.dependencies
-      const response = await auth.pollDevice(context.req.raw.headers)
-      if (!response.ok) return response
-      const result = (await response.json()) as DevicePoll
-      copyAuthHeaders(context, response.headers)
-      return context.json(result)
-    }
-  )
-
-  /**
-   * @openapi cancelChatGPTDevice
-   * @tags auth
-   * @description Cancels a ChatGPT device authentication attempt.
-   */
-  router.post(
-    "/auth/chatgpt/device/cancel",
-    validate(() => ({})),
-    async (context) => {
-      const { auth } = context.var.dependencies
-      const response = await auth.cancelDevice(context.req.raw.headers)
-      if (!response.ok) return response
-      const result = (await response.json()) as { cancelled: boolean }
-      copyAuthHeaders(context, response.headers)
-      return context.json(result)
     }
   )
 

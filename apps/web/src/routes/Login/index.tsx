@@ -1,12 +1,6 @@
-import { Button } from "@stdlib/shadcn"
-import {
-  Check,
-  Copy,
-  ExternalLink,
-  LoaderCircle,
-  MessageCircle,
-} from "lucide-react"
-import { useEffect, useState } from "react"
+import { Button, Input, Label } from "@stdlib/shadcn"
+import { KeyRound, LoaderCircle, MessageCircle } from "lucide-react"
+import { type FormEvent, useState } from "react"
 import {
   replace,
   type LoaderFunctionArgs,
@@ -15,14 +9,8 @@ import {
 } from "react-router"
 
 import { hasIdentity, redirectDestination } from "../../auth"
+import { authClient } from "../../auth-client"
 import { api } from "../ChatBot/api"
-
-interface DeviceLogin {
-  verificationUrl: string
-  userCode: string
-  interval: number
-  expiresAt: number
-}
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
@@ -41,103 +29,48 @@ export async function loader({ request }: LoaderFunctionArgs) {
 export default function Login() {
   const location = useLocation()
   const navigate = useNavigate()
-  const [device, setDevice] = useState<DeviceLogin | null>(null)
-  const [starting, setStarting] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!device) return
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
 
-    const controller = new AbortController()
-    let timer: number | undefined
-    const schedule = () => {
-      timer = window.setTimeout(poll, device.interval * 1_000)
-    }
-    const poll = async () => {
-      if (Date.now() >= device.expiresAt) {
-        setDevice(null)
-        setError("That code expired. Start again to get a new one.")
-        return
-      }
-
-      try {
-        const result: unknown = await api.request(
-          "POST /auth/chatgpt/device/poll",
-          {},
-          { signal: controller.signal }
-        )
-        if (!isPollResult(result)) {
-          throw new Error("ChatGPT approval could not be checked.")
-        }
-        if (result.status === "complete") {
-          await navigate(redirectDestination(location.search), {
-            replace: true,
-          })
-          return
-        }
-        if (result.status === "expired") {
-          setDevice(null)
-          setError("That code expired. Start again to get a new one.")
-          return
-        }
-        setError(null)
-        schedule()
-      } catch (cause) {
-        if (controller.signal.aborted) return
-        setError(
-          cause instanceof Error
-            ? cause.message
-            : "ChatGPT approval could not be checked."
-        )
-        schedule()
-      }
-    }
-
-    schedule()
-    return () => {
-      controller.abort()
-      if (timer !== undefined) window.clearTimeout(timer)
-    }
-  }, [device, location.search, navigate])
-
-  async function start() {
-    setStarting(true)
+    setSubmitting(true)
     setError(null)
     try {
-      const result: unknown = await api.request("POST /auth/chatgpt/device", {})
-      if (!isDeviceLogin(result)) {
-        throw new Error("ChatGPT sign-in could not be started.")
+      if (!globalThis.PublicKeyCredential) {
+        throw new Error("This browser does not support passkeys.")
       }
-      setDevice(result)
+
+      const result = creating
+        ? await authClient.passkey.addPasskey({
+            context: String(
+              new FormData(event.currentTarget).get("name") ?? ""
+            ).trim(),
+          })
+        : await authClient.signIn.passkey()
+      if (result.error) {
+        throw new Error(
+          result.error.message ?? "Passkey authentication failed."
+        )
+      }
+
+      await navigate(redirectDestination(location.search), { replace: true })
     } catch (cause) {
       setError(
         cause instanceof Error
           ? cause.message
-          : "ChatGPT sign-in could not be started."
+          : "Passkey authentication could not be completed."
       )
     } finally {
-      setStarting(false)
+      setSubmitting(false)
     }
   }
 
-  function cancel() {
-    setDevice(null)
+  function switchMode() {
+    setCreating((current) => !current)
     setError(null)
-    void api
-      .request("POST /auth/chatgpt/device/cancel", {})
-      .catch(() => undefined)
-  }
-
-  async function copyCode() {
-    if (!device) return
-    try {
-      await navigator.clipboard.writeText(device.userCode)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 2_000)
-    } catch {
-      setError("The code could not be copied. Select and copy it manually.")
-    }
   }
 
   return (
@@ -172,134 +105,75 @@ export default function Login() {
               id="login-heading"
               className="max-w-sm text-4xl leading-[1.02] font-medium tracking-[-0.04em] text-balance sm:text-5xl"
             >
-              {device
-                ? "Connect ChatGPT to continue"
-                : "Sign in to start your group"}
+              {creating ? "Create your passkey" : "Welcome back"}
             </h1>
 
-            <div className="mt-9 max-w-sm">
-              {device ? (
-                <div className="space-y-4">
-                  <Button
-                    className="h-12 w-full bg-[#eef771] text-[#02120c] hover:bg-[#f5faa5] focus-visible:ring-[#eef771]/60"
-                    size="lg"
-                    asChild
-                  >
-                    <a
-                      href={device.verificationUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      Open ChatGPT
-                      <ExternalLink aria-hidden="true" />
-                    </a>
-                  </Button>
+            <p className="mt-4 max-w-sm text-base leading-7 text-[#c7e6da]/75">
+              {creating
+                ? "Enter your name, then use your device to secure your account."
+                : "Use your device passkey to continue to Baseera."}
+            </p>
 
-                  <div className="border-y border-white/15 py-4 text-center">
-                    <p className="text-xs text-[#c7e6da]/70">
-                      Enter this one-time code
-                    </p>
-                    <p className="mt-1 font-mono text-xl font-semibold tracking-widest text-[#f5f3ed]">
-                      {device.userCode}
-                    </p>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="mt-2 text-[#c7e6da] hover:bg-white/10 hover:text-white"
-                      onClick={() => void copyCode()}
-                    >
-                      {copied ? (
-                        <Check aria-hidden="true" />
-                      ) : (
-                        <Copy aria-hidden="true" />
-                      )}
-                      {copied ? "Copied" : "Copy code"}
-                    </Button>
-                  </div>
-
-                  <p
-                    className="flex items-center justify-center gap-2 text-sm text-[#c7e6da]/70"
-                    aria-live="polite"
-                  >
-                    <LoaderCircle aria-hidden="true" className="animate-spin" />
-                    Waiting for approval…
-                  </p>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="w-full text-[#c7e6da] hover:bg-white/10 hover:text-white"
-                    onClick={cancel}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <Button
-                    type="button"
-                    size="lg"
-                    className="h-12 w-full bg-[#eef771] text-[#02120c] hover:bg-[#f5faa5] focus-visible:ring-[#eef771]/60"
-                    disabled={starting}
-                    onClick={() => void start()}
-                  >
-                    {starting ? (
-                      <LoaderCircle
-                        aria-hidden="true"
-                        className="animate-spin"
-                      />
-                    ) : (
-                      <MessageCircle aria-hidden="true" />
-                    )}
-                    {starting ? "Connecting…" : "Continue with ChatGPT"}
-                  </Button>
-                  <p className="text-center text-xs text-[#c7e6da]/65">
-                    Uses your ChatGPT account and plan.
-                  </p>
+            <form className="mt-9 max-w-sm space-y-4" onSubmit={submit}>
+              {creating && (
+                <div className="space-y-2">
+                  <Label htmlFor="name" className="text-[#d9eee6]">
+                    Name
+                  </Label>
+                  <Input
+                    id="name"
+                    name="name"
+                    type="text"
+                    autoComplete="name"
+                    maxLength={80}
+                    required
+                    autoFocus
+                    disabled={submitting}
+                    className="h-12 border-white/20 bg-white/10 text-base text-white placeholder:text-[#c7e6da]/45"
+                  />
                 </div>
               )}
 
-              {error && (
-                <p
-                  className="mt-4 text-center text-sm text-red-200"
-                  role="alert"
+              <Button
+                type="submit"
+                size="lg"
+                className="h-12 w-full bg-[#eef771] text-[#02120c] hover:bg-[#f5faa5] focus-visible:ring-[#eef771]/60"
+                disabled={submitting}
+              >
+                {submitting && (
+                  <LoaderCircle aria-hidden="true" className="animate-spin" />
+                )}
+                {!submitting && <KeyRound aria-hidden="true" />}
+                {submitting
+                  ? creating
+                    ? "Creating passkey…"
+                    : "Signing in…"
+                  : creating
+                    ? "Create passkey"
+                    : "Sign in with passkey"}
+              </Button>
+
+              <p className="text-center text-sm text-[#c7e6da]/75">
+                {creating ? "Already have a passkey?" : "New to Baseera?"}{" "}
+                <button
+                  type="button"
+                  className="font-medium text-[#eef771] underline-offset-4 hover:underline"
+                  disabled={submitting}
+                  onClick={switchMode}
                 >
+                  {creating ? "Sign in" : "Create a passkey"}
+                </button>
+              </p>
+
+              {error && (
+                <p className="text-center text-sm text-red-200" role="alert">
                   {error}
                 </p>
               )}
-            </div>
+            </form>
           </section>
         </div>
       </div>
     </main>
   )
-}
-
-function isDeviceLogin(value: unknown): value is DeviceLogin {
-  return (
-    isRecord(value) &&
-    typeof value.verificationUrl === "string" &&
-    value.verificationUrl.startsWith("https://") &&
-    typeof value.userCode === "string" &&
-    value.userCode.length > 0 &&
-    typeof value.interval === "number" &&
-    value.interval > 0 &&
-    typeof value.expiresAt === "number" &&
-    value.expiresAt > Date.now()
-  )
-}
-
-function isPollResult(
-  value: unknown
-): value is { status: "pending" | "complete" | "expired" } {
-  return (
-    isRecord(value) &&
-    (value.status === "pending" ||
-      value.status === "complete" ||
-      value.status === "expired")
-  )
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }

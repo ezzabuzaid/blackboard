@@ -1,6 +1,16 @@
 {
   "name": "api",
   "targets": {
+    "portless": {
+      "command": "portless --name backend.baseera --app-port 3001 -- nx run api:dev",
+      "continuous": true,
+      "options": {
+        "env": {
+          "BETTER_AUTH_URL": "https://frontend.baseera.localhost",
+          "WEB_ORIGIN": "https://frontend.baseera.localhost"
+        }
+      }
+    },
     "sdk": {
       "command": "npx @sdk-it/cli generate",
       "cache": true,

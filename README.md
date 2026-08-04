@@ -5,18 +5,24 @@ A collaborative AI workspace built with React Router, Hono, and AI SDK.
 ## Setup
 
 ```bash
-cp .env.example .env
-# Set BETTER_AUTH_SECRET in .env to a random value of at least 32 characters.
+cp .env.example apps/api/.env
+# Set OPENROUTER_API_KEY and BETTER_AUTH_SECRET in apps/api/.env.
+# BETTER_AUTH_SECRET must be a random value of at least 32 characters.
 # For example: openssl rand -base64 32
 npm install
-npm run dev
+nx run-many -t portless -p web api
 ```
+
+Open `https://frontend.baseera.localhost`. Run `portless trust` once first if
+the local HTTPS certificate is not installed yet.
 
 Agents use an in-process virtual Bash sandbox with persistent workspaces under
 `ZUKHRUF_DATA_DIR`; it does not require KVM or a container runtime. Open the web
-app and choose **Continue with ChatGPT** to connect your subscription. Better
-Auth stores the user session and encrypted OAuth tokens in `auth.sqlite` under
-`ZUKHRUF_DATA_DIR`.
+app and create a passkey with only your name. Returning users sign in with their
+device passkey and no form fields. Better Auth stores users, passkeys, and
+sessions in `auth.sqlite` under `ZUKHRUF_DATA_DIR`. Agent requests use the
+server's `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` (`openrouter/auto` by
+default).
 
 ## Agents
 

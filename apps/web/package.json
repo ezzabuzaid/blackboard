@@ -11,8 +11,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@better-auth/passkey": "^1.6.25",
     "@sdk-it/client": "*",
     "@stdlib/shadcn": "*",
+    "better-auth": "^1.6.25",
     "lucide-react": "^1.26.0",
     "mdast-util-directive": "^3.1.0",
     "motion": "^12.42.2",
