@@ -41,15 +41,21 @@ export async function loader(args: LoaderFunctionArgs) {
         { signal: request.signal }
       ),
     ])
-    if (!isGroupChatState(state)) {
+    if (
+      !isGroupChatState(state) ||
+      !isRecord(state) ||
+      typeof state.streamPath !== "string"
+    ) {
       throw new Error("Invalid chat state")
     }
+    const { streamPath, ...initialState } = state
 
     return {
       apiStatus: "ready" as const,
       chatId,
       groups,
-      initialState: state,
+      initialState,
+      streamPath,
     }
   } catch (error) {
     if (error instanceof Response) throw error
@@ -58,6 +64,7 @@ export async function loader(args: LoaderFunctionArgs) {
       apiStatus: "offline" as const,
       chatId,
       groups,
+      streamPath: null,
       initialState: {
         messages: [],
         participants: [],

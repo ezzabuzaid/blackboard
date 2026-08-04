@@ -10,7 +10,9 @@ import {
 import {
   SqliteMailboxStore,
   type AgentDeclaration,
+  type AgentRuntimeInfo,
   type ConversationId,
+  type TurnInput,
 } from "@deepagents/experimental/zukhruf"
 
 import {
@@ -30,6 +32,10 @@ interface ChatSession {
 }
 
 export class WhatsAppChatRuntime implements AsyncDisposable {
+  readonly info: AgentRuntimeInfo = {
+    root: "whatsapp-group",
+    agents: [],
+  }
   readonly #chats = new Map<string, Promise<ChatSession>>()
   readonly #resources = new AsyncDisposableStack()
   readonly #store: SqliteContextStore
@@ -89,18 +95,36 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     return group.post(message.content, message.id, message.replyToMessageId)
   }
 
+  async createSession(conversation: ConversationId) {
+    await this.#chat(conversation)
+  }
+
+  async sessionExists(conversation: ConversationId) {
+    return Boolean(await this.#streamStore.getStream(streamId(conversation)))
+  }
+
+  async enqueue(conversation: ConversationId, turn: TurnInput) {
+    await this.post(conversation, { id: turn.id, content: turn.input })
+    const id = streamId(conversation)
+    return { id, stream: this.#streams.watch(id) }
+  }
+
+  observe(conversation: ConversationId) {
+    return {
+      cancel: async () => {
+        await this.stop(conversation)
+      },
+      resume: async () => {
+        if (!(await this.sessionExists(conversation))) return null
+        await this.#chat(conversation)
+        return this.#streams.watch(streamId(conversation))
+      },
+    }
+  }
+
   async snapshot(conversation: ConversationId) {
     const { group } = await this.#chat(conversation)
     return group.snapshot()
-  }
-
-  async subscribe(
-    conversation: ConversationId,
-    after: number,
-    onEvent: (event: WhatsAppChatEvent) => void | Promise<void>
-  ) {
-    const { group } = await this.#chat(conversation)
-    return group.subscribe({ after, onEvent })
   }
 
   async stop(conversation: ConversationId) {
@@ -140,10 +164,10 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   }
 
   async #createChat(conversation: ConversationId) {
-    const streamId = JSON.stringify(["whatsapp-chat", conversation.chatId])
+    const id = streamId(conversation)
     const now = Date.now()
     await this.#streamStore.upsertStream({
-      id: streamId,
+      id,
       status: "running",
       createdAt: now,
       startedAt: now,
@@ -151,7 +175,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       cancelRequestedAt: null,
       error: null,
     })
-    const events = (await this.#streamStore.getChunks(streamId)).map(
+    const events = (await this.#streamStore.getChunks(id)).map(
       ({ seq, data, createdAt }) => chatEvent(data, seq, createdAt)
     )
     const participants = [...(await this.#loadChatParticipants(conversation))]
@@ -182,7 +206,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       persist: (event) =>
         this.#streamStore.appendChunks([
           {
-            streamId,
+            streamId: id,
             seq: event.cursor,
             data: { type: CHAT_EVENT_TYPE, data: event },
             createdAt: Date.now(),
@@ -207,6 +231,10 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
         : participant
     )
   }
+}
+
+function streamId(conversation: ConversationId) {
+  return JSON.stringify(["whatsapp-chat", conversation.chatId])
 }
 
 function chatEvent(part: StreamPart, sequence: number, createdAt: number) {

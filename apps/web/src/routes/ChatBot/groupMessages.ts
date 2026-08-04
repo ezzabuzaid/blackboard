@@ -127,6 +127,14 @@ export function isGroupChatEvent(value: unknown): value is GroupChatEvent {
   return value.type === "activity" && isGroupActivityEvent(value.activity)
 }
 
+export function groupChatEventFromStreamPart(value: unknown) {
+  return isRecord(value) &&
+    value.type === "data-whatsapp-chat-event" &&
+    isGroupChatEvent(value.data)
+    ? value.data
+    : null
+}
+
 function isGroupParticipant(value: unknown): value is GroupParticipant {
   return isRecord(value) && typeof value.name === "string" && !!value.name
 }

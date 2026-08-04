@@ -1,7 +1,9 @@
-import type { ConversationId } from "@deepagents/experimental/zukhruf"
+import {
+  ZUKHRUF_SESSION_STREAM_ROUTE_PATH,
+  type ConversationId,
+} from "@deepagents/experimental/zukhruf"
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
-import { streamSSE } from "hono/streaming"
 import { getMimeType } from "hono/utils/mime"
 import { validate } from "@sdk-it/hono/runtime"
 import { z } from "zod"
@@ -48,49 +50,12 @@ export default function (router: Hono<AppEnv>) {
         return context.json({ error: "Invalid chat id." }, 400)
       }
 
-      return context.json(
-        await context.var.dependencies.runtime.snapshot(conversation)
-      )
-    }
-  )
-
-  /**
-   * @openapi getChatEvents
-   * @tags chat
-   * @description Streams chat events after a cursor.
-   */
-  router.get(
-    "/chat/:chatId/events",
-    validate((payload) => ({
-      chatId: { select: payload.params.chatId, against: z.string() },
-      after: { select: payload.query.after, against: z.string().optional() },
-    })),
-    async (context) => {
-      const conversation = conversationFrom(
-        context.get("userId"),
-        context.var.input.chatId
-      )
-      const after = eventCursor(
-        context.req.header("Last-Event-ID") ?? context.var.input.after ?? "0"
-      )
-      if (!conversation || after === null) {
-        return context.json({ error: "Invalid chat event cursor." }, 400)
-      }
-
-      return streamSSE(context, async (output) => {
-        using subscription = await context.var.dependencies.runtime.subscribe(
-          conversation,
-          after,
-          (event) =>
-            output
-              .writeSSE({
-                event: event.type,
-                id: String(event.cursor),
-                data: JSON.stringify(event),
-              })
-              .catch(() => undefined)
-        )
-        await new Promise<void>((resolve) => output.onAbort(resolve))
+      return context.json({
+        ...(await context.var.dependencies.runtime.snapshot(conversation)),
+        streamPath: ZUKHRUF_SESSION_STREAM_ROUTE_PATH.replace(
+          ":sessionId",
+          encodeURIComponent(conversation.chatId)
+        ),
       })
     }
   )
@@ -261,11 +226,6 @@ export default function (router: Hono<AppEnv>) {
       }
     }
   )
-}
-
-function eventCursor(value: string) {
-  const cursor = Number(value)
-  return Number.isSafeInteger(cursor) && cursor >= 0 ? cursor : null
 }
 
 function artifactPath(path: string | undefined) {

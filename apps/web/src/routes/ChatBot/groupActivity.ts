@@ -236,10 +236,42 @@ export function isGroupActivityState(
   )
 }
 
-export function groupTypingParticipants(state: GroupActivityState) {
-  return state.presence
+export function groupActivityIndicator(state: GroupActivityState) {
+  if (state.phase !== "active") return null
+
+  const typing = state.presence
     .filter(({ state }) => state === "typing")
     .map(({ name }) => name)
+  if (typing.length > 0) {
+    return {
+      participants: typing,
+      label:
+        typing.length === 1
+          ? `${typing[0]} is typing…`
+          : `${typing.length} agents are typing…`,
+    }
+  }
+
+  const thinking = state.participants
+    .filter(
+      (participant) =>
+        participant.state === "notified" ||
+        participant.state === "considering" ||
+        state.presence.some(
+          ({ name, state }) =>
+            name === participant.name && state === "reading"
+        )
+    )
+    .map(({ name }) => name)
+  if (thinking.length === 0) return null
+
+  return {
+    participants: thinking,
+    label:
+      thinking.length === 1
+        ? `${thinking[0]} is thinking…`
+        : `${thinking.length} agents are thinking…`,
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

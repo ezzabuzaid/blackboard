@@ -6,12 +6,10 @@ import {
   type ContextStore,
   type StreamManager,
   guardrail,
-  once,
   persona,
   policy,
   principle,
   quirk,
-  reminder,
   styleGuide,
   workflow,
 } from "@deepagents/context"
@@ -161,6 +159,7 @@ interface RunningParticipant {
   runtime: AgentRuntime
   active: boolean
   seenThroughSequence: number
+  pendingReminder?: string
   turnId?: string
 }
 
@@ -304,28 +303,6 @@ export class WhatsAppGroup implements AsyncDisposable {
               tone: "Concise, natural, and selective",
             }),
             ...(participant.instructions ?? []),
-            ...(joining
-              ? [
-                  reminder(
-                    "You just joined an ongoing group chat. Read the full public conversation included in this notification, then greet the group once with a brief, natural introduction.",
-                    {
-                      asPart: true,
-                      when: once("whatsapp-participant-joined"),
-                    }
-                  ),
-                ]
-              : []),
-            ...(options.participants.length === 1
-              ? [
-                  reminder(
-                    "Before deciding whether to reply to the first human message, use bash to list all participant directories under /workspace/participants. If your own directory is the only participant directory, the human is speaking directly to you even when they do not name you.",
-                    {
-                      asPart: true,
-                      when: once("whatsapp-participant-roster"),
-                    }
-                  ),
-                ]
-              : []),
             principle({
               title: "Voluntary participation",
               description:
@@ -347,7 +324,7 @@ export class WhatsAppGroup implements AsyncDisposable {
                   rule: `When the user explicitly asks for exactly one answer, only the named participant may reply; if nobody is named, only ${options.participants[0]!.name} may reply. Every other participant must stay silent.`,
                 }),
                 policy({
-                  rule: "A short, unaddressed user follow-up or acknowledgment belongs to the participant who authored the immediately preceding public reply. If that was not you, stay silent. An explicit participant name or request to the whole group overrides this.",
+                  rule: "A short, unaddressed user follow-up or acknowledgment belongs to the participant who authored the immediately preceding public reply. If that was you, reply briefly; if the intent is unclear, ask one concise clarifying question. If that was not you, stay silent. An explicit participant name or request to the whole group overrides this.",
                 }),
               ],
             }),
@@ -439,6 +416,11 @@ export class WhatsAppGroup implements AsyncDisposable {
         runtime,
         active: false,
         seenThroughSequence: 0,
+        pendingReminder: joining
+          ? "You just joined an ongoing group chat. Read the full public conversation included in this notification, then greet the group once with a brief, natural introduction."
+          : options.participants.length === 1
+            ? "Before deciding whether to reply to the first human message, use bash to list all participant directories under /workspace/participants. If your own directory is the only participant directory, the human is speaking directly to you even when they do not name you."
+            : undefined,
       }
       participantResources.use(await runtime.work())
       return running
@@ -783,8 +765,9 @@ export class WhatsAppGroup implements AsyncDisposable {
       const repliesBefore = this.#replyCounts.get(participant.name) ?? 0
       const turn = await participant.runtime.enqueue(participant.conversation, {
         id: randomUUID(),
-        input: this.#notification(notifications),
+        input: this.#notification(notifications, participant.pendingReminder),
       })
+      participant.pendingReminder = undefined
       participant.turnId = turn.id
       let failure: string | undefined
       const typingCalls = new Set<string>()
@@ -917,7 +900,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     return delivery
   }
 
-  #notification(messages: WhatsAppMessage[]) {
+  #notification(messages: WhatsAppMessage[], reminder?: string) {
     return [
       "New WhatsApp group messages:",
       "",
@@ -929,6 +912,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         message.content,
         "",
       ]),
+      ...(reminder ? [`<system-reminder>${reminder}</system-reminder>`, ""] : []),
       "Reply only through reply_to_group when you have something useful to add.",
       "Omit replyToMessageId by default. It points to one earlier public message in the UI; use it only to emphasize that message or when directly replying to another participant. Do not use it for an ordinary response to the latest user message or current discussion.",
     ].join("\n")

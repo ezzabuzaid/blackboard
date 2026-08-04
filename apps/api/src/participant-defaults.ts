@@ -6,7 +6,7 @@ export function createParticipantDefaults(options: {
   modelId?: string
   appUrl?: string
 }) {
-  const modelId = options.modelId || "openrouter/auto-beta"
+  const modelId = options.modelId || "deepseek/deepseek-v4-flash-0731"
   const openrouter = createOpenRouter({
     apiKey: options.apiKey,
     compatibility: "strict",

@@ -9,7 +9,7 @@ import {
 import { api, apiUrl } from "./api"
 import {
   addGroupMessage,
-  isGroupChatEvent,
+  groupChatEventFromStreamPart,
   isGroupChatState,
   isGroupMessage,
   reduceGroupChat,
@@ -43,12 +43,14 @@ interface GroupChatProviderProps extends PropsWithChildren {
   chatId: string
   apiStatus: "ready" | "offline"
   initialState: GroupChatState
+  streamPath: string | null
 }
 
 export function GroupChatProvider({
   chatId,
   apiStatus,
   initialState,
+  streamPath,
   children,
 }: GroupChatProviderProps) {
   const [chat, setChat] = useState(initialState)
@@ -58,14 +60,15 @@ export function GroupChatProvider({
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
+    if (!streamPath) return
     const source = new EventSource(
-      `${apiUrl}/chat/${encodeURIComponent(chatId)}/events?after=${initialState.cursor}`,
+      `${apiUrl}${streamPath}`,
       { withCredentials: true }
     )
     const receive = ({ data }: MessageEvent<string>) => {
       try {
-        const event: unknown = JSON.parse(data)
-        if (isGroupChatEvent(event)) {
+        const event = groupChatEventFromStreamPart(JSON.parse(data))
+        if (event) {
           setChat((current) => reduceGroupChat(current, event))
         }
       } catch {
@@ -73,9 +76,8 @@ export function GroupChatProvider({
       }
     }
     source.addEventListener("message", receive)
-    source.addEventListener("activity", receive)
     return () => source.close()
-  }, [chatId, initialState.cursor])
+  }, [streamPath])
 
   async function postMessage(content: string) {
     if (apiStatus === "offline") throw new Error("The group is unavailable.")

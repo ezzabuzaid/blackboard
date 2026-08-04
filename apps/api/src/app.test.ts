@@ -114,6 +114,26 @@ function durableRuntime(
 }
 
 const unusedRuntime: ChatRuntime = {
+  info: { root: "test", agents: [] },
+  async createSession() {
+    throw new Error("Unexpected session creation")
+  },
+  async sessionExists() {
+    return false
+  },
+  async enqueue() {
+    throw new Error("Unexpected enqueue")
+  },
+  observe() {
+    return {
+      async cancel() {
+        throw new Error("Unexpected cancellation")
+      },
+      async resume() {
+        throw new Error("Unexpected resume")
+      },
+    }
+  },
   async post() {
     throw new Error("Unexpected post")
   },
@@ -122,9 +142,6 @@ const unusedRuntime: ChatRuntime = {
   },
   async stop() {
     throw new Error("Unexpected stop")
-  },
-  async subscribe() {
-    throw new Error("Unexpected subscribe")
   },
   async traces() {
     throw new Error("Unexpected traces")
@@ -256,7 +273,7 @@ test("passkey registration requires only a name", async () => {
 test("participant defaults use the configured OpenRouter key", () => {
   const defaults = createParticipantDefaults({ apiKey: "openrouter-key-1" })
   assert.equal(defaults.model.provider, "openrouter")
-  assert.equal(defaults.model.modelId, "openrouter/auto-beta")
+  assert.equal(defaults.model.modelId, "deepseek/deepseek-v4-flash-0731")
   assert.equal(defaults.tools.web_search?.type, "provider")
 })
 
@@ -687,15 +704,24 @@ test("SDK auth routes preserve Better Auth response headers", async () => {
 })
 
 test("chat routes require a Better Auth session", async () => {
-  const response = await testApp({
+  const unauthenticatedApp = testApp({
     auth: {
       ...authenticatedAuth,
       getSession: async () => null,
     },
-  }).request("/api/chat/chat-1/state")
+  })
+  const response = await unauthenticatedApp.request("/api/chat/chat-1/state")
 
   assert.equal(response.status, 401)
   assert.deepEqual(await response.json(), { error: "Unauthorized." })
+  assert.equal(
+    (
+      await unauthenticatedApp.request(
+        "/api/zukhruf/v1/session/00000000-0000-4000-8000-000000000001/stream"
+      )
+    ).status,
+    401
+  )
 })
 
 test("a user with no participants gets an empty group", async () => {
@@ -715,6 +741,7 @@ test("a user with no participants gets an empty group", async () => {
       presence: [],
     },
     cursor: 0,
+    streamPath: "/zukhruf/v1/session/chat-1/stream",
   })
 
   const messageResponse = await groupApp.request("/api/chat/chat-1/messages", {
@@ -1130,6 +1157,8 @@ test("group chats share writable per-user participants and isolate other users",
 })
 
 test("chat message POST returns before active participants settle", async () => {
+  const chatId = "00000000-0000-4000-8000-000000000001"
+  const conversation = { chatId, userId: "local-user" }
   const participantStarted = Promise.withResolvers<void>()
   const releaseParticipant = Promise.withResolvers<void>()
   const participant = new MockLanguageModelV4({
@@ -1149,7 +1178,7 @@ test("chat message POST returns before active participants settle", async () => 
   try {
     const groupApp = testApp({ runtime })
     const request = () =>
-      groupApp.request("/api/chat/chat-1/messages", {
+      groupApp.request(`/api/chat/${chatId}/messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1192,7 +1221,7 @@ test("chat message POST returns before active participants settle", async () => 
     await participantStarted.promise
 
     const state = (await (
-      await groupApp.request("/api/chat/chat-1/state")
+      await groupApp.request(`/api/chat/${chatId}/state`)
     ).json()) as ReturnType<WhatsAppGroup["snapshot"]>
     assert.deepEqual(state, {
       messages: [
@@ -1214,31 +1243,26 @@ test("chat message POST returns before active participants settle", async () => 
         presence: [{ name: "Maya", state: "reading" }],
       },
       cursor: 5,
+      streamPath: `/zukhruf/v1/session/${chatId}/stream`,
     })
 
-    const settled = Promise.withResolvers<void>()
-    using settlement = await runtime.subscribe(
-      { chatId: "chat-1", userId: "local-user" },
-      state.cursor,
-      (event) => {
-        if (event.type === "activity" && event.activity.type === "settled") {
-          settled.resolve()
-        }
-      }
-    )
     releaseParticipant.resolve()
-    await settled.promise
+    await waitForChat(runtime, conversation, "settled")
 
-    async function readEvents(headers?: Record<string, string>) {
+    async function readEvents() {
       const controller = new AbortController()
       const response = await groupApp.request(
-        `/api/chat/chat-1/events?after=${state.cursor}`,
-        { headers, signal: controller.signal }
+        `/api/zukhruf/v1/session/${chatId}/stream`,
+        { signal: controller.signal }
       )
       assert.equal(response.status, 200)
       assert.match(
         response.headers.get("content-type") ?? "",
         /text\/event-stream/
+      )
+      assert.equal(
+        response.headers.get("x-vercel-ai-ui-message-stream"),
+        "v1"
       )
       const reader = response.body!.getReader()
       let events = ""
@@ -1253,19 +1277,12 @@ test("chat message POST returns before active participants settle", async () => 
     }
 
     const events = await readEvents()
-    assert.doesNotMatch(events, new RegExp(`id: ${state.cursor}\\n`))
-    assert.match(events, /event: activity/)
-    assert.match(events, new RegExp(`id: ${state.cursor + 1}`))
-    assert.match(events, new RegExp(`id: ${state.cursor + 2}`))
-    assert.match(events, new RegExp(`id: ${state.cursor + 3}`))
+    assert.match(events, /"type":"data-whatsapp-chat-event"/)
+    assert.match(events, /"cursor":1/)
     assert.match(events, /"type":"settled"/)
 
-    const reconnected = await readEvents({
-      "Last-Event-ID": String(state.cursor),
-    })
-    assert.doesNotMatch(reconnected, new RegExp(`id: ${state.cursor}\\n`))
-    assert.match(reconnected, new RegExp(`id: ${state.cursor + 1}`))
-    assert.match(reconnected, new RegExp(`id: ${state.cursor + 3}`))
+    const reconnected = await readEvents()
+    assert.equal(reconnected, events)
   } finally {
     releaseParticipant.resolve()
   }
@@ -1316,7 +1333,7 @@ test("activity subscribers do not wait for persistence", async () => {
   assert.equal(deliveredBeforePersistence, true)
 })
 
-test("chat message and event cursors are validated at the boundary", async () => {
+test("chat messages and Zukhruf session ids are validated at the boundary", async () => {
   for (const body of [
     null,
     {},
@@ -1333,13 +1350,14 @@ test("chat message and event cursors are validated at the boundary", async () =>
   }
 
   assert.equal(
-    (await app.request("/api/chat/chat-1/events?after=-1")).status,
+    (
+      await app.request(
+        "/api/zukhruf/v1/session/not-a-session-id/stream"
+      )
+    ).status,
     400
   )
-  assert.equal(
-    (await app.request("/api/chat/chat-1/events?after=invalid")).status,
-    400
-  )
+  assert.equal((await app.request("/api/chat/chat-1/events")).status, 404)
   assert.equal((await app.request("/api/chat/chat-1/stream")).status, 404)
   assert.equal((await app.request("/api/chat/chat-1/turns")).status, 404)
   assert.equal(
@@ -2098,22 +2116,27 @@ test("group prompt selects one responder for an explicitly single-answer request
   )
 })
 
-test("group prompt keeps a short unaddressed follow-up with the previous responder", async () => {
+test("the previous responder answers an ambiguous short follow-up", async () => {
   const followUpRule =
     "A short, unaddressed user follow-up or acknowledgment belongs to the participant who authored the immediately preceding public reply."
+  const followUpOwnerRule =
+    "If that was you, reply briefly; if the intent is unclear, ask one concise clarifying question."
   const participant = (name: "Maya" | "Omar") => {
     let initialReplyPosted = false
     let followUpHandled = false
     return new MockLanguageModelV4({
       doStream: async ({ prompt }) => {
         const instructions = JSON.stringify(prompt)
-        if (instructions.includes("thanks") && !followUpHandled) {
+        if (instructions.includes("So?") && !followUpHandled) {
           followUpHandled = true
           if (instructions.includes(followUpRule) && name !== "Omar") {
             return groupTextResponse("The follow-up belongs to Omar.")
           }
+          if (!instructions.includes(followUpOwnerRule)) {
+            return groupTextResponse("The follow-up does not require an answer.")
+          }
           return groupToolResponse("reply_to_group", `${name}-thanks`, {
-            message: `${name} acknowledged the follow-up.`,
+            message: `${name} asked what needs clarification.`,
           })
         }
         if (name === "Omar" && !initialReplyPosted) {
@@ -2148,7 +2171,7 @@ test("group prompt keeps a short unaddressed follow-up with the previous respond
 
   await group.send("Omar, what do you think?")
   const beforeFollowUp = group.snapshot().messages.length
-  const messages = await group.send("thanks")
+  const messages = await group.send("So?")
 
   assert.deepEqual(
     messages
@@ -2200,18 +2223,28 @@ test("a chat survives a runtime restart and replays persisted events", async () 
     assert.deepEqual(snapshot.participants, [{ name: "Maya" }])
     assert.equal(snapshot.activity.phase, "settled")
 
+    const stream = await runtime.observe(conversation).resume()
+    assert.ok(stream)
+    const reader = stream.getReader()
     const replayed: number[] = []
-    const replayComplete = Promise.withResolvers<void>()
-    using subscription = await runtime.subscribe(
-      conversation,
-      snapshot.cursor - 2,
-      (event) => {
-        replayed.push(event.cursor)
-        if (event.cursor === snapshot.cursor) replayComplete.resolve()
+    while (replayed.at(-1) !== snapshot.cursor) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (
+        value.type === "data-whatsapp-chat-event" &&
+        typeof value.data === "object" &&
+        value.data !== null &&
+        "cursor" in value.data &&
+        typeof value.data.cursor === "number"
+      ) {
+        replayed.push(value.data.cursor)
       }
+    }
+    await reader.cancel()
+    assert.deepEqual(
+      replayed,
+      Array.from({ length: snapshot.cursor }, (_, index) => index + 1)
     )
-    await replayComplete.promise
-    assert.deepEqual(replayed, [snapshot.cursor - 1, snapshot.cursor])
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

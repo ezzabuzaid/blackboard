@@ -14,16 +14,16 @@ connection while keeping the existing conversation presentation components.
   - participants and specialties
   - current activity state
   - the latest event cursor
-- [x] Add `GET /api/chat/:chatId/events`.
-- [x] Stream native SSE events with an SSE id matching the chat sequence.
-- [x] Support an initial `after` cursor and `Last-Event-ID` reconnect.
-- [x] Replay events after the cursor before subscribing to new events.
+  - the Zukhruf session stream path
+- [x] Use `GET /api/zukhruf/v1/session/:sessionId/stream`.
+- [x] Stream persisted chat events as Zukhruf UI message data parts.
+- [x] Replay the durable stream before subscribing to new events.
 - [x] Add `POST /api/chat/:chatId/messages`.
 - [x] Validate message id and non-empty content at the HTTP trust boundary.
 - [x] Make repeated client message ids idempotent.
 - [x] Return the accepted public message immediately; do not wait for agents.
 - [x] Keep the SSE connection open while the chat is idle.
-- [x] Remove the group path's AI SDK `UIMessageStream` response.
+- [x] Let Zukhruf own the AI SDK `UIMessageStream` response.
 - [x] Remove the root `POST /api/chat` route when no remaining caller uses it.
 
 ## Browser state
@@ -57,9 +57,10 @@ connection while keeping the existing conversation presentation components.
 
 ## Tests
 
-- [x] State hydration followed by SSE connection cannot lose an event emitted
-      between the two requests.
-- [x] Reconnection after a cursor replays each missed event once.
+- [x] State hydration followed by durable stream replay cannot lose an event
+      emitted between the two requests.
+- [x] Reconnection replays the durable stream while the reducer ignores events
+      already represented by the hydrated cursor.
 - [x] Posting while agents work renders the human message immediately.
 - [x] A fast agent reply renders before a slow agent finishes.
 - [x] The composer accepts another message while activity is live.

@@ -23,7 +23,8 @@ import {
 export { loader }
 
 export default function ChatBot() {
-  const { apiStatus, chatId, initialState } = useLoaderData<typeof loader>()
+  const { apiStatus, chatId, initialState, streamPath } =
+    useLoaderData<typeof loader>()
 
   return (
     <GroupChatProvider
@@ -31,6 +32,7 @@ export default function ChatBot() {
       apiStatus={apiStatus}
       chatId={chatId}
       initialState={initialState}
+      streamPath={streamPath}
     >
       <AgentTraceProvider>
         <main className="relative flex h-svh bg-background">

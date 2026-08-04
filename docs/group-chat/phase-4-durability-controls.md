@@ -19,7 +19,7 @@ its public conversation semantics.
 - [x] Persist event sequence, public messages, participants, and current chat
       activity.
 - [x] Reconstruct a chat after an API restart.
-- [x] Resume SSE delivery from `Last-Event-ID`.
+- [x] Resume delivery by replaying the durable Zukhruf session stream.
 - [x] Define what happens to participant work interrupted by process restart.
 - [x] Verify a completed conversation survives API and browser restart.
 

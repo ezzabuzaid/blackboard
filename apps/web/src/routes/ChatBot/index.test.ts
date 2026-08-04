@@ -8,13 +8,14 @@ import { Streamdown } from "streamdown"
 
 import { artifactRemarkPlugins, sandboxArtifactUrl } from "./artifactLinks"
 import {
-  groupTypingParticipants,
+  groupActivityIndicator,
   initialGroupActivity,
   reduceGroupActivity,
   type GroupActivityEvent,
 } from "./groupActivity"
 import {
   addGroupMessage,
+  groupChatEventFromStreamPart,
   groupMessageClusters,
   reduceGroupChat,
   type GroupChatState,
@@ -31,6 +32,22 @@ const groupSummary = {
   lastMessage: null,
   unreadCount: 0,
 }
+
+test("extracts group events from the Zukhruf stream", () => {
+  const event = {
+    cursor: 1,
+    type: "activity" as const,
+    activity: { type: "started" as const, participants: ["Maya"] },
+  }
+  assert.deepEqual(
+    groupChatEventFromStreamPart({
+      type: "data-whatsapp-chat-event",
+      data: event,
+    }),
+    event
+  )
+  assert.equal(groupChatEventFromStreamPart({ type: "text-delta" }), null)
+})
 
 test("loader sends users without groups to group creation", async () => {
   const originalFetch = globalThis.fetch
@@ -165,6 +182,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
         participants: [{ name: "Maya" }],
         activity: initialGroupActivity,
         cursor: hasHistory ? 2 : 0,
+        streamPath: "/zukhruf/v1/session/test-chat/stream",
       })
     }
     return new Response(null, { status: 404 })
@@ -179,6 +197,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
       apiStatus: "ready",
       chatId: "test-chat",
       groups: [groupSummary],
+      streamPath: "/zukhruf/v1/session/test-chat/stream",
       initialState: {
         messages: [
           {
@@ -208,6 +227,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
       apiStatus: "ready",
       chatId: "test-chat",
       groups: [groupSummary],
+      streamPath: "/zukhruf/v1/session/test-chat/stream",
       initialState: {
         messages: [],
         participants: [{ name: "Maya" }],
@@ -381,18 +401,26 @@ test("group activity tracks decisions, replies, and settlement", () => {
   })
 })
 
-test("typing presence excludes reading and seen states", () => {
+test("group activity stays visible while agents think and type", () => {
   const started = reduceGroupActivity(initialGroupActivity, {
     type: "started",
     participants: ["Maya", "Omar"],
   })
+  assert.deepEqual(groupActivityIndicator(started), {
+    participants: ["Maya", "Omar"],
+    label: "2 agents are thinking…",
+  })
+
   const reading = reduceGroupActivity(started, {
     type: "presence",
     notification: 1,
     participant: "Maya",
     state: "reading",
   })
-  assert.deepEqual(groupTypingParticipants(reading), [])
+  assert.deepEqual(groupActivityIndicator(reading), {
+    participants: ["Maya", "Omar"],
+    label: "2 agents are thinking…",
+  })
 
   const typing = reduceGroupActivity(reading, {
     type: "presence",
@@ -400,12 +428,15 @@ test("typing presence excludes reading and seen states", () => {
     participant: "Omar",
     state: "typing",
   })
-  assert.deepEqual(groupTypingParticipants(typing), ["Omar"])
+  assert.deepEqual(groupActivityIndicator(typing), {
+    participants: ["Omar"],
+    label: "Omar is typing…",
+  })
   assert.deepEqual(
-    groupTypingParticipants(
+    groupActivityIndicator(
       reduceGroupActivity(typing, { type: "settled", notifications: 1 })
     ),
-    []
+    null
   )
 })
 

@@ -1,5 +1,9 @@
 import type { DrainContext } from "evlog"
 import { evlog, useLogger } from "evlog/hono"
+import {
+  ZUKHRUF_ROUTE_PREFIX,
+  zukhruf,
+} from "@deepagents/experimental/zukhruf"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 
@@ -44,8 +48,9 @@ export interface AppDependencies {
   }
   runtime: Pick<
     WhatsAppChatRuntime,
-    "post" | "snapshot" | "stop" | "subscribe" | "traces"
-  >
+    "post" | "snapshot" | "stop" | "traces"
+  > &
+    Parameters<typeof zukhruf>[0]
   openArtifact: OpenArtifact
 }
 
@@ -98,6 +103,14 @@ export function createApp(dependencies: AppDependencies) {
     context.set("dependencies", dependencies)
     await next()
   })
+
+  const zukhrufPath = `/api${ZUKHRUF_ROUTE_PREFIX}` as const
+  app.use(`${zukhrufPath}/*`, async (context, next) => {
+    const session = await dependencies.auth.getSession(context.req.raw.headers)
+    if (session) context.set("userId", session.user.id)
+    await next()
+  })
+  app.route(zukhrufPath, zukhruf(dependencies.runtime))
 
   for (const route of routes) {
     route.default(app.basePath("/api"))
