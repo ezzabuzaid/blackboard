@@ -27,9 +27,9 @@ export interface AppDependencies {
     handler(request: Request): Promise<Response>
     getSession(headers: Headers): Promise<{ user: { id: string } } | null>
     getSessionResponse(request: Request): Promise<Response>
-    startDevice(request: Request): Promise<Response>
-    pollDevice(request: Request): Promise<Response>
-    cancelDevice(request: Request): Promise<Response>
+    startDevice(headers: Headers): Promise<Response>
+    pollDevice(headers: Headers): Promise<Response>
+    cancelDevice(headers: Headers): Promise<Response>
   }
   runtime: Pick<
     WhatsAppChatRuntime,
@@ -94,7 +94,7 @@ export function createApp({ auth, runtime, openArtifact }: AppDependencies) {
     "/api/auth/chatgpt/device",
     validate(() => ({})),
     async (context) => {
-      const response = await auth.startDevice(context.req.raw)
+      const response = await auth.startDevice(context.req.raw.headers)
       if (!response.ok) return response
       const device = (await response.json()) as DeviceLogin
       copyAuthHeaders(context, response.headers)
@@ -110,7 +110,7 @@ export function createApp({ auth, runtime, openArtifact }: AppDependencies) {
     "/api/auth/chatgpt/device/poll",
     validate(() => ({})),
     async (context) => {
-      const response = await auth.pollDevice(context.req.raw)
+      const response = await auth.pollDevice(context.req.raw.headers)
       if (!response.ok) return response
       const result = (await response.json()) as DevicePoll
       copyAuthHeaders(context, response.headers)
@@ -126,7 +126,7 @@ export function createApp({ auth, runtime, openArtifact }: AppDependencies) {
     "/api/auth/chatgpt/device/cancel",
     validate(() => ({})),
     async (context) => {
-      const response = await auth.cancelDevice(context.req.raw)
+      const response = await auth.cancelDevice(context.req.raw.headers)
       if (!response.ok) return response
       const result = (await response.json()) as { cancelled: boolean }
       copyAuthHeaders(context, response.headers)

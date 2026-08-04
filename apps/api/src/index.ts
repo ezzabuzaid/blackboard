@@ -82,12 +82,12 @@ const app = createApp({
         headers: request.headers,
         asResponse: true,
       }),
-    startDevice: (request) =>
-      authentication.auth.api.device({ request, asResponse: true }),
-    pollDevice: (request) =>
-      authentication.auth.api.poll({ request, asResponse: true }),
-    cancelDevice: (request) =>
-      authentication.auth.api.cancel({ request, asResponse: true }),
+    startDevice: (headers) =>
+      authentication.auth.api.device({ headers, asResponse: true }),
+    pollDevice: (headers) =>
+      authentication.auth.api.poll({ headers, asResponse: true }),
+    cancelDevice: (headers) =>
+      authentication.auth.api.cancel({ headers, asResponse: true }),
   },
   runtime,
   openArtifact: (conversation, path) =>

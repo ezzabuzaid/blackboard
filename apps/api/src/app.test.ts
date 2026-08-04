@@ -307,6 +307,25 @@ test("SDK auth routes preserve Better Auth response headers", async () => {
   assert.equal(await response.json(), null)
 })
 
+test("SDK auth poll forwards its cookie header", async () => {
+  const response = await testApp({
+    auth: {
+      ...authenticatedAuth,
+      pollDevice: async (input) => {
+        assert.ok(input instanceof Headers)
+        assert.equal(input.get("cookie"), "chatgpt-device=attempt-1")
+        return Response.json({ status: "pending" })
+      },
+    },
+  }).request("/api/auth/chatgpt/device/poll", {
+    method: "POST",
+    headers: { Cookie: "chatgpt-device=attempt-1" },
+  })
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { status: "pending" })
+})
+
 test("chat routes require a Better Auth session", async () => {
   const response = await testApp({
     auth: {
