@@ -138,7 +138,11 @@ function GroupList() {
       </div>
       <NotificationBanner />
       <ScrollArea className="min-h-0 flex-1">
-        <div role="list" aria-label="Groups" className="px-2 pb-3">
+        <div
+          role="list"
+          aria-label="Groups"
+          className="w-0 min-w-full px-2 pb-3"
+        >
           {groups.map((group) => (
             <GroupListItem key={group.id} group={group} />
           ))}

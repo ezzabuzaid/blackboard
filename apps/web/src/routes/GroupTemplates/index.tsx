@@ -81,7 +81,6 @@ export default function GroupTemplates() {
   const filters = [
     { id: "all", label: "All" },
     { id: "source:prebuilt", label: "Prebuilt" },
-    { id: "source:marketplace", label: "Marketplace" },
     ...[...new Set(groupTemplates.map(({ category }) => category))].map(
       (category) => ({ id: `category:${category}`, label: category })
     ),

@@ -4,12 +4,12 @@ import test from "node:test"
 
 import { loadAgentCatalog } from "./agent-catalog.js"
 
-test("native agent catalog contains 44 complete character definitions", () => {
+test("native agent catalog contains 45 complete character definitions", () => {
   const agents = loadAgentCatalog(
     resolve(import.meta.dirname, "../../../../../catalog/agents")
   )
 
-  assert.equal(agents.length, 44)
+  assert.equal(agents.length, 45)
   assert.equal(new Set(agents.map(({ id }) => id)).size, agents.length)
   assert.deepEqual(
     agents.find(({ id }) => id === "paul-graham"),
