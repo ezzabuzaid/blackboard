@@ -72,6 +72,10 @@
       {
         "agentId": "yazan-alnajjar",
         "responsibility": "Turns strategy into accountable workflows, supplier discipline, and cross-functional execution."
+      },
+      {
+        "agentId": "mohammad-jaber",
+        "responsibility": "Keeps product architecture modular, interfaces explicit, and feature complexity under control."
       }
     ]
   },
