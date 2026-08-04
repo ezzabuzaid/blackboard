@@ -9,7 +9,14 @@ import {
   SheetTitle,
   cn,
 } from "@stdlib/shadcn"
-import { ArrowLeft, ArrowRight, Check, MessageCircle, Plus } from "lucide-react"
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  MessageCircle,
+  Plus,
+  Search,
+} from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { useState } from "react"
 import {
@@ -21,11 +28,20 @@ import {
 
 import { requireIdentity } from "../../auth"
 import { api } from "../ChatBot/api"
+import { toggleAgentSelection } from "./selection"
 
 interface GroupAgent {
   id: string
   name: string
   responsibility: string
+}
+
+interface CatalogAgent {
+  id: string
+  name: string
+  category: string
+  headline: string
+  tags: readonly string[]
 }
 
 interface GroupTemplate {
@@ -35,58 +51,63 @@ interface GroupTemplate {
   outcome: string
   agents: readonly GroupAgent[]
   source: "prebuilt" | "marketplace" | "custom"
-  scratch?: boolean
+  custom?: boolean
 }
 
-const scratchTemplate: GroupTemplate = {
-  id: "scratch",
-  name: "Build from scratch",
+const buildOwnTemplate: GroupTemplate = {
+  id: "custom",
+  name: "Build your own",
   category: "Custom",
-  outcome:
-    "Start with Factory and describe the group you need in plain language.",
+  outcome: "Choose up to eight characters from the catalog.",
   source: "custom",
-  scratch: true,
-  agents: [
-    {
-      id: "factory",
-      name: "Factory",
-      responsibility: "Creates the agents and responsibilities you ask for.",
-    },
-  ],
+  custom: true,
+  agents: [],
 }
 
 export async function loader(args: LoaderFunctionArgs) {
   await requireIdentity(args)
-  const { templates } = await api.request(
-    "GET /group-templates",
-    {},
-    { signal: args.request.signal }
-  )
+  const [{ templates }, catalog] = await Promise.all([
+    api.request("GET /group-templates", {}, { signal: args.request.signal }),
+    api.request("GET /agents", {}, { signal: args.request.signal }) as Promise<{
+      agents: readonly CatalogAgent[]
+    }>,
+  ])
   const groupTemplates: readonly GroupTemplate[] = [
     ...templates,
-    scratchTemplate,
+    buildOwnTemplate,
   ]
-  return { groupTemplates }
+  return { catalogAgents: catalog.agents, groupTemplates }
 }
 
 export default function GroupTemplates() {
-  const { groupTemplates } = useLoaderData<typeof loader>()
+  const { catalogAgents, groupTemplates } = useLoaderData<typeof loader>()
   const [activeFilter, setActiveFilter] = useState("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
+  const [customName, setCustomName] = useState("")
   const [startingId, setStartingId] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const navigate = useNavigate()
   const reduceMotion = useReducedMotion()
+  const selectedAgents = selectedAgentIds.flatMap((id) => {
+    const agent = catalogAgents.find((candidate) => candidate.id === id)
+    return agent
+      ? [{ id: agent.id, name: agent.name, responsibility: agent.headline }]
+      : []
+  })
+  const templates = groupTemplates.map((template) =>
+    template.custom ? { ...template, agents: selectedAgents } : template
+  )
   const filters = [
     { id: "all", label: "All" },
     { id: "source:prebuilt", label: "Prebuilt" },
-    ...[...new Set(groupTemplates.map(({ category }) => category))].map(
+    ...[...new Set(templates.map(({ category }) => category))].map(
       (category) => ({ id: `category:${category}`, label: category })
     ),
   ]
-  const selected = groupTemplates.find(({ id }) => id === selectedId) ?? null
-  const visibleTemplates = groupTemplates.filter(
+  const selected = templates.find(({ id }) => id === selectedId) ?? null
+  const visibleTemplates = templates.filter(
     ({ source, category }) =>
       activeFilter === "all" ||
       activeFilter === `source:${source}` ||
@@ -98,18 +119,41 @@ export default function GroupTemplates() {
     setStartError(null)
   }
 
-  async function startGroup(template: GroupTemplate) {
-    setStartingId(template.id)
+  async function createGroup(
+    input: { templateId?: string; name?: string; agentIds?: string[] },
+    startingId: string
+  ) {
+    setStartingId(startingId)
     setStartError(null)
     try {
-      const group = await api.request("POST /groups", {
-        templateId: template.id,
-      })
+      const group = await api.request("POST /groups", input)
       await navigate(`/?${new URLSearchParams({ chatId: group.id })}`)
     } catch {
       setStartError("Could not create this group. Try again.")
       setStartingId(null)
     }
+  }
+
+  function toggleAgent(id: string) {
+    setSelectedAgentIds((selected) => toggleAgentSelection(selected, id))
+    setStartError(null)
+  }
+
+  function startSelectedGroup() {
+    if (!selected) return
+    void createGroup(
+      selected.custom
+        ? {
+            name: customName,
+            agentIds: [...selectedAgentIds],
+          }
+        : { templateId: selected.id },
+      selected.id
+    )
+  }
+
+  function startFactory() {
+    void createGroup({ templateId: "scratch" }, "factory")
   }
 
   return (
@@ -154,8 +198,7 @@ export default function GroupTemplates() {
               Build your group.
             </h1>
             <p className="mt-3 max-w-xl text-sm leading-6 text-[#8ca79a]">
-              Choose a ready-made team or start with Factory and assemble your
-              own.
+              Choose a ready-made team or select the exact characters you want.
             </p>
           </motion.div>
 
@@ -204,8 +247,15 @@ export default function GroupTemplates() {
             <SelectedGroupPanel
               template={selected}
               starting={startingId === selected?.id}
+              startingFactory={startingId === "factory"}
               error={startError}
-              onStart={() => selected && void startGroup(selected)}
+              catalogAgents={catalogAgents}
+              selectedAgentIds={selectedAgentIds}
+              customName={customName}
+              onCustomNameChange={setCustomName}
+              onToggleAgent={toggleAgent}
+              onStart={startSelectedGroup}
+              onStartFactory={startFactory}
             />
           </div>
         </aside>
@@ -248,8 +298,15 @@ export default function GroupTemplates() {
           <SelectedGroupPanel
             template={selected}
             starting={startingId === selected?.id}
+            startingFactory={startingId === "factory"}
             error={startError}
-            onStart={() => selected && void startGroup(selected)}
+            catalogAgents={catalogAgents}
+            selectedAgentIds={selectedAgentIds}
+            customName={customName}
+            onCustomNameChange={setCustomName}
+            onToggleAgent={toggleAgent}
+            onStart={startSelectedGroup}
+            onStartFactory={startFactory}
           />
         </SheetContent>
       </Sheet>
@@ -318,8 +375,11 @@ function TemplateCard({
         <div className="mt-auto flex items-center gap-2 pt-4">
           <AgentAvatarGroup agents={template.agents} />
           <span className="text-[11px] text-[#789487]">
-            {template.agents.length}{" "}
-            {template.agents.length === 1 ? "agent" : "agents"}
+            {template.custom && template.agents.length === 0
+              ? "Choose characters"
+              : `${template.agents.length} ${
+                  template.agents.length === 1 ? "agent" : "agents"
+                }`}
           </span>
         </div>
       </div>
@@ -330,14 +390,45 @@ function TemplateCard({
 function SelectedGroupPanel({
   template,
   starting,
+  startingFactory,
   error,
+  catalogAgents,
+  selectedAgentIds,
+  customName,
+  onCustomNameChange,
+  onToggleAgent,
   onStart,
+  onStartFactory,
 }: {
   template: GroupTemplate | null
   starting: boolean
+  startingFactory: boolean
   error: string | null
+  catalogAgents: readonly CatalogAgent[]
+  selectedAgentIds: readonly string[]
+  customName: string
+  onCustomNameChange(name: string): void
+  onToggleAgent(id: string): void
   onStart(): void
+  onStartFactory(): void
 }) {
+  if (template?.custom) {
+    return (
+      <CustomGroupPanel
+        agents={catalogAgents}
+        selectedAgentIds={selectedAgentIds}
+        name={customName}
+        starting={starting}
+        startingFactory={startingFactory}
+        error={error}
+        onNameChange={onCustomNameChange}
+        onToggleAgent={onToggleAgent}
+        onStart={onStart}
+        onStartFactory={onStartFactory}
+      />
+    )
+  }
+
   return (
     <div className="flex min-h-full flex-col">
       <p className="text-[10px] font-semibold tracking-[0.16em] text-[#789487] uppercase">
@@ -403,17 +494,8 @@ function SelectedGroupPanel({
             disabled={starting}
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#eef771] px-4 py-3 text-sm font-semibold text-[#03130c] transition-colors hover:bg-[#f8fba8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#eef771]"
           >
-            {template.scratch ? (
-              <Plus aria-hidden="true" className="size-4" />
-            ) : null}
-            {starting
-              ? "Starting…"
-              : template.scratch
-                ? "Start from scratch"
-                : "Start with this group"}
-            {!starting && !template.scratch && (
-              <ArrowRight aria-hidden="true" className="size-4" />
-            )}
+            {starting ? "Starting…" : "Start with this group"}
+            {!starting && <ArrowRight aria-hidden="true" className="size-4" />}
           </button>
           {error && (
             <p role="alert" className="mt-3 text-xs text-[#ffb4a8]">
@@ -421,6 +503,169 @@ function SelectedGroupPanel({
             </p>
           )}
         </>
+      )}
+    </div>
+  )
+}
+
+function CustomGroupPanel({
+  agents,
+  selectedAgentIds,
+  name,
+  starting,
+  startingFactory,
+  error,
+  onNameChange,
+  onToggleAgent,
+  onStart,
+  onStartFactory,
+}: {
+  agents: readonly CatalogAgent[]
+  selectedAgentIds: readonly string[]
+  name: string
+  starting: boolean
+  startingFactory: boolean
+  error: string | null
+  onNameChange(name: string): void
+  onToggleAgent(id: string): void
+  onStart(): void
+  onStartFactory(): void
+}) {
+  const [query, setQuery] = useState("")
+  const normalizedQuery = query.trim().toLowerCase()
+  const visibleAgents = normalizedQuery
+    ? agents.filter((agent) =>
+        [agent.name, agent.category, agent.headline, ...agent.tags]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedQuery)
+      )
+    : agents
+  const selectionFull = selectedAgentIds.length >= 8
+
+  return (
+    <div className="flex min-h-full flex-col">
+      <p className="text-[10px] font-semibold tracking-[0.16em] text-[#789487] uppercase">
+        Build your own
+      </p>
+      <h2 className="mt-5 text-2xl font-medium tracking-[-0.035em] text-[#d8ede2]">
+        Choose your characters.
+      </h2>
+      <p className="mt-2 text-sm leading-6 text-[#8ca79a]">
+        Select up to eight people for this group.
+      </p>
+
+      <label className="mt-6 block text-[10px] font-semibold tracking-[0.14em] text-[#789487] uppercase">
+        Group name
+        <input
+          value={name}
+          onChange={(event) => onNameChange(event.target.value)}
+          maxLength={100}
+          placeholder="e.g. Product council"
+          className="mt-2 h-10 w-full rounded-md border border-[#29483b] bg-[#091f16] px-3 text-sm font-medium tracking-normal text-[#d8ede2] normal-case outline-none placeholder:text-[#5b776a] focus:border-[#eef771]"
+        />
+      </label>
+
+      <div className="mt-6 flex items-center justify-between">
+        <p className="text-[10px] font-semibold tracking-[0.14em] text-[#789487] uppercase">
+          Characters
+        </p>
+        <span className="text-xs text-[#8ca79a]">
+          {selectedAgentIds.length}/8 selected
+        </span>
+      </div>
+      <label className="relative mt-3 block">
+        <span className="sr-only">Search characters</span>
+        <Search
+          aria-hidden="true"
+          className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#6f8b7e]"
+        />
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search characters"
+          className="h-10 w-full rounded-md border border-[#29483b] bg-[#091f16] pr-3 pl-9 text-sm text-[#d8ede2] outline-none placeholder:text-[#5b776a] focus:border-[#eef771]"
+        />
+      </label>
+
+      <div className="mt-3 border-y border-[#173429]">
+        {visibleAgents.map((agent, index) => {
+          const selected = selectedAgentIds.includes(agent.id)
+          return (
+            <button
+              key={agent.id}
+              type="button"
+              aria-pressed={selected}
+              disabled={!selected && selectionFull}
+              onClick={() => onToggleAgent(agent.id)}
+              className="flex w-full items-center gap-3 border-b border-[#173429] py-3 text-left transition-colors last:border-b-0 hover:bg-[#102a1f] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <AgentAvatar
+                agent={{
+                  id: agent.id,
+                  name: agent.name,
+                  responsibility: agent.headline,
+                }}
+                index={index}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-[#d8ede2]">
+                  {agent.name}
+                </span>
+                <span className="mt-0.5 block truncate text-xs text-[#789487]">
+                  {agent.category} · {agent.headline}
+                </span>
+              </span>
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "grid size-5 shrink-0 place-items-center rounded-full border",
+                  selected
+                    ? "border-[#eef771] bg-[#eef771] text-[#03130c]"
+                    : "border-[#4d735f]"
+                )}
+              >
+                {selected && <Check className="size-3" />}
+              </span>
+            </button>
+          )
+        })}
+        {visibleAgents.length === 0 && (
+          <p className="py-8 text-center text-xs text-[#789487]">
+            No characters match that search.
+          </p>
+        )}
+      </div>
+
+      <button
+        type="button"
+        onClick={onStart}
+        disabled={starting || !name.trim() || selectedAgentIds.length === 0}
+        className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#eef771] px-4 py-3 text-sm font-semibold text-[#03130c] transition-colors hover:bg-[#f8fba8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#eef771] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {starting ? "Creating…" : "Create group"}
+        {!starting && <ArrowRight aria-hidden="true" className="size-4" />}
+      </button>
+
+      <div className="mt-5 border-t border-[#29483b] pt-5">
+        <p className="text-xs leading-5 text-[#789487]">
+          Need a character that is not in the catalog?
+        </p>
+        <button
+          type="button"
+          onClick={onStartFactory}
+          disabled={startingFactory}
+          className="mt-2 text-sm font-semibold text-[#d8ede2] underline decoration-[#4d735f] underline-offset-4 hover:decoration-[#eef771] focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#eef771] disabled:opacity-40"
+        >
+          {startingFactory ? "Opening Factory…" : "Create one with Factory"}
+        </button>
+      </div>
+
+      {error && (
+        <p role="alert" className="mt-3 text-xs text-[#ffb4a8]">
+          {error}
+        </p>
       )}
     </div>
   )
@@ -448,7 +693,7 @@ function TemplateArtwork({
         {id === "company-building" && <CompanyArtwork />}
         {id === "content-studio" && <ContentArtwork />}
         {id === "capital-strategy" && <CapitalArtwork />}
-        {id === "scratch" && <ScratchArtwork />}
+        {id === "custom" && <CustomArtwork />}
       </svg>
       <span className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent via-[#091f16]/60 to-[#091f16]" />
     </div>
@@ -525,7 +770,7 @@ function CapitalArtwork() {
   )
 }
 
-function ScratchArtwork() {
+function CustomArtwork() {
   return (
     <g>
       <path d="M184 116 H374 M194 126 V24" fill="none" stroke="currentColor" />

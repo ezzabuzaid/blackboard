@@ -17,7 +17,7 @@ import {
   SqliteMailboxStore,
   defineSandbox,
 } from "@deepagents/experimental/zukhruf"
-import { simulateReadableStream } from "ai"
+import { APICallError, simulateReadableStream } from "ai"
 import { MockLanguageModelV4 } from "ai/test"
 import type { DrainContext } from "evlog"
 import { InMemoryFs } from "just-bash"
@@ -256,7 +256,7 @@ test("passkey registration requires only a name", async () => {
 test("participant defaults use the configured OpenRouter key", () => {
   const defaults = createParticipantDefaults({ apiKey: "openrouter-key-1" })
   assert.equal(defaults.model.provider, "openrouter")
-  assert.equal(defaults.model.modelId, "openrouter/auto")
+  assert.equal(defaults.model.modelId, "openrouter/auto-beta")
   assert.equal(defaults.tools.web_search?.type, "provider")
 })
 
@@ -575,6 +575,47 @@ test("group template selection creates a normal group roster", async () => {
   assert.equal(unknown.status, 400)
 })
 
+test("custom character selection creates an explicit group roster", async () => {
+  const calls: unknown[] = []
+  const application = testApp({
+    createGroup: (userId, input) => {
+      calls.push({ userId, input })
+      return testGroupRecord("group-2", input.name, input.agentIds)
+    },
+  })
+  const response = await application.request("/api/groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "My advisors",
+      agentIds: ["paul-graham", "annie-duke"],
+    }),
+  })
+
+  assert.equal(response.status, 201)
+  assert.deepEqual(calls, [
+    {
+      userId: "local-user",
+      input: {
+        name: "My advisors",
+        agentIds: ["paul-graham", "annie-duke"],
+      },
+    },
+  ])
+
+  const mixed = await application.request("/api/groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      templateId: "customer-discovery",
+      name: "Mixed input",
+      agentIds: ["paul-graham"],
+    }),
+  })
+  assert.equal(mixed.status, 400)
+  assert.equal(calls.length, 1)
+})
+
 test("group listing is scoped to the authenticated user", async () => {
   const userIds: string[] = []
   const groups = [testGroupRecord("group-1", "Founder panel", ["paul-graham"])]
@@ -590,7 +631,7 @@ test("group listing is scoped to the authenticated user", async () => {
   assert.deepEqual(await response.json(), { groups })
 })
 
-test("scratch groups are persisted and can be marked read", async () => {
+test("Factory workshop groups are persisted and can be marked read", async () => {
   const calls: unknown[] = []
   const response = await testApp({
     createGroup: (userId, input) => {
@@ -605,7 +646,10 @@ test("scratch groups are persisted and can be marked read", async () => {
 
   assert.equal(response.status, 201)
   assert.deepEqual(calls, [
-    { userId: "local-user", input: { name: "New group", agentIds: [] } },
+    {
+      userId: "local-user",
+      input: { name: "Character Workshop", agentIds: [] },
+    },
   ])
 
   const readCalls: unknown[] = []
@@ -2425,6 +2469,50 @@ test("one participant failure does not erase successful replies", async () => {
   )
 })
 
+test("participant failures do not expose provider request data", async (t) => {
+  const logs: unknown[][] = []
+  t.mock.method(console, "error", (...args: unknown[]) => logs.push(args))
+  const secret = "private prompt that must not reach logs"
+  const error = new APICallError({
+    message: "Cannot connect to API",
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    requestBodyValues: { input: [secret] },
+    cause: { code: "UND_ERR_CONNECT_TIMEOUT" },
+    isRetryable: true,
+  })
+  await using runtime = memoryRuntime([
+    {
+      name: "Omar",
+      model: new MockLanguageModelV4({
+        doStream: async () => {
+          throw error
+        },
+      }),
+    },
+  ])
+
+  await runtime.post(testGroupConversation, {
+    id: "provider-failure-message",
+    content: "Please investigate.",
+  })
+  const snapshot = await waitForChat(
+    runtime,
+    testGroupConversation,
+    "settled",
+    1_000
+  )
+  const output = JSON.stringify(logs, (_key, value) =>
+    value instanceof Error
+      ? Object.assign({}, value, { name: value.name, message: value.message })
+      : value
+  )
+
+  assert.equal(snapshot.activity.participants[0]?.state, "failed")
+  assert.doesNotMatch(output, new RegExp(secret))
+  assert.match(output, /AI_RetryError/)
+  assert.match(output, /UND_ERR_CONNECT_TIMEOUT/)
+})
+
 test("participant identities cannot collide with the human author", async () => {
   const model = new MockLanguageModelV4({
     doStream: groupTextResponse("Nothing to add."),
@@ -2467,9 +2555,10 @@ test("participant identities cannot collide with the human author", async () => 
 async function waitForChat(
   runtime: WhatsAppChatRuntime,
   conversation: { chatId: string; userId: string },
-  phase: "settled" | "stopped"
+  phase: "settled" | "stopped",
+  attempts = 500
 ) {
-  for (let attempt = 0; attempt < 500; attempt++) {
+  for (let attempt = 0; attempt < attempts; attempt++) {
     const snapshot = await runtime.snapshot(conversation)
     if (snapshot.activity.phase === phase) return snapshot
     await sleep(10)

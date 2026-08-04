@@ -6,7 +6,7 @@ export function createParticipantDefaults(options: {
   modelId?: string
   appUrl?: string
 }) {
-  const modelId = options.modelId || "openrouter/auto"
+  const modelId = options.modelId || "openrouter/auto-beta"
   const openrouter = createOpenRouter({
     apiKey: options.apiKey,
     compatibility: "strict",

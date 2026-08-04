@@ -64,17 +64,48 @@ export default function (router: Hono<AppEnv>) {
       await next()
     },
     validate((payload) => ({
-      templateId: { select: payload.body.templateId, against: z.string() },
+      templateId: {
+        select: payload.body.templateId,
+        against: z.string().optional(),
+      },
+      name: { select: payload.body.name, against: z.string().optional() },
+      agentIds: {
+        select: payload.body.agentIds,
+        against: z.array(z.string()).min(1).max(8).optional(),
+      },
     })),
     (context) => {
+      const { templateId, name, agentIds } = context.var.input
+      if (!templateId) {
+        if (name === undefined || agentIds === undefined) {
+          return context.json({ error: "Invalid custom group." }, 400)
+        }
+
+        try {
+          return context.json(
+            context.var.dependencies.createGroup(context.get("userId"), {
+              name,
+              agentIds,
+            }),
+            201
+          )
+        } catch (error) {
+          if (error instanceof GroupInputError) {
+            return context.json({ error: error.message }, 400)
+          }
+          throw error
+        }
+      }
+      if (name !== undefined || agentIds !== undefined) {
+        return context.json({ error: "Invalid group." }, 400)
+      }
+
       const template =
-        context.var.input.templateId === "scratch"
-          ? { name: "New group", agents: [] }
-          : (groupTemplates.find(
-              ({ id }) => id === context.var.input.templateId
-            ) ??
+        templateId === "scratch"
+          ? { name: "Character Workshop", agents: [] }
+          : (groupTemplates.find(({ id }) => id === templateId) ??
             context.var.dependencies.marketplaceTemplates.findPublished(
-              context.var.input.templateId
+              templateId
             ))
       if (!template) {
         return context.json({ error: "Unknown group template." }, 400)

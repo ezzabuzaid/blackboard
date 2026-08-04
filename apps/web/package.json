@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
-    "test": "node --import tsx --test src/routes/ChatBot/index.test.ts",
+    "test": "node --import tsx --test src/routes/ChatBot/index.test.ts src/routes/GroupTemplates/index.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

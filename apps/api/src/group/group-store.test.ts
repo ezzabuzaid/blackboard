@@ -26,11 +26,12 @@ test("groups persist an explicit validated agent roster", () => {
   assert.deepEqual(groups.list("user-1"), [newest, group])
   assert.deepEqual(groups.list("user-2"), [otherUser])
 
+  const sentAt = new Date(Date.parse(newest.createdAt) + 1).toISOString()
   assert.equal(
     groups.recordMessage("user-1", group.id, {
       author: "Annie Duke",
       content: "Challenge the assumption.",
-      sentAt: "2026-08-04T12:00:00.000Z",
+      sentAt,
     }),
     true
   )
@@ -39,7 +40,7 @@ test("groups persist an explicit validated agent roster", () => {
     lastMessage: {
       author: "Annie Duke",
       content: "Challenge the assumption.",
-      sentAt: "2026-08-04T12:00:00.000Z",
+      sentAt,
     },
     unreadCount: 1,
   })

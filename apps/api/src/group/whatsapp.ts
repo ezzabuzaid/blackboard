@@ -27,7 +27,13 @@ import {
   defineTool,
 } from "@deepagents/experimental/zukhruf"
 import { PGlite } from "@electric-sql/pglite"
-import { jsonSchema, type ToolSet } from "ai"
+import {
+  APICallError,
+  jsonSchema,
+  wrapLanguageModel,
+  type LanguageModelMiddleware,
+  type ToolSet,
+} from "ai"
 import { PgBoss, fromPglite } from "pg-boss"
 
 export interface WhatsAppParticipant {
@@ -283,7 +289,10 @@ export class WhatsAppGroup implements AsyncDisposable {
       const runtime = new AgentRuntime(
         defineAgent({
           name: participant.name,
-          model: participant.model,
+          model: wrapLanguageModel({
+            model: participant.model,
+            middleware: safeParticipantModelErrors,
+          }),
           telemetry: participant.telemetry,
           sandbox: options.sandbox,
           instructions: [
@@ -842,7 +851,7 @@ export class WhatsAppGroup implements AsyncDisposable {
           participant: participant.name,
           state: "seen",
         })
-        console.error(`[group participant failed] ${participant.name}`, error)
+        console.error(`[group participant failed] ${participant.name}`)
       }
     } finally {
       participant.active = false
@@ -1022,6 +1031,56 @@ export class WhatsAppGroup implements AsyncDisposable {
       names.add(normalizedName)
     }
   }
+}
+
+const safeParticipantModelErrors: LanguageModelMiddleware = {
+  specificationVersion: "v4",
+  wrapGenerate: async ({ doGenerate }) => {
+    try {
+      return await doGenerate()
+    } catch (error) {
+      throw safeLanguageModelError(error)
+    }
+  },
+  wrapStream: async ({ doStream }) => {
+    try {
+      return await doStream()
+    } catch (error) {
+      throw safeLanguageModelError(error)
+    }
+  },
+}
+
+function safeLanguageModelError(error: unknown) {
+  if (APICallError.isInstance(error)) {
+    const code = errorCode(error.cause)
+    return new APICallError({
+      message: "Provider request failed",
+      url: "[redacted]",
+      requestBodyValues: undefined,
+      statusCode: error.statusCode,
+      cause: code ? { code } : undefined,
+      isRetryable: error.isRetryable,
+    })
+  }
+  if (
+    error instanceof Error &&
+    (error.name === "AbortError" || error.name === "TimeoutError")
+  ) {
+    return error
+  }
+  return new Error("Language model request failed")
+}
+
+function errorCode(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null || !("code" in value)) {
+    return undefined
+  }
+  const code = value.code
+  return typeof code === "string" &&
+    /^(?:E[A-Z0-9_]+|UND_ERR_[A-Z0-9_]+)$/u.test(code)
+    ? code
+    : undefined
 }
 
 function reduceActivity(
