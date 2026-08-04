@@ -76,6 +76,10 @@
       {
         "agentId": "mohammad-jaber",
         "responsibility": "Keeps product architecture modular, interfaces explicit, and feature complexity under control."
+      },
+      {
+        "agentId": "abdulrahman-zeineddin",
+        "responsibility": "Turns AI prototypes into tested, observable production systems with lean infrastructure."
       }
     ]
   },
