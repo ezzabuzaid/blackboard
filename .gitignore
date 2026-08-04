@@ -3,6 +3,7 @@
 !.env.example
 node_modules
 .data
+.evlog
 
 # Nx
 .nx

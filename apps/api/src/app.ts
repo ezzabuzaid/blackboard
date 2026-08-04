@@ -1,5 +1,5 @@
 import type { DrainContext } from "evlog"
-import { evlog } from "evlog/hono"
+import { evlog, useLogger } from "evlog/hono"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 
@@ -71,6 +71,10 @@ export function createApp(dependencies: AppDependencies) {
         redact: true,
       })
     )
+    app.use("/api/*", async (context, next) => {
+      await next()
+      if (context.error) useLogger().error(context.error)
+    })
   }
   app.use(
     "/api/*",

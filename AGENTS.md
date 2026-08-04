@@ -8,20 +8,21 @@
 
 ## Development logs
 
-Start both development services from the repository root with this Bash or Zsh
-command. The transcript is truncated on every start.
+Start both development services from the repository root:
 
 ```sh
-mkdir -p .data
-set -o pipefail
-npm run dev 2>&1 | tee .data/dev.log
+npm run dev
 ```
 
-Before starting another server, inspect `.data/dev.log` and check whether the
-expected ports are already listening. The transcript contains startup, build,
-API console output, and browser warnings or errors forwarded by Vite.
+Before starting another server, check whether ports 3001 and 5173 are already
+listening. Vite forwards browser warnings and errors to its live terminal; they
+are not persisted after that process exits.
 
-Structured agent events are separate product data under
-`apps/api/.data/zukhruf/group-telemetry/*.jsonl`. These files may contain user
-prompts and model output; inspect only what is needed and do not copy secrets
-into reports.
+Structured API request events are local NDJSON files under
+`apps/api/.evlog/logs/*.jsonl`. Evlog retains at most five 10 MB files. Treat
+these files as sensitive even though built-in PII redaction is enabled.
+
+Structured agent events are separate product data recursively under
+`apps/api/.data/zukhruf/group-telemetry`. These files may contain user prompts
+and model output; inspect only what is needed and do not copy secrets into
+reports.
