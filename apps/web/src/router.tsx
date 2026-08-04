@@ -24,6 +24,13 @@ export const router = createBrowserRouter([
         },
       },
       {
+        path: "groups/new",
+        lazy: async () => {
+          const route = await import("./routes/GroupTemplates")
+          return { Component: route.default, loader: route.loader }
+        },
+      },
+      {
         path: "*",
         loader: () => {
           throw new Response("Not Found", { status: 404 })
