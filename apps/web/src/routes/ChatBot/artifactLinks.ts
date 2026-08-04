@@ -14,7 +14,7 @@ const sandboxArtifactPrefixes = [
 ]
 
 export const artifactBaseUrl = (chatId: string) =>
-  `${apiUrl}/api/chat/${encodeURIComponent(chatId)}/artifacts/`
+  `${apiUrl}/chat/${encodeURIComponent(chatId)}/artifacts/`
 
 export const artifactRemarkPlugins = (chatId: string) => [
   ...Object.values(defaultRemarkPlugins),

@@ -1,20 +1,17 @@
 import type { Hono } from "hono"
 import { validate } from "@sdk-it/hono/runtime"
 
-import type { AgentTemplate } from "../group/participants/agent-catalog.js"
+import type { AppEnv } from "../app.js"
 
-export function createAgentsRoute(
-  app: Hono<{ Variables: { userId: string } }>,
-  agents: readonly AgentTemplate[]
-) {
+export default function (router: Hono<AppEnv>) {
   /**
    * @openapi listAgents
    * @tags agents
    * @description Lists the available agent catalog.
    */
-  app.get(
-    "/api/agents",
+  router.get(
+    "/agents",
     validate(() => ({})),
-    (context) => context.json({ agents })
+    (context) => context.json({ agents: context.var.dependencies.agents })
   )
 }

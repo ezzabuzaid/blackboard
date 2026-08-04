@@ -58,7 +58,7 @@ export default function GroupTemplates() {
     setStartingId(template.id)
     setStartError(null)
     try {
-      const group = await api.request("POST /api/groups", {
+      const group = await api.request("POST /groups", {
         name: template.name,
         agentIds: template.agents.map(({ id }) => id),
       })

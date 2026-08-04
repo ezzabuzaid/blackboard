@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite"
 
 import { betterAuth, type BetterAuthOptions } from "better-auth"
 
-import { chatGPTAuthPlugin } from "./routes/chatgpt-auth.route.js"
+import { chatGPTAuthPlugin } from "./auth/chatgpt-plugin.js"
 
 export async function createAuthentication(options: {
   databasePath: string

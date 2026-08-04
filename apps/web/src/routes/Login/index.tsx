@@ -27,7 +27,7 @@ interface DeviceLogin {
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const session: unknown = await api.request(
-      "GET /api/auth/get-session",
+      "GET /auth/get-session",
       {},
       { signal: request.signal }
     )
@@ -63,7 +63,7 @@ export default function Login() {
 
       try {
         const result: unknown = await api.request(
-          "POST /api/auth/chatgpt/device/poll",
+          "POST /auth/chatgpt/device/poll",
           {},
           { signal: controller.signal }
         )
@@ -71,7 +71,9 @@ export default function Login() {
           throw new Error("ChatGPT approval could not be checked.")
         }
         if (result.status === "complete") {
-          await navigate(redirectDestination(location.search), { replace: true })
+          await navigate(redirectDestination(location.search), {
+            replace: true,
+          })
           return
         }
         if (result.status === "expired") {
@@ -103,10 +105,7 @@ export default function Login() {
     setStarting(true)
     setError(null)
     try {
-      const result: unknown = await api.request(
-        "POST /api/auth/chatgpt/device",
-        {}
-      )
+      const result: unknown = await api.request("POST /auth/chatgpt/device", {})
       if (!isDeviceLogin(result)) {
         throw new Error("ChatGPT sign-in could not be started.")
       }
@@ -126,7 +125,7 @@ export default function Login() {
     setDevice(null)
     setError(null)
     void api
-      .request("POST /api/auth/chatgpt/device/cancel", {})
+      .request("POST /auth/chatgpt/device/cancel", {})
       .catch(() => undefined)
   }
 

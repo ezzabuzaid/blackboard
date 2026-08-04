@@ -1,6 +1,8 @@
 import type { Context, Hono } from "hono"
 import { validate } from "@sdk-it/hono/runtime"
 
+import type { AppEnv } from "../app.js"
+
 interface AuthSession {
   user: { id: string }
 }
@@ -16,28 +18,17 @@ type DevicePoll =
   | { status: "pending" | "expired" }
   | { status: "complete"; user: { id: string } }
 
-export interface AuthRoutes {
-  handler(request: Request): Promise<Response>
-  getSession(headers: Headers): Promise<{ user: { id: string } } | null>
-  getSessionResponse(request: Request): Promise<Response>
-  startDevice(headers: Headers): Promise<Response>
-  pollDevice(headers: Headers): Promise<Response>
-  cancelDevice(headers: Headers): Promise<Response>
-}
-
-export function createAuthRoutes(
-  app: Hono<{ Variables: { userId: string } }>,
-  auth: AuthRoutes
-) {
+export default function (router: Hono<AppEnv>) {
   /**
    * @openapi getSession
    * @tags auth
    * @description Gets the current authenticated session.
    */
-  app.get(
-    "/api/auth/get-session",
+  router.get(
+    "/auth/get-session",
     validate(() => ({})),
     async (context) => {
+      const { auth } = context.var.dependencies
       const response = await auth.getSessionResponse(context.req.raw)
       if (!response.ok) return response
       const session = (await response.json()) as AuthSession | null
@@ -51,10 +42,11 @@ export function createAuthRoutes(
    * @tags auth
    * @description Starts ChatGPT device authentication.
    */
-  app.post(
-    "/api/auth/chatgpt/device",
+  router.post(
+    "/auth/chatgpt/device",
     validate(() => ({})),
     async (context) => {
+      const { auth } = context.var.dependencies
       const response = await auth.startDevice(context.req.raw.headers)
       if (!response.ok) return response
       const device = (await response.json()) as DeviceLogin
@@ -68,10 +60,11 @@ export function createAuthRoutes(
    * @tags auth
    * @description Polls a ChatGPT device authentication attempt.
    */
-  app.post(
-    "/api/auth/chatgpt/device/poll",
+  router.post(
+    "/auth/chatgpt/device/poll",
     validate(() => ({})),
     async (context) => {
+      const { auth } = context.var.dependencies
       const response = await auth.pollDevice(context.req.raw.headers)
       if (!response.ok) return response
       const result = (await response.json()) as DevicePoll
@@ -85,10 +78,11 @@ export function createAuthRoutes(
    * @tags auth
    * @description Cancels a ChatGPT device authentication attempt.
    */
-  app.post(
-    "/api/auth/chatgpt/device/cancel",
+  router.post(
+    "/auth/chatgpt/device/cancel",
     validate(() => ({})),
     async (context) => {
+      const { auth } = context.var.dependencies
       const response = await auth.cancelDevice(context.req.raw.headers)
       if (!response.ok) return response
       const result = (await response.json()) as { cancelled: boolean }
@@ -97,9 +91,9 @@ export function createAuthRoutes(
     }
   )
 
-  app.on(["GET", "POST"], "/api/auth/*", (context) =>
-    auth.handler(context.req.raw)
-  )
+  router.on(["GET", "POST"], "/auth/*", (context) => {
+    return context.var.dependencies.auth.handler(context.req.raw)
+  })
 }
 
 function copyAuthHeaders(context: Context, headers: Headers) {

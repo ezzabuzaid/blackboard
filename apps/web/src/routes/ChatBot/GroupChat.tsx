@@ -59,7 +59,7 @@ export function GroupChatProvider({
 
   useEffect(() => {
     const source = new EventSource(
-      `${apiUrl}/api/chat/${encodeURIComponent(chatId)}/events?after=${initialState.cursor}`,
+      `${apiUrl}/chat/${encodeURIComponent(chatId)}/events?after=${initialState.cursor}`,
       { withCredentials: true }
     )
     const receive = ({ data }: MessageEvent<string>) => {
@@ -86,15 +86,12 @@ export function GroupChatProvider({
     setPosting(true)
     setError(null)
     try {
-      const body: unknown = await api.request(
-        "POST /api/chat/{chatId}/messages",
-        {
-          chatId,
-          id: crypto.randomUUID(),
-          content,
-          ...(replyingTo ? { replyToMessageId: replyingTo.id } : {}),
-        }
-      )
+      const body: unknown = await api.request("POST /chat/{chatId}/messages", {
+        chatId,
+        id: crypto.randomUUID(),
+        content,
+        ...(replyingTo ? { replyToMessageId: replyingTo.id } : {}),
+      })
       const message =
         isRecord(body) && isGroupMessage(body.message) ? body.message : null
       if (!message) {
@@ -121,10 +118,9 @@ export function GroupChatProvider({
     setStopping(true)
     setError(null)
     try {
-      const state: unknown = await api.request(
-        "POST /api/chat/{chatId}/stop",
-        { chatId }
-      )
+      const state: unknown = await api.request("POST /chat/{chatId}/stop", {
+        chatId,
+      })
       if (!isGroupChatState(state)) {
         throw new Error("The group could not be stopped.")
       }

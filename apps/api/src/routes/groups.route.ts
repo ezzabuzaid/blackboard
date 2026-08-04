@@ -3,20 +3,12 @@ import { bodyLimit } from "hono/body-limit"
 import { validate } from "@sdk-it/hono/runtime"
 import { z } from "zod"
 
-import { GroupInputError, type GroupRecord } from "../group/group-store.js"
-import type { AuthRoutes } from "./auth.route.js"
+import type { AppEnv } from "../app.js"
+import { GroupInputError } from "../group/group-store.js"
 
-export type CreateGroup = (
-  userId: string,
-  input: { name: string; agentIds: readonly string[] }
-) => GroupRecord
-
-export function createGroupsRoute(
-  app: Hono<{ Variables: { userId: string } }>,
-  auth: Pick<AuthRoutes, "getSession">,
-  createGroup: CreateGroup
-) {
-  app.use("/api/groups", async (context, next) => {
+export default function (router: Hono<AppEnv>) {
+  router.use("/groups", async (context, next) => {
+    const { auth } = context.var.dependencies
     const session = await auth.getSession(context.req.raw.headers)
     if (!session) return context.json({ error: "Unauthorized." }, 401)
 
@@ -29,8 +21,8 @@ export function createGroupsRoute(
    * @tags groups
    * @description Creates a group with a selected agent roster.
    */
-  app.post(
-    "/api/groups",
+  router.post(
+    "/groups",
     bodyLimit({
       maxSize: 10 * 1024,
       onError: (context) =>
@@ -53,7 +45,10 @@ export function createGroupsRoute(
     (context) => {
       try {
         return context.json(
-          createGroup(context.get("userId"), context.var.input),
+          context.var.dependencies.createGroup(
+            context.get("userId"),
+            context.var.input
+          ),
           201
         )
       } catch (error) {

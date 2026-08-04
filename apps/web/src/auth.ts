@@ -4,7 +4,7 @@ import { api } from "./routes/ChatBot/api"
 
 export async function requireIdentity({ request }: LoaderFunctionArgs) {
   const session: unknown = await api.request(
-    "GET /api/auth/get-session",
+    "GET /auth/get-session",
     {},
     { signal: request.signal }
   )

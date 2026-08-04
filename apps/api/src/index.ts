@@ -12,7 +12,6 @@ import { GroupStore } from "./group/group-store.js"
 import { loadAgentCatalog } from "./group/participants/agent-catalog.js"
 import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
-import { createWebRoute } from "./routes/web.route.js"
 import { openArtifact } from "./sandbox.js"
 
 const dataDirectory = process.env.ZUKHRUF_DATA_DIR
@@ -115,10 +114,8 @@ const app = createApp({
     openArtifact(dataDirectory, conversation, path),
 })
 
-const webRoot = process.env.WEB_ROOT
-if (webRoot) {
-  createWebRoute(app, webRoot)
-}
+const webRoute = await import("./routes/web.route.js")
+webRoute.default(app)
 
 await using server = serve(
   {

@@ -2,19 +2,33 @@ import { Hono } from "hono"
 import { cors } from "hono/cors"
 
 import type { WhatsAppChatRuntime } from "./group/chat-runtime.js"
+import type { GroupRecord } from "./group/group-store.js"
 import type { AgentTemplate } from "./group/participants/agent-catalog.js"
-import { createAgentsRoute } from "./routes/agents.route.js"
-import { createAuthRoutes, type AuthRoutes } from "./routes/auth.route.js"
-import { createChatRoutes, type OpenArtifact } from "./routes/chat.route.js"
-import { createGroupsRoute, type CreateGroup } from "./routes/groups.route.js"
-import { createHealthRoute } from "./routes/health.route.js"
+import type { OpenArtifact } from "./routes/chat.route.js"
 
 const configuredOrigin = process.env.WEB_ORIGIN
+const routes = await Promise.all([
+  import("./routes/health.route.js"),
+  import("./routes/agents.route.js"),
+  import("./routes/auth.route.js"),
+  import("./routes/groups.route.js"),
+  import("./routes/chat.route.js"),
+])
 
 export interface AppDependencies {
   agents: readonly AgentTemplate[]
-  createGroup: CreateGroup
-  auth: AuthRoutes
+  createGroup(
+    userId: string,
+    input: { name: string; agentIds: readonly string[] }
+  ): GroupRecord
+  auth: {
+    handler(request: Request): Promise<Response>
+    getSession(headers: Headers): Promise<{ user: { id: string } } | null>
+    getSessionResponse(request: Request): Promise<Response>
+    startDevice(headers: Headers): Promise<Response>
+    pollDevice(headers: Headers): Promise<Response>
+    cancelDevice(headers: Headers): Promise<Response>
+  }
   runtime: Pick<
     WhatsAppChatRuntime,
     "post" | "snapshot" | "stop" | "subscribe" | "traces"
@@ -22,14 +36,12 @@ export interface AppDependencies {
   openArtifact: OpenArtifact
 }
 
-export function createApp({
-  agents,
-  createGroup,
-  auth,
-  runtime,
-  openArtifact,
-}: AppDependencies) {
-  const app = new Hono<{ Variables: { userId: string } }>().use(
+export type AppEnv = {
+  Variables: { userId: string; dependencies: AppDependencies }
+}
+
+export function createApp(dependencies: AppDependencies) {
+  const app = new Hono<AppEnv>().use(
     "/api/*",
     cors({
       credentials: true,
@@ -50,12 +62,14 @@ export function createApp({
       },
     })
   )
+  app.use("/api/*", async (context, next) => {
+    context.set("dependencies", dependencies)
+    await next()
+  })
 
-  createHealthRoute(app)
-  createAgentsRoute(app, agents)
-  createAuthRoutes(app, auth)
-  createGroupsRoute(app, auth, createGroup)
-  createChatRoutes(app, auth, runtime, openArtifact)
+  for (const route of routes) {
+    route.default(app.basePath("/api"))
+  }
 
   return app
 }

@@ -6,30 +6,23 @@ import { getMimeType } from "hono/utils/mime"
 import { validate } from "@sdk-it/hono/runtime"
 import { z } from "zod"
 
-import type { WhatsAppChatRuntime } from "../group/chat-runtime.js"
+import type { AppEnv } from "../app.js"
+import { conversationFrom } from "../chat/conversation.js"
 import {
   WhatsAppGroupLimitError,
   WhatsAppReplyTargetError,
 } from "../group/whatsapp.js"
-import { conversationFrom } from "../chat/conversation.js"
-import type { AuthRoutes } from "./auth.route.js"
 
 export type OpenArtifact = (
   conversation: ConversationId,
   path: string
 ) => Promise<{ body: Uint8Array<ArrayBuffer>; size: number } | null>
 
-export function createChatRoutes(
-  app: Hono<{ Variables: { userId: string } }>,
-  auth: Pick<AuthRoutes, "getSession">,
-  chats: Pick<
-    WhatsAppChatRuntime,
-    "post" | "snapshot" | "stop" | "subscribe" | "traces"
-  >,
-  openArtifact: OpenArtifact
-) {
-  app.use("/api/chat/*", async (context, next) => {
-    const session = await auth.getSession(context.req.raw.headers)
+export default function (router: Hono<AppEnv>) {
+  router.use("/chat/*", async (context, next) => {
+    const session = await context.var.dependencies.auth.getSession(
+      context.req.raw.headers
+    )
     if (!session) return context.json({ error: "Unauthorized." }, 401)
 
     context.set("userId", session.user.id)
@@ -41,8 +34,8 @@ export function createChatRoutes(
    * @tags chat
    * @description Gets the current chat state.
    */
-  app.get(
-    "/api/chat/:chatId/state",
+  router.get(
+    "/chat/:chatId/state",
     validate((payload) => ({
       chatId: { select: payload.params.chatId, against: z.string() },
     })),
@@ -55,7 +48,9 @@ export function createChatRoutes(
         return context.json({ error: "Invalid chat id." }, 400)
       }
 
-      return context.json(await chats.snapshot(conversation))
+      return context.json(
+        await context.var.dependencies.runtime.snapshot(conversation)
+      )
     }
   )
 
@@ -64,8 +59,8 @@ export function createChatRoutes(
    * @tags chat
    * @description Streams chat events after a cursor.
    */
-  app.get(
-    "/api/chat/:chatId/events",
+  router.get(
+    "/chat/:chatId/events",
     validate((payload) => ({
       chatId: { select: payload.params.chatId, against: z.string() },
       after: { select: payload.query.after, against: z.string().optional() },
@@ -83,7 +78,7 @@ export function createChatRoutes(
       }
 
       return streamSSE(context, async (output) => {
-        using subscription = await chats.subscribe(
+        using subscription = await context.var.dependencies.runtime.subscribe(
           conversation,
           after,
           (event) =>
@@ -105,8 +100,8 @@ export function createChatRoutes(
    * @tags chat
    * @description Gets an agent's traces for a chat.
    */
-  app.get(
-    "/api/chat/:chatId/agents/:agent/traces",
+  router.get(
+    "/chat/:chatId/agents/:agent/traces",
     validate((payload) => ({
       chatId: { select: payload.params.chatId, against: z.string() },
       agent: { select: payload.params.agent, against: z.string() },
@@ -120,7 +115,10 @@ export function createChatRoutes(
         return context.json({ error: "Invalid chat id." }, 400)
       }
 
-      const traces = await chats.traces(conversation, context.var.input.agent)
+      const traces = await context.var.dependencies.runtime.traces(
+        conversation,
+        context.var.input.agent
+      )
       if (!traces) {
         return context.json({ error: "Agent not found." }, 404)
       }
@@ -133,8 +131,8 @@ export function createChatRoutes(
    * @tags chat
    * @description Gets a generated chat artifact.
    */
-  app.get(
-    "/api/chat/:chatId/artifacts/:path{.+}",
+  router.get(
+    "/chat/:chatId/artifacts/:path{.+}",
     validate((payload) => ({
       chatId: { select: payload.params.chatId, against: z.string() },
       path: { select: payload.params.path, against: z.string() },
@@ -149,7 +147,10 @@ export function createChatRoutes(
         return context.json({ error: "Invalid artifact path." }, 400)
       }
 
-      const artifact = await openArtifact(conversation, path)
+      const artifact = await context.var.dependencies.openArtifact(
+        conversation,
+        path
+      )
       if (!artifact) {
         return context.json({ error: "Artifact not found." }, 404)
       }
@@ -174,8 +175,8 @@ export function createChatRoutes(
    * @tags chat
    * @description Stops active work in a chat.
    */
-  app.post(
-    "/api/chat/:chatId/stop",
+  router.post(
+    "/chat/:chatId/stop",
     validate((payload) => ({
       chatId: { select: payload.params.chatId, against: z.string() },
     })),
@@ -188,7 +189,9 @@ export function createChatRoutes(
         return context.json({ error: "Invalid chat id." }, 400)
       }
 
-      return context.json(await chats.stop(conversation))
+      return context.json(
+        await context.var.dependencies.runtime.stop(conversation)
+      )
     }
   )
 
@@ -197,8 +200,8 @@ export function createChatRoutes(
    * @tags chat
    * @description Posts a message to a chat.
    */
-  app.post(
-    "/api/chat/:chatId/messages",
+  router.post(
+    "/chat/:chatId/messages",
     bodyLimit({
       maxSize: 10 * 1024,
       onError: (context) =>
@@ -236,13 +239,16 @@ export function createChatRoutes(
       }
 
       try {
-        const message = await chats.post(conversation, {
-          id,
-          content: content.trim(),
-          ...(replyToMessageId
-            ? { replyToMessageId: replyToMessageId.trim() }
-            : {}),
-        })
+        const message = await context.var.dependencies.runtime.post(
+          conversation,
+          {
+            id,
+            content: content.trim(),
+            ...(replyToMessageId
+              ? { replyToMessageId: replyToMessageId.trim() }
+              : {}),
+          }
+        )
         return context.json({ message }, 201)
       } catch (error) {
         if (error instanceof WhatsAppGroupLimitError) {
@@ -255,8 +261,6 @@ export function createChatRoutes(
       }
     }
   )
-
-  return app
 }
 
 function eventCursor(value: string) {

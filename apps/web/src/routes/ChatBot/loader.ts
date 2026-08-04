@@ -18,9 +18,9 @@ export async function loader(args: LoaderFunctionArgs) {
 
   try {
     const [, state] = await Promise.all([
-      api.request("GET /api/health", {}, { signal: request.signal }),
+      api.request("GET /health", {}, { signal: request.signal }),
       api.request(
-        "GET /api/chat/{chatId}/state",
+        "GET /chat/{chatId}/state",
         { chatId },
         { signal: request.signal }
       ),

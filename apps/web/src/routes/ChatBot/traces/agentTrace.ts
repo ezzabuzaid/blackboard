@@ -48,7 +48,7 @@ export async function fetchAgentTraces(
   signal: AbortSignal
 ) {
   const value: unknown = await api.request(
-    "GET /api/chat/{chatId}/agents/{agent}/traces",
+    "GET /chat/{chatId}/agents/{agent}/traces",
     { chatId, agent },
     { signal }
   )
