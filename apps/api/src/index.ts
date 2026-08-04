@@ -9,6 +9,7 @@ import { createAuthentication } from "./auth.js"
 import { createChatGPTSubscription } from "./chatgpt.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import { GroupStore } from "./group/group-store.js"
+import { MarketplaceGroupTemplateStore } from "./group/marketplace-group-template-store.js"
 import { loadAgentCatalog } from "./group/participants/agent-catalog.js"
 import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
@@ -52,6 +53,11 @@ const groups = new GroupStore(
   agents.map(({ id }) => id)
 )
 resources.defer(() => groups[Symbol.dispose]())
+const marketplaceTemplates = new MarketplaceGroupTemplateStore(
+  resolve(dataDirectory, "group-templates.sqlite"),
+  agents.map(({ id }) => id)
+)
+resources.defer(() => marketplaceTemplates[Symbol.dispose]())
 const participants = new ParticipantDirectory({
   databasePath: resolve(dataDirectory, "participants.sqlite"),
   builtinsDirectory: resolve(import.meta.dirname, "../../../participants"),
@@ -94,6 +100,8 @@ const runtime = resources.use(
 const app = createApp({
   agents,
   createGroup: (userId, input) => groups.create(userId, input),
+  listGroups: (userId) => groups.list(userId),
+  marketplaceTemplates,
   auth: {
     handler: authentication.auth.handler,
     getSession: (headers) => authentication.auth.api.getSession({ headers }),

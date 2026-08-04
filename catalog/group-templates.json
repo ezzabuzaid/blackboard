@@ -1,0 +1,126 @@
+[
+  {
+    "id": "customer-discovery",
+    "name": "Customer Discovery",
+    "category": "Research",
+    "outcome": "Turn a guessed customer problem into an evidence-backed market position.",
+    "agents": [
+      {
+        "agentId": "rob-fitzpatrick",
+        "responsibility": "Keeps interviews grounded in real past behavior."
+      },
+      {
+        "agentId": "april-dunford",
+        "responsibility": "Turns customer evidence into sharp positioning."
+      },
+      {
+        "agentId": "elena-verna",
+        "responsibility": "Tests activation, retention, and growth signals."
+      },
+      {
+        "agentId": "andrew-chen",
+        "responsibility": "Evaluates acquisition loops and network effects."
+      }
+    ]
+  },
+  {
+    "id": "market-intelligence",
+    "name": "Market Intelligence",
+    "category": "Strategy",
+    "outcome": "Turn noisy market signals into one defensible strategic decision.",
+    "agents": [
+      {
+        "agentId": "richard-rumelt",
+        "responsibility": "Finds the pivotal challenge and coherent action."
+      },
+      {
+        "agentId": "hamilton-helmer",
+        "responsibility": "Tests whether the advantage can become durable power."
+      },
+      {
+        "agentId": "charlie-munger",
+        "responsibility": "Applies multidisciplinary models and inversion."
+      },
+      {
+        "agentId": "julia-galef",
+        "responsibility": "Challenges motivated reasoning and weak evidence."
+      }
+    ]
+  },
+  {
+    "id": "company-building",
+    "name": "Company Building",
+    "category": "Operations",
+    "outcome": "Shape the operating system, team, and product around what matters.",
+    "agents": [
+      {
+        "agentId": "andy-grove",
+        "responsibility": "Raises managerial leverage and operating discipline."
+      },
+      {
+        "agentId": "jeff-bezos",
+        "responsibility": "Works backward from customers through mechanisms."
+      },
+      {
+        "agentId": "brian-chesky",
+        "responsibility": "Protects quality, craft, and founder-level detail."
+      },
+      {
+        "agentId": "matt-mochary",
+        "responsibility": "Clarifies ownership, decisions, and hard conversations."
+      }
+    ]
+  },
+  {
+    "id": "content-studio",
+    "name": "Content Studio",
+    "category": "Content",
+    "outcome": "Develop one clear idea into persuasive, publish-ready material.",
+    "agents": [
+      {
+        "agentId": "william-zinsser",
+        "responsibility": "Removes clutter and protects the human voice."
+      },
+      {
+        "agentId": "david-ogilvy",
+        "responsibility": "Makes the promise specific, researched, and persuasive."
+      },
+      {
+        "agentId": "harry-dry",
+        "responsibility": "Turns abstractions into concrete, memorable copy."
+      },
+      {
+        "agentId": "wes-kao",
+        "responsibility": "Sharpens hierarchy, credibility, and executive clarity."
+      }
+    ]
+  },
+  {
+    "id": "capital-strategy",
+    "name": "Capital Strategy",
+    "category": "Finance",
+    "outcome": "Stress-test fundraising, leverage, and long-term capital choices.",
+    "agents": [
+      {
+        "agentId": "paul-graham",
+        "responsibility": "Keeps the company alive and focused on what users want."
+      },
+      {
+        "agentId": "peter-thiel",
+        "responsibility": "Tests contrarian insight, monopoly, and market entry."
+      },
+      {
+        "agentId": "naval-ravikant",
+        "responsibility": "Examines leverage, judgment, and compounding incentives."
+      },
+      {
+        "agentId": "marc-andreessen",
+        "responsibility": "Frames venture scale, markets, and strategic financing."
+      },
+      {
+        "agentId": "tambi-jalouqa",
+        "responsibility": "Tests technical founders, product judgment, and global ambition from MENA."
+      }
+    ]
+  }
+]

@@ -3,6 +3,7 @@ import { cors } from "hono/cors"
 
 import type { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import type { GroupRecord } from "./group/group-store.js"
+import type { MarketplaceGroupTemplateStore } from "./group/marketplace-group-template-store.js"
 import type { AgentTemplate } from "./group/participants/agent-catalog.js"
 import type { OpenArtifact } from "./routes/chat.route.js"
 
@@ -10,6 +11,7 @@ const configuredOrigin = process.env.WEB_ORIGIN
 const routes = await Promise.all([
   import("./routes/health.route.js"),
   import("./routes/agents.route.js"),
+  import("./routes/group-templates.route.js"),
   import("./routes/auth.route.js"),
   import("./routes/groups.route.js"),
   import("./routes/chat.route.js"),
@@ -21,6 +23,16 @@ export interface AppDependencies {
     userId: string,
     input: { name: string; agentIds: readonly string[] }
   ): GroupRecord
+  listGroups(userId: string): GroupRecord[]
+  marketplaceTemplates: Pick<
+    MarketplaceGroupTemplateStore,
+    | "create"
+    | "update"
+    | "publish"
+    | "unpublish"
+    | "published"
+    | "findPublished"
+  >
   auth: {
     handler(request: Request): Promise<Response>
     getSession(headers: Headers): Promise<{ user: { id: string } } | null>

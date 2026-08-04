@@ -5,6 +5,7 @@ import { z } from "zod"
 
 import type { AppEnv } from "../app.js"
 import { GroupInputError } from "../group/group-store.js"
+import { groupTemplates } from "../group/group-template-catalog.js"
 
 export default function (router: Hono<AppEnv>) {
   router.use("/groups", async (context, next) => {
@@ -17,9 +18,23 @@ export default function (router: Hono<AppEnv>) {
   })
 
   /**
+   * @openapi listGroups
+   * @tags groups
+   * @description Lists the authenticated user's groups, newest first.
+   */
+  router.get(
+    "/groups",
+    validate(() => ({})),
+    (context) =>
+      context.json({
+        groups: context.var.dependencies.listGroups(context.get("userId")),
+      })
+  )
+
+  /**
    * @openapi createGroup
    * @tags groups
-   * @description Creates a group with a selected agent roster.
+   * @description Creates a normal group from a curated template.
    */
   router.post(
     "/groups",
@@ -36,19 +51,24 @@ export default function (router: Hono<AppEnv>) {
       await next()
     },
     validate((payload) => ({
-      name: { select: payload.body.name, against: z.string() },
-      agentIds: {
-        select: payload.body.agentIds,
-        against: z.array(z.string()),
-      },
+      templateId: { select: payload.body.templateId, against: z.string() },
     })),
     (context) => {
+      const template =
+        groupTemplates.find(({ id }) => id === context.var.input.templateId) ??
+        context.var.dependencies.marketplaceTemplates.findPublished(
+          context.var.input.templateId
+        )
+      if (!template) {
+        return context.json({ error: "Unknown group template." }, 400)
+      }
+
       try {
         return context.json(
-          context.var.dependencies.createGroup(
-            context.get("userId"),
-            context.var.input
-          ),
+          context.var.dependencies.createGroup(context.get("userId"), {
+            name: template.name,
+            agentIds: template.agents.map(({ agentId }) => agentId),
+          }),
           201
         )
       } catch (error) {

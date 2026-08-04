@@ -79,6 +79,23 @@ export class GroupStore implements Disposable {
       : null
   }
 
+  list(userId: string): GroupRecord[] {
+    const rows = this.#database
+      .prepare(
+        `SELECT id, name, agent_ids
+         FROM groups
+         WHERE user_id = ?
+         ORDER BY created_at DESC, rowid DESC`
+      )
+      .all(userId) as { id: string; name: string; agent_ids: string }[]
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      agentIds: JSON.parse(row.agent_ids),
+    }))
+  }
+
   [Symbol.dispose]() {
     this.#database.close()
   }

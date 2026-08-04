@@ -28,6 +28,11 @@ import { createApp, type AppDependencies } from "./app.js"
 import { chatGPTAuthPlugin, parseDeviceAttempt } from "./auth/chatgpt-plugin.js"
 import type { OpenArtifact } from "./routes/chat.route.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
+import { groupTemplates } from "./group/group-template-catalog.js"
+import {
+  MarketplaceGroupTemplateStore,
+  type MarketplaceGroupTemplate,
+} from "./group/marketplace-group-template-store.js"
 import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox, shareSandboxInstance } from "./group/sandbox.js"
 import {
@@ -111,6 +116,26 @@ const unusedRuntime: ChatRuntime = {
 }
 
 const noArtifact: OpenArtifact = async () => null
+const unusedMarketplaceTemplates: AppDependencies["marketplaceTemplates"] = {
+  create() {
+    throw new Error("Unexpected marketplace template creation")
+  },
+  update() {
+    throw new Error("Unexpected marketplace template update")
+  },
+  publish() {
+    throw new Error("Unexpected marketplace template publication")
+  },
+  unpublish() {
+    throw new Error("Unexpected marketplace template withdrawal")
+  },
+  published() {
+    return []
+  },
+  findPublished() {
+    return null
+  },
+}
 const authenticatedAuth: AppDependencies["auth"] = {
   handler: async () => new Response(null, { status: 404 }),
   getSession: async () => ({ user: { id: "local-user" } }),
@@ -126,16 +151,28 @@ function testApp({
   createGroup = () => {
     throw new Error("Unexpected group creation")
   },
+  listGroups = () => [],
+  marketplaceTemplates = unusedMarketplaceTemplates,
   runtime = unusedRuntime,
   openArtifact = noArtifact,
 }: {
   agents?: AppDependencies["agents"]
   auth?: AppDependencies["auth"]
   createGroup?: AppDependencies["createGroup"]
+  listGroups?: AppDependencies["listGroups"]
+  marketplaceTemplates?: AppDependencies["marketplaceTemplates"]
   runtime?: ChatRuntime
   openArtifact?: OpenArtifact
 } = {}) {
-  return createApp({ agents, auth, createGroup, runtime, openArtifact })
+  return createApp({
+    agents,
+    auth,
+    createGroup,
+    listGroups,
+    marketplaceTemplates,
+    runtime,
+    openArtifact,
+  })
 }
 
 function responseCookies(response: Response) {
@@ -317,20 +354,218 @@ test("agent catalog exposes native character metadata", async () => {
   })
 })
 
-test("group creation persists the selected catalog roster", async () => {
-  const calls: unknown[] = []
+test("group template catalog resolves agent names", async () => {
   const response = await testApp({
+    agents: groupTemplates.flatMap(({ agents }) =>
+      agents.map(({ agentId }) => ({
+        id: agentId,
+        name: `Name for ${agentId}`,
+        category: "Test",
+        headline: "Test agent",
+        tags: ["test"],
+      }))
+    ),
+  }).request("/api/group-templates")
+
+  assert.equal(response.status, 200)
+  const body = (await response.json()) as {
+    templates: { agents: unknown[] }[]
+  }
+  assert.equal(body.templates.length, groupTemplates.length)
+  assert.deepEqual(body.templates[0]?.agents[0], {
+    id: "rob-fitzpatrick",
+    name: "Name for rob-fitzpatrick",
+    responsibility: "Keeps interviews grounded in real past behavior.",
+  })
+})
+
+test("a publisher owns the marketplace template lifecycle", async () => {
+  using marketplaceTemplates = new MarketplaceGroupTemplateStore(":memory:", [
+    "annie-duke",
+    "paul-graham",
+  ])
+  let userId = "publisher-1"
+  const application = testApp({
+    marketplaceTemplates,
+    auth: {
+      ...authenticatedAuth,
+      getSession: async () => ({ user: { id: userId } }),
+    },
+  })
+  const input = {
+    name: "Founder Panel",
+    category: "Strategy",
+    outcome: "Pressure-test a company decision.",
+    agents: [
+      {
+        agentId: "paul-graham",
+        responsibility: "Keeps the company focused on users.",
+      },
+    ],
+  }
+
+  const createResponse = await application.request("/api/group-templates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  })
+  assert.equal(createResponse.status, 201)
+  const created = (await createResponse.json()) as MarketplaceGroupTemplate
+  assert.equal(created.published, false)
+
+  const invalidResponse = await application.request("/api/group-templates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...input,
+      agents: [{ agentId: "missing", responsibility: "Unknown agent." }],
+    }),
+  })
+  assert.equal(invalidResponse.status, 400)
+
+  const publishResponse = await application.request(
+    `/api/group-templates/${created.id}/publish`,
+    { method: "POST" }
+  )
+  assert.equal(publishResponse.status, 200)
+  assert.equal(
+    ((await publishResponse.json()) as MarketplaceGroupTemplate).published,
+    true
+  )
+
+  const updateResponse = await application.request(
+    `/api/group-templates/${created.id}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...input,
+        outcome: "Pressure-test the next company decision.",
+      }),
+    }
+  )
+  assert.equal(updateResponse.status, 200)
+  assert.deepEqual(await updateResponse.json(), {
+    ...created,
+    outcome: "Pressure-test the next company decision.",
+    published: true,
+  })
+
+  userId = "publisher-2"
+  const foreignResponse = await application.request(
+    `/api/group-templates/${created.id}/unpublish`,
+    { method: "POST" }
+  )
+  assert.equal(foreignResponse.status, 404)
+
+  userId = "publisher-1"
+  const unpublishResponse = await application.request(
+    `/api/group-templates/${created.id}/unpublish`,
+    { method: "POST" }
+  )
+  assert.equal(unpublishResponse.status, 200)
+  assert.equal(
+    ((await unpublishResponse.json()) as MarketplaceGroupTemplate).published,
+    false
+  )
+})
+
+test("published marketplace templates create ordinary groups", async () => {
+  using marketplaceTemplates = new MarketplaceGroupTemplateStore(":memory:", [
+    "paul-graham",
+  ])
+  const template = marketplaceTemplates.create("publisher-1", {
+    name: "Founder Board",
+    category: "Strategy",
+    outcome: "Challenge the next company decision.",
+    agents: [
+      {
+        agentId: "paul-graham",
+        responsibility: "Keeps the company focused on users.",
+      },
+    ],
+  })
+  marketplaceTemplates.publish("publisher-1", template.id)
+
+  const calls: unknown[] = []
+  const application = testApp({
+    agents: groupTemplates.flatMap(({ agents }) =>
+      agents.map(({ agentId }) => ({
+        id: agentId,
+        name: `Name for ${agentId}`,
+        category: "Test",
+        headline: "Test agent",
+        tags: ["test"],
+      }))
+    ),
+    marketplaceTemplates,
+    createGroup: (userId, input) => {
+      calls.push({ userId, input })
+      return { id: "group-2", ...input }
+    },
+  })
+
+  const listResponse = await application.request("/api/group-templates")
+  const list = (await listResponse.json()) as {
+    templates: Array<{ id: string } & Record<string, unknown>>
+  }
+  assert.deepEqual(
+    list.templates.find(({ id }) => id === template.id),
+    {
+      id: template.id,
+      name: "Founder Board",
+      category: "Strategy",
+      outcome: "Challenge the next company decision.",
+      source: "marketplace",
+      agents: [
+        {
+          id: "paul-graham",
+          name: "Name for paul-graham",
+          responsibility: "Keeps the company focused on users.",
+        },
+      ],
+    }
+  )
+
+  const createResponse = await application.request("/api/groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ templateId: template.id }),
+  })
+  assert.equal(createResponse.status, 201)
+  assert.deepEqual(calls, [
+    {
+      userId: "local-user",
+      input: { name: "Founder Board", agentIds: ["paul-graham"] },
+    },
+  ])
+  assert.deepEqual(await createResponse.json(), {
+    id: "group-2",
+    name: "Founder Board",
+    agentIds: ["paul-graham"],
+  })
+
+  marketplaceTemplates.unpublish("publisher-1", template.id)
+  const withdrawnResponse = await application.request("/api/groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ templateId: template.id }),
+  })
+  assert.equal(withdrawnResponse.status, 400)
+})
+
+test("group template selection creates a normal group roster", async () => {
+  const calls: unknown[] = []
+  const application = testApp({
     createGroup: (userId, input) => {
       calls.push({ userId, input })
       return { id: "group-1", ...input }
     },
-  }).request("/api/groups", {
+  })
+  const response = await application.request("/api/groups", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      name: "Founder panel",
-      agentIds: ["annie-duke", "paul-graham"],
-    }),
+    body: JSON.stringify({ templateId: "customer-discovery" }),
   })
 
   assert.equal(response.status, 201)
@@ -338,16 +573,50 @@ test("group creation persists the selected catalog roster", async () => {
     {
       userId: "local-user",
       input: {
-        name: "Founder panel",
-        agentIds: ["annie-duke", "paul-graham"],
+        name: "Customer Discovery",
+        agentIds: [
+          "rob-fitzpatrick",
+          "april-dunford",
+          "elena-verna",
+          "andrew-chen",
+        ],
       },
     },
   ])
   assert.deepEqual(await response.json(), {
     id: "group-1",
-    name: "Founder panel",
-    agentIds: ["annie-duke", "paul-graham"],
+    name: "Customer Discovery",
+    agentIds: [
+      "rob-fitzpatrick",
+      "april-dunford",
+      "elena-verna",
+      "andrew-chen",
+    ],
   })
+
+  const unknown = await application.request("/api/groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ templateId: "missing" }),
+  })
+  assert.equal(unknown.status, 400)
+})
+
+test("group listing is scoped to the authenticated user", async () => {
+  const userIds: string[] = []
+  const groups = [
+    { id: "group-1", name: "Founder panel", agentIds: ["paul-graham"] },
+  ]
+  const response = await testApp({
+    listGroups: (userId) => {
+      userIds.push(userId)
+      return groups
+    },
+  }).request("/api/groups")
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(userIds, ["local-user"])
+  assert.deepEqual(await response.json(), { groups })
 })
 
 test("SDK auth routes preserve Better Auth response headers", async () => {

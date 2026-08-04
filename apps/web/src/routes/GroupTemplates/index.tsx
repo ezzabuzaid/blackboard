@@ -12,35 +12,87 @@ import {
 import { ArrowLeft, ArrowRight, Check, MessageCircle, Plus } from "lucide-react"
 import { motion, useReducedMotion } from "motion/react"
 import { useState } from "react"
-import { Link, useNavigate } from "react-router"
-
-import { api } from "../ChatBot/api"
 import {
-  groupTemplates,
-  type GroupAgent,
-  type GroupTemplate,
-} from "./templates"
+  Link,
+  useLoaderData,
+  useNavigate,
+  type LoaderFunctionArgs,
+} from "react-router"
 
-export { requireIdentity as loader } from "../../auth"
+import { requireIdentity } from "../../auth"
+import { api } from "../ChatBot/api"
 
-const categories = [
-  "All",
-  ...new Set(groupTemplates.map(({ category }) => category)),
-]
+interface GroupAgent {
+  id: string
+  name: string
+  responsibility: string
+}
+
+interface GroupTemplate {
+  id: string
+  name: string
+  category: string
+  outcome: string
+  agents: readonly GroupAgent[]
+  source: "prebuilt" | "marketplace" | "custom"
+  scratch?: boolean
+}
+
+const scratchTemplate: GroupTemplate = {
+  id: "scratch",
+  name: "Build from scratch",
+  category: "Custom",
+  outcome:
+    "Start with Factory and describe the group you need in plain language.",
+  source: "custom",
+  scratch: true,
+  agents: [
+    {
+      id: "factory",
+      name: "Factory",
+      responsibility: "Creates the agents and responsibilities you ask for.",
+    },
+  ],
+}
+
+export async function loader(args: LoaderFunctionArgs) {
+  await requireIdentity(args)
+  const { templates } = await api.request(
+    "GET /group-templates",
+    {},
+    { signal: args.request.signal }
+  )
+  const groupTemplates: readonly GroupTemplate[] = [
+    ...templates,
+    scratchTemplate,
+  ]
+  return { groupTemplates }
+}
 
 export default function GroupTemplates() {
-  const [activeCategory, setActiveCategory] = useState("All")
+  const { groupTemplates } = useLoaderData<typeof loader>()
+  const [activeFilter, setActiveFilter] = useState("all")
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [startingId, setStartingId] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const navigate = useNavigate()
   const reduceMotion = useReducedMotion()
+  const filters = [
+    { id: "all", label: "All" },
+    { id: "source:prebuilt", label: "Prebuilt" },
+    { id: "source:marketplace", label: "Marketplace" },
+    ...[...new Set(groupTemplates.map(({ category }) => category))].map(
+      (category) => ({ id: `category:${category}`, label: category })
+    ),
+  ]
   const selected = groupTemplates.find(({ id }) => id === selectedId) ?? null
-  const visibleTemplates =
-    activeCategory === "All"
-      ? groupTemplates
-      : groupTemplates.filter(({ category }) => category === activeCategory)
+  const visibleTemplates = groupTemplates.filter(
+    ({ source, category }) =>
+      activeFilter === "all" ||
+      activeFilter === `source:${source}` ||
+      activeFilter === `category:${category}`
+  )
 
   function selectTemplate(id: string) {
     setSelectedId(id === selectedId ? null : id)
@@ -59,8 +111,7 @@ export default function GroupTemplates() {
     setStartError(null)
     try {
       const group = await api.request("POST /groups", {
-        name: template.name,
-        agentIds: template.agents.map(({ id }) => id),
+        templateId: template.id,
       })
       await navigate(`/?${new URLSearchParams({ chatId: group.id })}`)
     } catch {
@@ -117,14 +168,14 @@ export default function GroupTemplates() {
           </motion.div>
 
           <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-1">
-            {categories.map((category) => {
-              const active = activeCategory === category
+            {filters.map((filter) => {
+              const active = activeFilter === filter.id
 
               return (
                 <button
-                  key={category}
+                  key={filter.id}
                   type="button"
-                  onClick={() => setActiveCategory(category)}
+                  onClick={() => setActiveFilter(filter.id)}
                   className={cn(
                     "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#eef771]",
                     active
@@ -132,7 +183,7 @@ export default function GroupTemplates() {
                       : "text-[#9db3a8] hover:bg-[#102a1f] hover:text-white"
                   )}
                 >
-                  {category}
+                  {filter.label}
                 </button>
               )
             })}
@@ -257,14 +308,16 @@ function TemplateCard({
       >
         {selected && <Check className="size-3" />}
       </span>
-      <TemplateArtwork id={template.id} />
+      <TemplateArtwork id={template.id} source={template.source} />
 
       <div className="flex flex-1 flex-col p-4">
         <h2 className="text-base font-semibold tracking-[-0.02em] text-[#d8ede2]">
           {template.name}
         </h2>
         <span className="mt-1 text-[10px] font-semibold tracking-[0.14em] text-[#789487] uppercase">
-          {template.category}
+          {template.source === "marketplace"
+            ? `Marketplace · ${template.category}`
+            : template.category}
         </span>
         <p className="mt-2 text-xs leading-[1.55] text-[#8ca79a]">
           {template.outcome}
@@ -317,7 +370,9 @@ function SelectedGroupPanel({
         <>
           <div className="mt-6">
             <span className="text-[10px] font-semibold tracking-[0.14em] text-[#789487] uppercase">
-              {template.category}
+              {template.source === "marketplace"
+                ? `Marketplace · ${template.category}`
+                : template.category}
             </span>
             <h2 className="mt-2 text-2xl font-medium tracking-[-0.035em] text-[#d8ede2]">
               {template.name}
@@ -379,7 +434,13 @@ function SelectedGroupPanel({
   )
 }
 
-function TemplateArtwork({ id }: { id: string }) {
+function TemplateArtwork({
+  id,
+  source,
+}: {
+  id: string
+  source: GroupTemplate["source"]
+}) {
   return (
     <div className="relative h-24 w-full shrink-0 overflow-hidden bg-[#0d271c]">
       <svg
@@ -389,7 +450,9 @@ function TemplateArtwork({ id }: { id: string }) {
         className="absolute inset-0 size-full text-[#5b776a]/40 transition-colors duration-300 group-hover:text-[#789487]/55"
       >
         {id === "customer-discovery" && <DiscoveryArtwork />}
-        {id === "market-intelligence" && <MarketArtwork />}
+        {(id === "market-intelligence" || source === "marketplace") && (
+          <MarketArtwork />
+        )}
         {id === "company-building" && <CompanyArtwork />}
         {id === "content-studio" && <ContentArtwork />}
         {id === "capital-strategy" && <CapitalArtwork />}
