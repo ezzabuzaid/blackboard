@@ -3,6 +3,8 @@ import { resolve } from "node:path"
 
 import { createTerminus } from "@godaddy/terminus"
 import { serve } from "@hono/node-server"
+import { initLogger } from "evlog"
+import { createFsDrain } from "evlog/fs"
 
 import { createApp } from "./app.js"
 import { createAuthentication } from "./auth.js"
@@ -18,6 +20,19 @@ import { openArtifact } from "./sandbox.js"
 const dataDirectory = process.env.ZUKHRUF_DATA_DIR
 if (!dataDirectory) throw new Error("ZUKHRUF_DATA_DIR is required")
 mkdirSync(dataDirectory, { recursive: true })
+
+const structuredLogDrain = createFsDrain({
+  dir: resolve(import.meta.dirname, "../.evlog/logs"),
+  maxFiles: 5,
+  maxSizePerFile: 10 * 1024 * 1024,
+  pretty: false,
+})
+initLogger({
+  drain: structuredLogDrain,
+  env: { service: "baseera-api" },
+  redact: true,
+  silent: true,
+})
 
 const port = Number(process.env.PORT)
 if (!Number.isSafeInteger(port) || port <= 0 || port > 65_535) {
@@ -71,13 +86,23 @@ const participants = new ParticipantDirectory({
     }
   },
 })
+const groupAgentIds = (conversation: { userId: string; chatId: string }) => {
+  const agentIds = groups.get(
+    conversation.userId,
+    conversation.chatId
+  )?.agentIds
+  return agentIds?.length ? agentIds : undefined
+}
 const runtime = resources.use(
   new WhatsAppChatRuntime({
     loadParticipants: (conversation) =>
       participants.participants(
         conversation.userId,
-        groups.get(conversation.userId, conversation.chatId)?.agentIds
+        groupAgentIds(conversation)
       ),
+    onMessage: (conversation, message) => {
+      groups.recordMessage(conversation.userId, conversation.chatId, message)
+    },
     limits: {
       notifications: 25,
       agentMessages: 100,
@@ -89,7 +114,7 @@ const runtime = resources.use(
       (conversation) =>
         participants.filesystem(
           conversation.userId,
-          groups.get(conversation.userId, conversation.chatId)?.agentIds
+          groupAgentIds(conversation)
         )
     ),
     databasePath: resolve(dataDirectory, "group.sqlite"),
@@ -98,9 +123,11 @@ const runtime = resources.use(
 )
 
 const app = createApp({
+  structuredLogDrain,
   agents,
   createGroup: (userId, input) => groups.create(userId, input),
   listGroups: (userId) => groups.list(userId),
+  markGroupRead: (userId, groupId) => groups.markRead(userId, groupId),
   marketplaceTemplates,
   auth: {
     handler: authentication.auth.handler,

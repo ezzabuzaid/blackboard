@@ -23,13 +23,24 @@ import { traceItems } from "./traces/agentTrace"
 import { loader } from "./loader"
 
 const sentAt = "2026-07-31T12:00:00.000Z"
+const groupSummary = {
+  id: "test-chat",
+  name: "Test group",
+  agentIds: ["maya"],
+  createdAt: sentAt,
+  lastMessage: null,
+  unreadCount: 0,
+}
 
-test("loader adds a chat id to the URL", async () => {
+test("loader sends users without groups to group creation", async () => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (input) => {
     const url = input instanceof Request ? input.url : String(input)
-    assert.ok(url.endsWith("/api/auth/get-session"))
-    return Response.json({ user: { id: "user-1" } })
+    if (url.endsWith("/api/auth/get-session")) {
+      return Response.json({ user: { id: "user-1" } })
+    }
+    if (url.endsWith("/api/groups")) return Response.json({ groups: [] })
+    return new Response(null, { status: 404 })
   }
   const request = new Request("http://localhost/?source=test")
 
@@ -40,12 +51,40 @@ test("loader adds a chat id to the URL", async () => {
         assert.ok(error instanceof Response)
         assert.equal(error.status, 302)
 
+        assert.equal(error.headers.get("location"), "/groups/new")
+        return true
+      }
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test("loader selects the most recent group", async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async (input) => {
+    const url = input instanceof Request ? input.url : String(input)
+    if (url.endsWith("/api/auth/get-session")) {
+      return Response.json({ user: { id: "user-1" } })
+    }
+    if (url.endsWith("/api/groups")) {
+      return Response.json({ groups: [groupSummary] })
+    }
+    return new Response(null, { status: 404 })
+  }
+
+  const request = new Request("http://localhost/?source=test")
+  try {
+    await assert.rejects(
+      loader({ request } as LoaderFunctionArgs),
+      (error: unknown) => {
+        assert.ok(error instanceof Response)
         const location = new URL(
           error.headers.get("location") ?? "",
           request.url
         )
         assert.equal(location.searchParams.get("source"), "test")
-        assert.ok(location.searchParams.get("chatId"))
+        assert.equal(location.searchParams.get("chatId"), "test-chat")
         return true
       }
     )
@@ -75,10 +114,7 @@ test("loader sends unauthenticated users to login", async () => {
           request.url
         )
         assert.equal(location.pathname, "/login")
-        assert.equal(
-          location.searchParams.get("redirect"),
-          "/?source=test"
-        )
+        assert.equal(location.searchParams.get("redirect"), "/?source=test")
         return true
       }
     )
@@ -100,6 +136,9 @@ test("loader hydrates the selected chat and reports API state", async () => {
     }
     if (url.endsWith("/api/health")) {
       return Response.json({ status: "ok" })
+    }
+    if (url.endsWith("/api/groups")) {
+      return Response.json({ groups: [groupSummary] })
     }
     if (url.endsWith("/api/chat/test-chat/state")) {
       return Response.json({
@@ -139,6 +178,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
     assert.deepEqual(await loader(args), {
       apiStatus: "ready",
       chatId: "test-chat",
+      groups: [groupSummary],
       initialState: {
         messages: [
           {
@@ -167,6 +207,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
     assert.deepEqual(await loader(args), {
       apiStatus: "ready",
       chatId: "test-chat",
+      groups: [groupSummary],
       initialState: {
         messages: [],
         participants: [{ name: "Maya" }],

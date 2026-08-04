@@ -1,4 +1,4 @@
-import type { Hono } from "hono"
+import type { Hono, MiddlewareHandler } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { validate } from "@sdk-it/hono/runtime"
 import { z } from "zod"
@@ -7,15 +7,19 @@ import type { AppEnv } from "../app.js"
 import { GroupInputError } from "../group/group-store.js"
 import { groupTemplates } from "../group/group-template-catalog.js"
 
-export default function (router: Hono<AppEnv>) {
-  router.use("/groups", async (context, next) => {
-    const { auth } = context.var.dependencies
-    const session = await auth.getSession(context.req.raw.headers)
-    if (!session) return context.json({ error: "Unauthorized." }, 401)
+const authenticate: MiddlewareHandler<AppEnv> = async (context, next) => {
+  const session = await context.var.dependencies.auth.getSession(
+    context.req.raw.headers
+  )
+  if (!session) return context.json({ error: "Unauthorized." }, 401)
 
-    context.set("userId", session.user.id)
-    await next()
-  })
+  context.set("userId", session.user.id)
+  await next()
+}
+
+export default function (router: Hono<AppEnv>) {
+  router.use("/groups", authenticate)
+  router.use("/groups/*", authenticate)
 
   /**
    * @openapi listGroups
@@ -25,10 +29,19 @@ export default function (router: Hono<AppEnv>) {
   router.get(
     "/groups",
     validate(() => ({})),
-    (context) =>
-      context.json({
-        groups: context.var.dependencies.listGroups(context.get("userId")),
-      })
+    (context) => {
+      const groups = context.var.dependencies
+        .listGroups(context.get("userId"))
+        .map(({ id, name, agentIds, createdAt, lastMessage, unreadCount }) => ({
+          id,
+          name,
+          agentIds,
+          createdAt,
+          lastMessage,
+          unreadCount,
+        }))
+      return context.json({ groups })
+    }
   )
 
   /**
@@ -55,10 +68,14 @@ export default function (router: Hono<AppEnv>) {
     })),
     (context) => {
       const template =
-        groupTemplates.find(({ id }) => id === context.var.input.templateId) ??
-        context.var.dependencies.marketplaceTemplates.findPublished(
-          context.var.input.templateId
-        )
+        context.var.input.templateId === "scratch"
+          ? { name: "New group", agents: [] }
+          : (groupTemplates.find(
+              ({ id }) => id === context.var.input.templateId
+            ) ??
+            context.var.dependencies.marketplaceTemplates.findPublished(
+              context.var.input.templateId
+            ))
       if (!template) {
         return context.json({ error: "Unknown group template." }, 400)
       }
@@ -77,6 +94,27 @@ export default function (router: Hono<AppEnv>) {
         }
         throw error
       }
+    }
+  )
+
+  /**
+   * @openapi markGroupRead
+   * @tags groups
+   * @description Marks the authenticated user's group as read.
+   */
+  router.post(
+    "/groups/:groupId/read",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    (context) => {
+      const read = context.var.dependencies.markGroupRead(
+        context.get("userId"),
+        context.var.input.groupId
+      )
+      return read
+        ? context.json({ read: true })
+        : context.json({ error: "Group not found." }, 404)
     }
   )
 }

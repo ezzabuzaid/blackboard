@@ -6,8 +6,10 @@ import {
   ScrollArea,
 } from "@stdlib/shadcn"
 import { BellRing, MessageSquarePlus, Search, Square } from "lucide-react"
+import { useEffect, useState } from "react"
 import { Link, useLoaderData } from "react-router"
 
+import { api } from "./api"
 import { ChatComposer } from "./ChatComposer"
 import { Conversation } from "./Conversation"
 import { GroupAvatarStack } from "./GroupAvatar"
@@ -32,6 +34,7 @@ export default function ChatBot() {
     >
       <AgentTraceProvider>
         <main className="relative flex h-svh bg-background">
+          <GroupReadReceipt />
           <GroupSidebar />
           <section className="relative flex min-w-0 flex-1 flex-col">
             <GroupHeader />
@@ -49,21 +52,6 @@ function GroupSidebar() {
   return (
     <aside className="hidden w-[clamp(20rem,30vw,27rem)] shrink-0 flex-col border-r bg-card md:flex">
       <SidebarHeader />
-      <div className="px-3 pt-3 pb-2">
-        <div className="relative">
-          <Search
-            aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            type="search"
-            aria-label="Search groups"
-            placeholder="Search groups"
-            className="h-10 rounded-full border-transparent bg-muted pr-4 pl-10 shadow-none"
-          />
-        </div>
-      </div>
-      <NotificationBanner />
       <GroupList />
     </aside>
   )
@@ -116,35 +104,10 @@ interface GroupPreview {
   preview: string
   time: string
   initials: string
-  unread?: number
-  active?: boolean
+  unread: number
+  active: boolean
+  sortAt: number
 }
-
-const placeholderGroups: readonly GroupPreview[] = [
-  {
-    id: "discovery-room",
-    name: "Discovery Room",
-    preview: "Evidence Analyst: Three interviews agree…",
-    time: "9:40 PM",
-    initials: "DR",
-    unread: 3,
-  },
-  {
-    id: "launch-planning",
-    name: "Launch Planning",
-    preview: "You: Review the launch brief",
-    time: "Mon",
-    initials: "LP",
-  },
-  {
-    id: "customer-research",
-    name: "Customer Research",
-    preview: "Market Mapper: I found a new pattern…",
-    time: "Sun",
-    initials: "CR",
-    unread: 8,
-  },
-]
 
 const groupTime = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
@@ -152,51 +115,104 @@ const groupTime = new Intl.DateTimeFormat(undefined, {
 })
 
 function GroupList() {
-  const groups = useData()
+  const [query, setQuery] = useState("")
+  const groups = useData(query)
 
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div role="list" aria-label="Groups" className="px-2 pb-3">
-        {groups.map((group) => (
-          <GroupListItem key={group.id} group={group} />
-        ))}
+    <>
+      <div className="px-3 pt-3 pb-2">
+        <div className="relative">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            type="search"
+            aria-label="Search groups"
+            placeholder="Search groups"
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            className="h-10 rounded-full border-transparent bg-muted pr-4 pl-10 shadow-none"
+          />
+        </div>
       </div>
-    </ScrollArea>
+      <NotificationBanner />
+      <ScrollArea className="min-h-0 flex-1">
+        <div role="list" aria-label="Groups" className="px-2 pb-3">
+          {groups.map((group) => (
+            <GroupListItem key={group.id} group={group} />
+          ))}
+          {groups.length === 0 && (
+            <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+              No groups found
+            </p>
+          )}
+        </div>
+      </ScrollArea>
+    </>
   )
 }
 
-function useData(): readonly GroupPreview[] {
+function useData(query: string): readonly GroupPreview[] {
+  const { chatId, groups } = useLoaderData<typeof loader>()
   const { activity, messages, participants } = useGroupChat()
   const latestMessage = messages.at(-1)
-  const preview = latestMessage
+  const activePreview = latestMessage
     ? `${latestMessage.author === "user" ? "You" : latestMessage.author}: ${latestMessage.content}`
     : activity.phase === "active"
       ? "Agents are working…"
       : participants.length > 0
         ? participants.map(({ name }) => name).join(", ")
         : "No agents yet"
+  const activeGroup = groups.find(({ id }) => id === chatId)
+  const records = activeGroup
+    ? groups
+    : [
+        {
+          id: chatId,
+          name: "New group",
+          agentIds: [],
+          createdAt: new Date(0).toISOString(),
+          lastMessage: null,
+          unreadCount: 0,
+        },
+        ...groups,
+      ]
+  const normalizedQuery = query.trim().toLocaleLowerCase()
 
-  return [
-    {
-      id: "baseera",
-      name: "Baseera",
-      preview,
-      time: latestMessage
-        ? groupTime.format(new Date(latestMessage.sentAt))
-        : "",
-      initials: "BA",
-      active: true,
-    },
-    ...placeholderGroups,
-  ]
+  return records
+    .map((group): GroupPreview => {
+      const active = group.id === chatId
+      const message =
+        active && latestMessage ? latestMessage : group.lastMessage
+      return {
+        id: group.id,
+        name: group.name,
+        preview: active
+          ? activePreview
+          : message
+            ? `${message.author === "user" ? "You" : message.author}: ${message.content}`
+            : group.agentIds.length > 0
+              ? `${group.agentIds.length} agents`
+              : "No messages yet",
+        time: message ? groupTime.format(new Date(message.sentAt)) : "",
+        initials: groupInitials(group.name),
+        unread: active ? 0 : group.unreadCount,
+        active,
+        sortAt: Date.parse(message?.sentAt ?? group.createdAt),
+      }
+    })
+    .filter(({ name }) => name.toLocaleLowerCase().includes(normalizedQuery))
+    .toSorted((left, right) => right.sortAt - left.sortAt)
 }
 
 function GroupListItem({ group }: { group: GroupPreview }) {
   return (
-    <article
+    <Link
+      to={`/?${new URLSearchParams({ chatId: group.id })}`}
       role="listitem"
       aria-current={group.active ? "page" : undefined}
-      className={`flex min-h-18 items-center gap-3 rounded-lg px-2 py-2.5 ${
+      className={`flex min-h-18 items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-accent/70 focus-visible:outline-2 focus-visible:outline-primary ${
         group.active ? "bg-accent" : ""
       }`}
     >
@@ -218,7 +234,7 @@ function GroupListItem({ group }: { group: GroupPreview }) {
           <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
             {group.preview}
           </p>
-          {group.unread && (
+          {group.unread > 0 && (
             <span
               aria-label={`${group.unread} unread messages`}
               className="grid min-w-5 shrink-0 place-items-center rounded-full bg-primary px-1.5 text-[10px] leading-5 font-semibold text-primary-foreground"
@@ -228,18 +244,44 @@ function GroupListItem({ group }: { group: GroupPreview }) {
           )}
         </div>
       </div>
-    </article>
+    </Link>
   )
+}
+
+function GroupReadReceipt() {
+  const { chatId, messages } = useGroupChat()
+  const { groups } = useLoaderData<typeof loader>()
+  const latestMessageId = messages.at(-1)?.id
+
+  useEffect(() => {
+    if (!groups.some(({ id }) => id === chatId)) return
+    void api
+      .request("POST /groups/{groupId}/read", { groupId: chatId })
+      .catch(() => undefined)
+  }, [chatId, groups, latestMessageId])
+
+  return null
+}
+
+function groupInitials(name: string) {
+  return name
+    .split(/\s+/u)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join("")
+    .toLocaleUpperCase()
 }
 
 function GroupHeader() {
   const { apiStatus, activity, participants, stop, stopping } = useGroupChat()
+  const { chatId, groups } = useLoaderData<typeof loader>()
+  const name = groups.find(({ id }) => id === chatId)?.name ?? "New group"
 
   return (
     <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-card px-3 sm:px-5">
       <GroupAvatarStack members={participants.map(({ name }) => name)} />
       <div className="min-w-0 flex-1">
-        <h1 className="truncate text-sm font-semibold">Baseera</h1>
+        <h1 className="truncate text-sm font-semibold">{name}</h1>
         <p className="truncate text-xs text-muted-foreground">
           {apiStatus === "offline"
             ? "Group unavailable"

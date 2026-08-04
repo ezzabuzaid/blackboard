@@ -5,14 +5,30 @@ import { api } from "./api"
 import { initialGroupActivity } from "./groupActivity"
 import { isGroupChatState } from "./groupMessages"
 
+export interface GroupSummary {
+  id: string
+  name: string
+  agentIds: readonly string[]
+  createdAt: string
+  lastMessage: {
+    author: string
+    content: string
+    sentAt: string
+  } | null
+  unreadCount: number
+}
+
 export async function loader(args: LoaderFunctionArgs) {
   await requireIdentity(args)
 
   const { request } = args
   const url = new URL(request.url)
+  const groups = await loadGroups(request.signal)
   const chatId = url.searchParams.get("chatId")
   if (!chatId) {
-    url.searchParams.set("chatId", crypto.randomUUID())
+    const firstGroup = groups.at(0)
+    if (!firstGroup) throw redirect("/groups/new")
+    url.searchParams.set("chatId", firstGroup.id)
     throw redirect(`${url.pathname}${url.search}`)
   }
 
@@ -32,6 +48,7 @@ export async function loader(args: LoaderFunctionArgs) {
     return {
       apiStatus: "ready" as const,
       chatId,
+      groups,
       initialState: state,
     }
   } catch (error) {
@@ -40,6 +57,7 @@ export async function loader(args: LoaderFunctionArgs) {
     return {
       apiStatus: "offline" as const,
       chatId,
+      groups,
       initialState: {
         messages: [],
         participants: [],
@@ -48,4 +66,40 @@ export async function loader(args: LoaderFunctionArgs) {
       },
     }
   }
+}
+
+async function loadGroups(signal: AbortSignal) {
+  const response: unknown = await api.request("GET /groups", {}, { signal })
+  if (
+    !isRecord(response) ||
+    !Array.isArray(response.groups) ||
+    !response.groups.every(isGroupSummary)
+  ) {
+    throw new Error("Invalid group list")
+  }
+  return response.groups
+}
+
+function isGroupSummary(value: unknown): value is GroupSummary {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    Array.isArray(value.agentIds) &&
+    value.agentIds.every((id) => typeof id === "string") &&
+    typeof value.createdAt === "string" &&
+    !Number.isNaN(Date.parse(value.createdAt)) &&
+    (value.lastMessage === null ||
+      (isRecord(value.lastMessage) &&
+        typeof value.lastMessage.author === "string" &&
+        typeof value.lastMessage.content === "string" &&
+        typeof value.lastMessage.sentAt === "string" &&
+        !Number.isNaN(Date.parse(value.lastMessage.sentAt)))) &&
+    Number.isSafeInteger(value.unreadCount) &&
+    Number(value.unreadCount) >= 0
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }

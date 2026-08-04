@@ -17,6 +17,7 @@ import {
   WhatsAppGroup,
   type WhatsAppChatEvent,
   type WhatsAppGroupLimits,
+  type WhatsAppMessage,
   type WhatsAppParticipant,
 } from "./whatsapp.js"
 import { readAgentTraces } from "../traces/agent-traces.js"
@@ -39,6 +40,10 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   readonly #loadParticipants: (
     conversation: ConversationId
   ) => Promise<readonly WhatsAppParticipant[]>
+  readonly #onMessage?: (
+    conversation: ConversationId,
+    message: WhatsAppMessage
+  ) => void | Promise<void>
   readonly #sandboxForChat: (
     conversation: ConversationId
   ) => AgentDeclaration["sandbox"]
@@ -47,6 +52,10 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     loadParticipants: (
       conversation: ConversationId
     ) => Promise<readonly WhatsAppParticipant[]>
+    onMessage?: (
+      conversation: ConversationId,
+      message: WhatsAppMessage
+    ) => void | Promise<void>
     limits: WhatsAppGroupLimits
     sandboxForChat: (
       conversation: ConversationId
@@ -55,6 +64,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     mailboxPath: string
   }) {
     this.#loadParticipants = options.loadParticipants
+    this.#onMessage = options.onMessage
     this.#limits = options.limits
     this.#sandboxForChat = options.sandboxForChat
 
@@ -168,6 +178,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       mailboxStore: this.#mailboxStore,
       events,
       limits: this.#limits,
+      onMessage: (message) => this.#onMessage?.(conversation, message),
       persist: (event) =>
         this.#streamStore.appendChunks([
           {

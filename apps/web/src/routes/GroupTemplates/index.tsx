@@ -100,13 +100,6 @@ export default function GroupTemplates() {
   }
 
   async function startGroup(template: GroupTemplate) {
-    if (template.scratch) {
-      await navigate(
-        `/?${new URLSearchParams({ chatId: crypto.randomUUID() })}`
-      )
-      return
-    }
-
     setStartingId(template.id)
     setStartError(null)
     try {

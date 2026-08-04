@@ -5,6 +5,24 @@ export interface GroupRecord {
   id: string
   name: string
   agentIds: readonly string[]
+  createdAt: string
+  lastMessage: {
+    author: string
+    content: string
+    sentAt: string
+  } | null
+  unreadCount: number
+}
+
+interface GroupRow {
+  id: string
+  name: string
+  agent_ids: string
+  created_at: number
+  last_message_author: string | null
+  last_message_content: string | null
+  last_message_at: number | null
+  unread_count: number
 }
 
 export class GroupInputError extends Error {
@@ -28,9 +46,32 @@ export class GroupStore implements Disposable {
         name TEXT NOT NULL,
         agent_ids TEXT NOT NULL,
         created_at INTEGER NOT NULL,
+        last_message_author TEXT,
+        last_message_content TEXT,
+        last_message_at INTEGER,
+        unread_count INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (user_id, id)
       ) STRICT
     `)
+    const columns = new Set(
+      (
+        this.#database.prepare("PRAGMA table_info(groups)").all() as {
+          name: string
+        }[]
+      ).map(({ name }) => name)
+    )
+    for (const [name, definition] of [
+      ["last_message_author", "TEXT"],
+      ["last_message_content", "TEXT"],
+      ["last_message_at", "INTEGER"],
+      ["unread_count", "INTEGER NOT NULL DEFAULT 0"],
+    ] as const) {
+      if (!columns.has(name)) {
+        this.#database.exec(
+          `ALTER TABLE groups ADD COLUMN ${name} ${definition}`
+        )
+      }
+    }
   }
 
   create(
@@ -48,55 +89,108 @@ export class GroupStore implements Disposable {
     if (agentIds.length !== input.agentIds.length) {
       throw new GroupInputError("Group agent IDs must be unique")
     }
-    if (agentIds.length < 1 || agentIds.length > 8) {
-      throw new GroupInputError("Groups require between 1 and 8 agents")
+    if (agentIds.length > 8) {
+      throw new GroupInputError("Groups support up to 8 agents")
     }
     const unknown = agentIds.find((id) => !this.#agentIds.has(id))
     if (unknown) throw new GroupInputError(`Unknown agent ID "${unknown}"`)
 
-    const group = { id: randomUUID(), name, agentIds }
+    const createdAt = Date.now()
+    const group: GroupRecord = {
+      id: randomUUID(),
+      name,
+      agentIds,
+      createdAt: new Date(createdAt).toISOString(),
+      lastMessage: null,
+      unreadCount: 0,
+    }
     this.#database
       .prepare(
         `INSERT INTO groups (user_id, id, name, agent_ids, created_at)
          VALUES (?, ?, ?, ?, ?)`
       )
-      .run(userId, group.id, group.name, JSON.stringify(agentIds), Date.now())
+      .run(userId, group.id, group.name, JSON.stringify(agentIds), createdAt)
     return group
   }
 
   get(userId: string, id: string): GroupRecord | null {
     const row = this.#database
       .prepare(
-        `SELECT id, name, agent_ids
+        `SELECT id, name, agent_ids, created_at, last_message_author,
+                last_message_content, last_message_at, unread_count
          FROM groups
          WHERE user_id = ? AND id = ?`
       )
-      .get(userId, id) as
-      { id: string; name: string; agent_ids: string } | undefined
+      .get(userId, id) as GroupRow | undefined
 
-    return row
-      ? { id: row.id, name: row.name, agentIds: JSON.parse(row.agent_ids) }
-      : null
+    return row ? groupRecord(row) : null
   }
 
   list(userId: string): GroupRecord[] {
     const rows = this.#database
       .prepare(
-        `SELECT id, name, agent_ids
+        `SELECT id, name, agent_ids, created_at, last_message_author,
+                last_message_content, last_message_at, unread_count
          FROM groups
          WHERE user_id = ?
-         ORDER BY created_at DESC, rowid DESC`
+         ORDER BY COALESCE(last_message_at, created_at) DESC, rowid DESC`
       )
-      .all(userId) as { id: string; name: string; agent_ids: string }[]
+      .all(userId) as unknown as GroupRow[]
 
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      agentIds: JSON.parse(row.agent_ids),
-    }))
+    return rows.map(groupRecord)
+  }
+
+  recordMessage(
+    userId: string,
+    id: string,
+    message: { author: string; content: string; sentAt: string }
+  ) {
+    const sentAt = Date.parse(message.sentAt)
+    if (!Number.isFinite(sentAt)) return false
+
+    const result = this.#database
+      .prepare(
+        `UPDATE groups
+         SET last_message_author = ?, last_message_content = ?,
+             last_message_at = ?,
+             unread_count = unread_count + CASE WHEN ? = 'user' THEN 0 ELSE 1 END
+         WHERE user_id = ? AND id = ?`
+      )
+      .run(message.author, message.content, sentAt, message.author, userId, id)
+    return result.changes > 0
+  }
+
+  markRead(userId: string, id: string) {
+    return (
+      this.#database
+        .prepare(
+          `UPDATE groups SET unread_count = 0 WHERE user_id = ? AND id = ?`
+        )
+        .run(userId, id).changes > 0
+    )
   }
 
   [Symbol.dispose]() {
     this.#database.close()
+  }
+}
+
+function groupRecord(row: GroupRow): GroupRecord {
+  return {
+    id: row.id,
+    name: row.name,
+    agentIds: JSON.parse(row.agent_ids),
+    createdAt: new Date(row.created_at).toISOString(),
+    lastMessage:
+      row.last_message_author === null ||
+      row.last_message_content === null ||
+      row.last_message_at === null
+        ? null
+        : {
+            author: row.last_message_author,
+            content: row.last_message_content,
+            sentAt: new Date(row.last_message_at).toISOString(),
+          },
+    unreadCount: row.unread_count,
   }
 }

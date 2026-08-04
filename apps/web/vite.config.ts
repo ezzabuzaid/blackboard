@@ -4,7 +4,10 @@ import { defineConfig } from "vite"
 
 export default defineConfig({
   envDir: "../..",
-  server: { forwardConsole: true },
+  server: {
+    forwardConsole: true,
+    proxy: { "/api": "http://localhost:3001" },
+  },
   resolve: { tsconfigPaths: true },
   plugins: [react(), tailwindcss()],
 })

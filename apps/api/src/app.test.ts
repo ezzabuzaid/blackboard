@@ -22,12 +22,14 @@ import { simulateReadableStream } from "ai"
 import { MockLanguageModelV4 } from "ai/test"
 import { betterAuth, type BetterAuthOptions } from "better-auth"
 import { decryptOAuthToken } from "better-auth/oauth2"
+import type { DrainContext } from "evlog"
 import { InMemoryFs } from "just-bash"
 
 import { createApp, type AppDependencies } from "./app.js"
 import { chatGPTAuthPlugin, parseDeviceAttempt } from "./auth/chatgpt-plugin.js"
 import type { OpenArtifact } from "./routes/chat.route.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
+import type { GroupRecord } from "./group/group-store.js"
 import { groupTemplates } from "./group/group-template-catalog.js"
 import {
   MarketplaceGroupTemplateStore,
@@ -55,6 +57,22 @@ const testGroupLimits = {
   notifications: 25,
   agentMessages: 100,
   transcriptMessages: 500,
+}
+const testCreatedAt = "2026-08-04T00:00:00.000Z"
+
+function testGroupRecord(
+  id: string,
+  name: string,
+  agentIds: readonly string[]
+): GroupRecord {
+  return {
+    id,
+    name,
+    agentIds,
+    createdAt: testCreatedAt,
+    lastMessage: null,
+    unreadCount: 0,
+  }
 }
 
 function testGroupDependencies(resources: AsyncDisposableStack) {
@@ -146,29 +164,35 @@ const authenticatedAuth: AppDependencies["auth"] = {
 }
 
 function testApp({
+  structuredLogDrain,
   agents = [],
   auth = authenticatedAuth,
   createGroup = () => {
     throw new Error("Unexpected group creation")
   },
   listGroups = () => [],
+  markGroupRead = () => false,
   marketplaceTemplates = unusedMarketplaceTemplates,
   runtime = unusedRuntime,
   openArtifact = noArtifact,
 }: {
+  structuredLogDrain?: AppDependencies["structuredLogDrain"]
   agents?: AppDependencies["agents"]
   auth?: AppDependencies["auth"]
   createGroup?: AppDependencies["createGroup"]
   listGroups?: AppDependencies["listGroups"]
+  markGroupRead?: AppDependencies["markGroupRead"]
   marketplaceTemplates?: AppDependencies["marketplaceTemplates"]
   runtime?: ChatRuntime
   openArtifact?: OpenArtifact
 } = {}) {
   return createApp({
+    structuredLogDrain,
     agents,
     auth,
     createGroup,
     listGroups,
+    markGroupRead,
     marketplaceTemplates,
     runtime,
     openArtifact,
@@ -325,6 +349,33 @@ test("health reports the WhatsApp group service", async () => {
 
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), { status: "ok" })
+})
+
+test("structured logging records request failures without authorization headers", async () => {
+  const events: DrainContext[] = []
+  const response = await testApp({
+    structuredLogDrain: (event) => {
+      events.push(event)
+    },
+    createGroup: () => {
+      throw new Error("controlled failure")
+    },
+  }).request("/api/groups", {
+    method: "POST",
+    headers: {
+      Authorization: "Bearer secret-marker",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ templateId: "scratch" }),
+  })
+
+  assert.equal(response.status, 500)
+  assert.equal(events.length, 1)
+  assert.equal(events[0]?.event.level, "error")
+  assert.equal(events[0]?.event.path, "/api/groups")
+  assert.equal(events[0]?.event.status, 500)
+  assert.match(JSON.stringify(events[0]?.event.error), /controlled failure/)
+  assert.equal(events[0]?.headers?.authorization, undefined)
 })
 
 test("agent catalog exposes native character metadata", async () => {
@@ -501,7 +552,7 @@ test("published marketplace templates create ordinary groups", async () => {
     marketplaceTemplates,
     createGroup: (userId, input) => {
       calls.push({ userId, input })
-      return { id: "group-2", ...input }
+      return testGroupRecord("group-2", input.name, input.agentIds)
     },
   })
 
@@ -543,6 +594,9 @@ test("published marketplace templates create ordinary groups", async () => {
     id: "group-2",
     name: "Founder Board",
     agentIds: ["paul-graham"],
+    createdAt: testCreatedAt,
+    lastMessage: null,
+    unreadCount: 0,
   })
 
   marketplaceTemplates.unpublish("publisher-1", template.id)
@@ -559,7 +613,7 @@ test("group template selection creates a normal group roster", async () => {
   const application = testApp({
     createGroup: (userId, input) => {
       calls.push({ userId, input })
-      return { id: "group-1", ...input }
+      return testGroupRecord("group-1", input.name, input.agentIds)
     },
   })
   const response = await application.request("/api/groups", {
@@ -592,6 +646,9 @@ test("group template selection creates a normal group roster", async () => {
       "elena-verna",
       "andrew-chen",
     ],
+    createdAt: testCreatedAt,
+    lastMessage: null,
+    unreadCount: 0,
   })
 
   const unknown = await application.request("/api/groups", {
@@ -604,9 +661,7 @@ test("group template selection creates a normal group roster", async () => {
 
 test("group listing is scoped to the authenticated user", async () => {
   const userIds: string[] = []
-  const groups = [
-    { id: "group-1", name: "Founder panel", agentIds: ["paul-graham"] },
-  ]
+  const groups = [testGroupRecord("group-1", "Founder panel", ["paul-graham"])]
   const response = await testApp({
     listGroups: (userId) => {
       userIds.push(userId)
@@ -617,6 +672,36 @@ test("group listing is scoped to the authenticated user", async () => {
   assert.equal(response.status, 200)
   assert.deepEqual(userIds, ["local-user"])
   assert.deepEqual(await response.json(), { groups })
+})
+
+test("scratch groups are persisted and can be marked read", async () => {
+  const calls: unknown[] = []
+  const response = await testApp({
+    createGroup: (userId, input) => {
+      calls.push({ userId, input })
+      return testGroupRecord("scratch-1", input.name, input.agentIds)
+    },
+  }).request("/api/groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ templateId: "scratch" }),
+  })
+
+  assert.equal(response.status, 201)
+  assert.deepEqual(calls, [
+    { userId: "local-user", input: { name: "New group", agentIds: [] } },
+  ])
+
+  const readCalls: unknown[] = []
+  const read = await testApp({
+    markGroupRead: (userId, groupId) => {
+      readCalls.push({ userId, groupId })
+      return true
+    },
+  }).request("/api/groups/scratch-1/read", { method: "POST" })
+  assert.equal(read.status, 200)
+  assert.deepEqual(readCalls, [{ userId: "local-user", groupId: "scratch-1" }])
+  assert.deepEqual(await read.json(), { read: true })
 })
 
 test("SDK auth routes preserve Better Auth response headers", async () => {
@@ -701,6 +786,27 @@ test("a user with no participants gets an empty group", async () => {
     message?: { content?: unknown }
   }
   assert.equal(body.message?.content, "Anyone here?")
+})
+
+test("chat runtime reports new messages to the group summary sink", async () => {
+  const seen: unknown[] = []
+  await using runtime = new WhatsAppChatRuntime({
+    loadParticipants: async () => [],
+    onMessage: (conversation, message) => {
+      seen.push({ conversation, message })
+    },
+    limits: testGroupLimits,
+    sandboxForChat: () => testGroupSandbox,
+    databasePath: ":memory:",
+    mailboxPath: ":memory:",
+  })
+
+  const message = await runtime.post(testGroupConversation, {
+    id: "summary-message",
+    content: "Keep this in the sidebar.",
+  })
+
+  assert.deepEqual(seen, [{ conversation: testGroupConversation, message }])
 })
 
 test("snapshots reuse the active chat roster", async () => {

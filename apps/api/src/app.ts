@@ -1,3 +1,5 @@
+import type { DrainContext } from "evlog"
+import { evlog } from "evlog/hono"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 
@@ -18,12 +20,14 @@ const routes = await Promise.all([
 ])
 
 export interface AppDependencies {
+  structuredLogDrain?: (context: DrainContext) => void | Promise<void>
   agents: readonly AgentTemplate[]
   createGroup(
     userId: string,
     input: { name: string; agentIds: readonly string[] }
   ): GroupRecord
   listGroups(userId: string): GroupRecord[]
+  markGroupRead(userId: string, groupId: string): boolean
   marketplaceTemplates: Pick<
     MarketplaceGroupTemplateStore,
     | "create"
@@ -53,7 +57,22 @@ export type AppEnv = {
 }
 
 export function createApp(dependencies: AppDependencies) {
-  const app = new Hono<AppEnv>().use(
+  const app = new Hono<AppEnv>()
+  if (dependencies.structuredLogDrain) {
+    app.use(
+      "/api/*",
+      evlog({
+        drain: dependencies.structuredLogDrain,
+        enrich: ({ event, response }) => {
+          if (response?.status && response.status >= 500) event.level = "error"
+          else if (response?.status && response.status >= 400)
+            event.level = "warn"
+        },
+        redact: true,
+      })
+    )
+  }
+  app.use(
     "/api/*",
     cors({
       credentials: true,
