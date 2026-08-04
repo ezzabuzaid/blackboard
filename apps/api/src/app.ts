@@ -1,9 +1,13 @@
 import { Hono, type Context } from "hono"
+import { bodyLimit } from "hono/body-limit"
 import { cors } from "hono/cors"
 import { validate } from "@sdk-it/hono/runtime"
+import { z } from "zod"
 
 import { createChatRoutes, type OpenArtifact } from "./chat/routes.js"
 import type { WhatsAppChatRuntime } from "./group/chat-runtime.js"
+import { GroupInputError, type GroupRecord } from "./group/group-store.js"
+import type { AgentTemplate } from "./group/participants/agent-catalog.js"
 
 const configuredOrigin = process.env.WEB_ORIGIN
 
@@ -23,6 +27,11 @@ type DevicePoll =
   | { status: "complete"; user: { id: string } }
 
 export interface AppDependencies {
+  agents: readonly AgentTemplate[]
+  createGroup(
+    userId: string,
+    input: { name: string; agentIds: readonly string[] }
+  ): GroupRecord
   auth: {
     handler(request: Request): Promise<Response>
     getSession(headers: Headers): Promise<{ user: { id: string } } | null>
@@ -38,7 +47,13 @@ export interface AppDependencies {
   openArtifact: OpenArtifact
 }
 
-export function createApp({ auth, runtime, openArtifact }: AppDependencies) {
+export function createApp({
+  agents,
+  createGroup,
+  auth,
+  runtime,
+  openArtifact,
+}: AppDependencies) {
   const app = new Hono<{ Variables: { userId: string } }>().use(
     "/api/*",
     cors({
@@ -68,6 +83,13 @@ export function createApp({ auth, runtime, openArtifact }: AppDependencies) {
     (context) => {
       return context.json({ status: "ok" })
     }
+  )
+
+  /** @openapi listAgents */
+  app.get(
+    "/api/agents",
+    validate(() => ({})),
+    (context) => context.json({ agents })
   )
 
   /**
@@ -137,6 +159,13 @@ export function createApp({ auth, runtime, openArtifact }: AppDependencies) {
   app.on(["GET", "POST"], "/api/auth/*", (context) =>
     auth.handler(context.req.raw)
   )
+  app.use("/api/groups", async (context, next) => {
+    const session = await auth.getSession(context.req.raw.headers)
+    if (!session) return context.json({ error: "Unauthorized." }, 401)
+
+    context.set("userId", session.user.id)
+    await next()
+  })
   app.use("/api/chat/*", async (context, next) => {
     const session = await auth.getSession(context.req.raw.headers)
     if (!session) return context.json({ error: "Unauthorized." }, 401)
@@ -144,6 +173,43 @@ export function createApp({ auth, runtime, openArtifact }: AppDependencies) {
     context.set("userId", session.user.id)
     await next()
   })
+
+  /** @openapi createGroup */
+  app.post(
+    "/api/groups",
+    bodyLimit({
+      maxSize: 10 * 1024,
+      onError: (context) =>
+        context.json({ error: "Group request is too large." }, 413),
+    }),
+    async (context, next) => {
+      const body = await context.req.json().catch(() => null)
+      if (!body || typeof body !== "object") {
+        return context.json({ error: "Invalid group." }, 400)
+      }
+      await next()
+    },
+    validate((payload) => ({
+      name: { select: payload.body.name, against: z.string() },
+      agentIds: {
+        select: payload.body.agentIds,
+        against: z.array(z.string()),
+      },
+    })),
+    (context) => {
+      try {
+        return context.json(
+          createGroup(context.get("userId"), context.var.input),
+          201
+        )
+      } catch (error) {
+        if (error instanceof GroupInputError) {
+          return context.json({ error: error.message }, 400)
+        }
+        throw error
+      }
+    }
+  )
 
   return createChatRoutes(app, runtime, openArtifact)
 }

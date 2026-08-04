@@ -6,7 +6,7 @@ import { fragment, type AgentModel } from "@deepagents/context"
 import { createFileTelemetry } from "@deepagents/context/telemetry/file"
 import { SqliteFs } from "@deepagents/text2sql"
 import type { ToolSet } from "ai"
-import { MountableFs, OverlayFs, type IFileSystem } from "just-bash"
+import { InMemoryFs, MountableFs, OverlayFs, type IFileSystem } from "just-bash"
 
 import type { WhatsAppParticipant } from "../whatsapp.js"
 
@@ -20,17 +20,21 @@ interface ParticipantDefaults {
 interface ParticipantDefinition {
   directory: string
   name: string
+  readOnly: boolean
 }
 
 export interface ParticipantDirectoryOptions {
   databasePath: string
   builtinsDirectory: string
+  catalogDirectory?: string
   telemetryDirectory: string
   loadDefaults: (userId: string) => Promise<ParticipantDefaults>
 }
 
 export class ParticipantDirectory {
   readonly #builtinDirectories: string[]
+  readonly #catalogDirectories: readonly string[]
+  readonly #catalogDirectory?: string
   readonly #databasePath: string
   readonly #defaults = new Map<string, Promise<ParticipantDefaults>>()
   readonly #builtinsDirectory: string
@@ -40,12 +44,33 @@ export class ParticipantDirectory {
   constructor(options: ParticipantDirectoryOptions) {
     this.#databasePath = resolve(options.databasePath)
     this.#builtinsDirectory = resolve(options.builtinsDirectory)
+    this.#catalogDirectory = options.catalogDirectory
+      ? resolve(options.catalogDirectory)
+      : undefined
     this.#telemetryDirectory = resolve(options.telemetryDirectory)
     this.#loadDefaults = options.loadDefaults
     this.#builtinDirectories = this.#loadBuiltinDirectories()
+    this.#catalogDirectories = this.#catalogDirectory
+      ? directoryNames(this.#catalogDirectory)
+      : []
   }
 
-  filesystem(userId: string): IFileSystem {
+  filesystem(userId: string, catalogIds?: readonly string[]): IFileSystem {
+    if (catalogIds) {
+      const selected = this.#catalogSelection(catalogIds)
+      return new MountableFs({
+        base: new InMemoryFs(),
+        mounts: selected.map((directory) => ({
+          mountPoint: `/${directory}`,
+          filesystem: new OverlayFs({
+            root: resolve(this.#catalogDirectory!, directory),
+            mountPoint: "/",
+            readOnly: true,
+          }),
+        })),
+      })
+    }
+
     return new MountableFs({
       base: new SqliteFs({
         dbPath: this.#databasePath,
@@ -62,9 +87,23 @@ export class ParticipantDirectory {
     })
   }
 
-  async participants(userId: string): Promise<readonly WhatsAppParticipant[]> {
-    const filesystem = this.filesystem(userId)
+  async participants(
+    userId: string,
+    catalogIds?: readonly string[]
+  ): Promise<readonly WhatsAppParticipant[]> {
+    const filesystem = this.filesystem(userId, catalogIds)
     const defaults = await this.#defaultsFor(userId)
+    if (catalogIds) {
+      const definitions = await Promise.all(
+        this.#catalogSelection(catalogIds).map((directory) =>
+          this.#readIdentity(filesystem, directory, true)
+        )
+      )
+      return definitions.map((definition) =>
+        this.#participant(userId, definition, defaults)
+      )
+    }
+
     const directories = await this.#participantDirectories(filesystem)
     const builtinSet = new Set(this.#builtinDirectories)
     const orderedDirectories = [
@@ -84,13 +123,17 @@ export class ParticipantDirectory {
   }
 
   #loadBuiltinDirectories() {
-    const entries = readdirSync(this.#builtinsDirectory, {
-      withFileTypes: true,
-    })
-    return entries
-      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-      .map(({ name }) => name)
-      .sort((left, right) => left.localeCompare(right, "en"))
+    return directoryNames(this.#builtinsDirectory)
+  }
+
+  #catalogSelection(ids: readonly string[]) {
+    if (!this.#catalogDirectory) {
+      throw new Error("Participant catalog is not configured")
+    }
+    const available = new Set(this.#catalogDirectories)
+    const unknown = ids.find((id) => !available.has(id))
+    if (unknown) throw new Error(`Unknown catalog participant "${unknown}"`)
+    return ids
   }
 
   async #participantDirectories(filesystem: IFileSystem) {
@@ -111,7 +154,8 @@ export class ParticipantDirectory {
 
   async #readIdentity(
     filesystem: IFileSystem,
-    directory: string
+    directory: string,
+    readOnly = false
   ): Promise<ParticipantDefinition> {
     const identityPath = `/${directory}/${IDENTITY_FILE}`
     if (!(await filesystem.exists(identityPath))) {
@@ -133,7 +177,7 @@ export class ParticipantDirectory {
       )
     }
 
-    return { directory, name: identity.name }
+    return { directory, name: identity.name, readOnly }
   }
 
   #participant(
@@ -153,7 +197,7 @@ export class ParticipantDirectory {
           "participant-bootstrap",
           `At the start of every turn, use bash to inspect ${JSON.stringify(
             `/workspace/participants/${definition.directory}`
-          )}. Read SOUL.md for persona and voice, AGENTS.md for operating instructions, and MEMORY.md for durable knowledge. Follow them for that turn. Participant files are writable; use bash to edit them directly when your role calls for it.`
+          )}. Read SOUL.md for persona and voice, AGENTS.md for operating instructions, and MEMORY.md for durable knowledge. Follow them for that turn. ${definition.readOnly ? "This catalog definition is read-only." : "Participant files are writable; use bash to edit them directly when your role calls for it."}`
         ),
       ],
       model: defaults.model,
@@ -176,6 +220,13 @@ export class ParticipantDirectory {
     }
     return defaults
   }
+}
+
+function directoryNames(directory: string) {
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map(({ name }) => name)
+    .toSorted((left, right) => left.localeCompare(right, "en"))
 }
 
 function userNamespace(userId: string) {

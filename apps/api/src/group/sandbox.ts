@@ -12,7 +12,7 @@ import { createPersistentVirtualSandbox, userDataRoot } from "../sandbox.js"
 export function createWhatsAppSandbox(
   resources: AsyncDisposableStack,
   dataDirectory: string,
-  participantsFilesystem: (userId: string) => IFileSystem
+  participantsFilesystem: (conversation: ConversationId) => IFileSystem
 ) {
   return (conversation: ConversationId) => {
     const userDirectory = userDataRoot(dataDirectory, conversation.userId)
@@ -21,7 +21,7 @@ export function createWhatsAppSandbox(
         createPersistentVirtualSandbox(resources, dataDirectory, conversation, [
           {
             path: "/workspace/participants",
-            filesystem: participantsFilesystem(conversation.userId),
+            filesystem: participantsFilesystem(conversation),
           },
           {
             path: "/workspace/business",

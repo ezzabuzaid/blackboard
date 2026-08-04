@@ -7,7 +7,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --env-file=.env --import tsx --watch src/index.ts",
     "start": "node --env-file=.env dist/index.js",
-    "test": "node --test dist/app.test.js dist/group/participants/participant-directory.test.js",
+    "test": "node --test dist/app.test.js dist/group/group-store.test.js dist/group/participants/agent-catalog.test.js dist/group/participants/participant-directory.test.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

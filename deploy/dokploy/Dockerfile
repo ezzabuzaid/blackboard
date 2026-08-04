@@ -27,6 +27,7 @@ WORKDIR /app
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/web/dist apps/web/dist
+COPY catalog catalog
 COPY participants participants
 
 EXPOSE 3001

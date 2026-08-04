@@ -9,6 +9,8 @@ import { createApp } from "./app.js"
 import { createAuthentication } from "./auth.js"
 import { createChatGPTSubscription } from "./chatgpt.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
+import { GroupStore } from "./group/group-store.js"
+import { loadAgentCatalog } from "./group/participants/agent-catalog.js"
 import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
 import { openArtifact } from "./sandbox.js"
@@ -43,9 +45,18 @@ const authentication = resources.use(
   })
 )
 const sandboxResources = resources.use(new AsyncDisposableStack())
+const agents = loadAgentCatalog(
+  resolve(import.meta.dirname, "../../../catalog/agents")
+)
+const groups = new GroupStore(
+  resolve(dataDirectory, "group.sqlite"),
+  agents.map(({ id }) => id)
+)
+resources.defer(() => groups[Symbol.dispose]())
 const participants = new ParticipantDirectory({
   databasePath: resolve(dataDirectory, "participants.sqlite"),
   builtinsDirectory: resolve(import.meta.dirname, "../../../participants"),
+  catalogDirectory: resolve(import.meta.dirname, "../../../catalog/agents"),
   telemetryDirectory: resolve(dataDirectory, "group-telemetry"),
   loadDefaults: async (userId) => {
     const chatgpt = await createChatGPTSubscription(authentication.auth, userId)
@@ -57,7 +68,11 @@ const participants = new ParticipantDirectory({
 })
 const runtime = resources.use(
   new WhatsAppChatRuntime({
-    loadParticipants: (userId) => participants.participants(userId),
+    loadParticipants: (conversation) =>
+      participants.participants(
+        conversation.userId,
+        groups.get(conversation.userId, conversation.chatId)?.agentIds
+      ),
     limits: {
       notifications: 25,
       agentMessages: 100,
@@ -66,7 +81,11 @@ const runtime = resources.use(
     sandboxForChat: createWhatsAppSandbox(
       sandboxResources,
       dataDirectory,
-      (userId) => participants.filesystem(userId)
+      (conversation) =>
+        participants.filesystem(
+          conversation.userId,
+          groups.get(conversation.userId, conversation.chatId)?.agentIds
+        )
     ),
     databasePath: resolve(dataDirectory, "group.sqlite"),
     mailboxPath: resolve(dataDirectory, "mailbox.sqlite"),
@@ -74,6 +93,8 @@ const runtime = resources.use(
 )
 
 const app = createApp({
+  agents,
+  createGroup: (userId, input) => groups.create(userId, input),
   auth: {
     handler: authentication.auth.handler,
     getSession: (headers) => authentication.auth.api.getSession({ headers }),

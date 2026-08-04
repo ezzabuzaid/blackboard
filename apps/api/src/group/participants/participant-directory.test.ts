@@ -160,3 +160,52 @@ test("a participant folder requires a valid identity file", async () => {
     await rm(root, { recursive: true, force: true })
   }
 })
+
+test("catalog selection mounts only the requested read-only participants", async () => {
+  const root = await mkdtemp(join(tmpdir(), "baseera-participants-"))
+  const builtins = resolve(root, "builtins")
+  const catalog = resolve(root, "catalog")
+
+  try {
+    await writeBuiltinFactory(builtins)
+    await writeCatalogAgent(catalog, "annie-duke", "Annie Duke")
+    await writeCatalogAgent(catalog, "paul-graham", "Paul Graham")
+    const directory = new ParticipantDirectory({
+      databasePath: resolve(root, "participants.sqlite"),
+      builtinsDirectory: builtins,
+      catalogDirectory: catalog,
+      telemetryDirectory: resolve(root, "group-telemetry"),
+      loadDefaults: async () => ({ model, tools: {} }),
+    })
+
+    const filesystem = directory.filesystem("user-1", ["paul-graham"])
+    const participants = await directory.participants("user-1", ["paul-graham"])
+
+    assert.deepEqual(await filesystem.readdir("/"), ["paul-graham"])
+    assert.deepEqual(
+      participants.map(({ name }) => name),
+      ["Paul Graham"]
+    )
+    assert.match(
+      JSON.stringify(participants[0]?.instructions),
+      /catalog definition is read-only/
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+async function writeCatalogAgent(
+  root: string,
+  directory: string,
+  name: string
+) {
+  const agent = resolve(root, directory)
+  await mkdir(agent, { recursive: true })
+  await Promise.all([
+    writeFile(resolve(agent, "identity.json"), JSON.stringify({ name })),
+    writeFile(resolve(agent, "SOUL.md"), "Give useful advice.\n"),
+    writeFile(resolve(agent, "AGENTS.md"), "Stay in your domain.\n"),
+    writeFile(resolve(agent, "MEMORY.md"), "# Memory\n"),
+  ])
+}

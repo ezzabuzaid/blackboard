@@ -114,23 +114,28 @@ const noArtifact: OpenArtifact = async () => null
 const authenticatedAuth: AppDependencies["auth"] = {
   handler: async () => new Response(null, { status: 404 }),
   getSession: async () => ({ user: { id: "local-user" } }),
-  getSessionResponse: async () =>
-    Response.json({ user: { id: "local-user" } }),
+  getSessionResponse: async () => Response.json({ user: { id: "local-user" } }),
   startDevice: async () => new Response(null, { status: 404 }),
   pollDevice: async () => new Response(null, { status: 404 }),
   cancelDevice: async () => new Response(null, { status: 404 }),
 }
 
 function testApp({
+  agents = [],
   auth = authenticatedAuth,
+  createGroup = () => {
+    throw new Error("Unexpected group creation")
+  },
   runtime = unusedRuntime,
   openArtifact = noArtifact,
 }: {
+  agents?: AppDependencies["agents"]
   auth?: AppDependencies["auth"]
+  createGroup?: AppDependencies["createGroup"]
   runtime?: ChatRuntime
   openArtifact?: OpenArtifact
 } = {}) {
-  return createApp({ auth, runtime, openArtifact })
+  return createApp({ agents, auth, createGroup, runtime, openArtifact })
 }
 
 function responseCookies(response: Response) {
@@ -283,6 +288,66 @@ test("health reports the WhatsApp group service", async () => {
 
   assert.equal(response.status, 200)
   assert.deepEqual(await response.json(), { status: "ok" })
+})
+
+test("agent catalog exposes native character metadata", async () => {
+  const response = await testApp({
+    agents: [
+      {
+        id: "paul-graham",
+        name: "Paul Graham",
+        category: "Fund",
+        headline: "YC's essayist-in-chief",
+        tags: ["strategy", "fundraising"],
+      },
+    ],
+  }).request("/api/agents")
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {
+    agents: [
+      {
+        id: "paul-graham",
+        name: "Paul Graham",
+        category: "Fund",
+        headline: "YC's essayist-in-chief",
+        tags: ["strategy", "fundraising"],
+      },
+    ],
+  })
+})
+
+test("group creation persists the selected catalog roster", async () => {
+  const calls: unknown[] = []
+  const response = await testApp({
+    createGroup: (userId, input) => {
+      calls.push({ userId, input })
+      return { id: "group-1", ...input }
+    },
+  }).request("/api/groups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: "Founder panel",
+      agentIds: ["annie-duke", "paul-graham"],
+    }),
+  })
+
+  assert.equal(response.status, 201)
+  assert.deepEqual(calls, [
+    {
+      userId: "local-user",
+      input: {
+        name: "Founder panel",
+        agentIds: ["annie-duke", "paul-graham"],
+      },
+    },
+  ])
+  assert.deepEqual(await response.json(), {
+    id: "group-1",
+    name: "Founder panel",
+    agentIds: ["annie-duke", "paul-graham"],
+  })
 })
 
 test("SDK auth routes preserve Better Auth response headers", async () => {
@@ -622,7 +687,7 @@ test("group chats share writable per-user participants and isolate other users",
     const sandboxForChat = createWhatsAppSandbox(
       resources,
       directory,
-      (userId) => participants.filesystem(userId)
+      (conversation) => participants.filesystem(conversation.userId)
     )
     const sandboxForFirstChat = sandboxForChat(firstChat)
     const first = await sandboxForFirstChat({

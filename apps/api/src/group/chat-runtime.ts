@@ -37,7 +37,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   readonly #mailboxStore: SqliteMailboxStore
   readonly #limits: WhatsAppGroupLimits
   readonly #loadParticipants: (
-    userId: string
+    conversation: ConversationId
   ) => Promise<readonly WhatsAppParticipant[]>
   readonly #sandboxForChat: (
     conversation: ConversationId
@@ -45,7 +45,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
 
   constructor(options: {
     loadParticipants: (
-      userId: string
+      conversation: ConversationId
     ) => Promise<readonly WhatsAppParticipant[]>
     limits: WhatsAppGroupLimits
     sandboxForChat: (
@@ -184,17 +184,16 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   }
 
   async #loadChatParticipants(conversation: ConversationId) {
-    return (await this.#loadParticipants(conversation.userId)).map(
-      (participant) =>
-        participant.telemetry
-          ? {
-              ...participant,
-              telemetry: {
-                ...participant.telemetry,
-                functionId: `${conversation.chatId}:${participant.name}`,
-              },
-            }
-          : participant
+    return (await this.#loadParticipants(conversation)).map((participant) =>
+      participant.telemetry
+        ? {
+            ...participant,
+            telemetry: {
+              ...participant.telemetry,
+              functionId: `${conversation.chatId}:${participant.name}`,
+            },
+          }
+        : participant
     )
   }
 }
