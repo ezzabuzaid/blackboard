@@ -9,6 +9,7 @@ COPY packages/ui/package.json packages/ui/package.json
 RUN npm ci
 
 COPY apps apps
+COPY catalog catalog
 COPY packages packages
 COPY sdk-it.config.ts sdk-it.config.ts
 RUN npx nx run api:build \
