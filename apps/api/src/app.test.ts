@@ -25,8 +25,11 @@ import { decryptOAuthToken } from "better-auth/oauth2"
 import { InMemoryFs } from "just-bash"
 
 import { createApp, type AppDependencies } from "./app.js"
-import { chatGPTAuthPlugin, parseDeviceAttempt } from "./auth/chatgpt-plugin.js"
-import type { OpenArtifact } from "./chat/routes.js"
+import {
+  chatGPTAuthPlugin,
+  parseDeviceAttempt,
+} from "./routes/chatgpt-auth.route.js"
+import type { OpenArtifact } from "./routes/chat.route.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox, shareSandboxInstance } from "./group/sandbox.js"

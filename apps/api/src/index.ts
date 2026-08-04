@@ -3,7 +3,6 @@ import { resolve } from "node:path"
 
 import { createTerminus } from "@godaddy/terminus"
 import { serve } from "@hono/node-server"
-import { serveStatic } from "@hono/node-server/serve-static"
 
 import { createApp } from "./app.js"
 import { createAuthentication } from "./auth.js"
@@ -13,6 +12,7 @@ import { GroupStore } from "./group/group-store.js"
 import { loadAgentCatalog } from "./group/participants/agent-catalog.js"
 import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
+import { createWebRoute } from "./routes/web.route.js"
 import { openArtifact } from "./sandbox.js"
 
 const dataDirectory = process.env.ZUKHRUF_DATA_DIR
@@ -117,9 +117,7 @@ const app = createApp({
 
 const webRoot = process.env.WEB_ROOT
 if (webRoot) {
-  app.get("/api/*", (context) => context.notFound())
-  app.use("*", serveStatic({ root: webRoot }))
-  app.get("*", serveStatic({ root: webRoot, path: "index.html" }))
+  createWebRoute(app, webRoot)
 }
 
 await using server = serve(

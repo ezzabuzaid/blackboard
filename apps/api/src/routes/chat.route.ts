@@ -11,7 +11,8 @@ import {
   WhatsAppGroupLimitError,
   WhatsAppReplyTargetError,
 } from "../group/whatsapp.js"
-import { conversationFrom } from "./conversation.js"
+import { conversationFrom } from "../chat/conversation.js"
+import type { AuthRoutes } from "./auth.route.js"
 
 export type OpenArtifact = (
   conversation: ConversationId,
@@ -20,15 +21,25 @@ export type OpenArtifact = (
 
 export function createChatRoutes(
   app: Hono<{ Variables: { userId: string } }>,
+  auth: Pick<AuthRoutes, "getSession">,
   chats: Pick<
     WhatsAppChatRuntime,
     "post" | "snapshot" | "stop" | "subscribe" | "traces"
   >,
   openArtifact: OpenArtifact
 ) {
+  app.use("/api/chat/*", async (context, next) => {
+    const session = await auth.getSession(context.req.raw.headers)
+    if (!session) return context.json({ error: "Unauthorized." }, 401)
+
+    context.set("userId", session.user.id)
+    await next()
+  })
+
   /**
    * @openapi getChatState
    * @tags chat
+   * @description Gets the current chat state.
    */
   app.get(
     "/api/chat/:chatId/state",
@@ -51,6 +62,7 @@ export function createChatRoutes(
   /**
    * @openapi getChatEvents
    * @tags chat
+   * @description Streams chat events after a cursor.
    */
   app.get(
     "/api/chat/:chatId/events",
@@ -91,6 +103,7 @@ export function createChatRoutes(
   /**
    * @openapi getAgentTraces
    * @tags chat
+   * @description Gets an agent's traces for a chat.
    */
   app.get(
     "/api/chat/:chatId/agents/:agent/traces",
@@ -118,6 +131,7 @@ export function createChatRoutes(
   /**
    * @openapi getArtifact
    * @tags chat
+   * @description Gets a generated chat artifact.
    */
   app.get(
     "/api/chat/:chatId/artifacts/:path{.+}",
@@ -158,6 +172,7 @@ export function createChatRoutes(
   /**
    * @openapi stopChat
    * @tags chat
+   * @description Stops active work in a chat.
    */
   app.post(
     "/api/chat/:chatId/stop",
@@ -180,6 +195,7 @@ export function createChatRoutes(
   /**
    * @openapi postChatMessage
    * @tags chat
+   * @description Posts a message to a chat.
    */
   app.post(
     "/api/chat/:chatId/messages",

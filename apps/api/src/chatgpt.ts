@@ -9,7 +9,7 @@ import {
 import { decryptOAuthToken, setTokenUtil } from "better-auth/oauth2"
 
 import type { AppAuth } from "./auth.js"
-import { CHATGPT_PROVIDER_ID } from "./auth/chatgpt-plugin.js"
+import { CHATGPT_PROVIDER_ID } from "./routes/chatgpt-auth.route.js"
 
 export async function createChatGPTSubscription(auth: AppAuth, userId: string) {
   const context = await auth.$context

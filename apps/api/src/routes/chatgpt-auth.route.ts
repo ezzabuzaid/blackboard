@@ -22,7 +22,7 @@ const ATTEMPT_COOKIE = "chatgpt_device"
 const ATTEMPT_PREFIX = "chatgpt-device:"
 export const CHATGPT_PROVIDER_ID = "chatgpt"
 
-interface DeviceAttempt {
+interface ChatGPTDeviceAttempt {
   deviceAuthId: string
   userCode: string
 }
@@ -43,7 +43,7 @@ export function chatGPTAuthPlugin(options: ChatGPTConfig = {}) {
         value: JSON.stringify({
           deviceAuthId: result.deviceAuthId,
           userCode: result.userCode,
-        } satisfies DeviceAttempt),
+        } satisfies ChatGPTDeviceAttempt),
         expiresAt: new Date(result.expiresAt),
       })
 
@@ -155,7 +155,7 @@ export function chatGPTAuthPlugin(options: ChatGPTConfig = {}) {
   } satisfies BetterAuthPlugin
 }
 
-export function parseDeviceAttempt(value: string): DeviceAttempt | null {
+export function parseDeviceAttempt(value: string): ChatGPTDeviceAttempt | null {
   try {
     const attempt: unknown = JSON.parse(value)
     return attempt &&
