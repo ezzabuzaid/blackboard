@@ -31,6 +31,7 @@ const groupSummary = {
   createdAt: sentAt,
   lastMessage: null,
   unreadCount: 0,
+  pinned: false,
 }
 
 test("extracts group events from the Zukhruf stream", () => {

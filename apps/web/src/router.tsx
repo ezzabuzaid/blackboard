@@ -31,6 +31,13 @@ export const router = createBrowserRouter([
         },
       },
       {
+        path: "share/:token",
+        lazy: async () => {
+          const route = await import("./routes/Share")
+          return { Component: route.default, loader: route.loader }
+        },
+      },
+      {
         path: "*",
         loader: () => {
           throw new Response("Not Found", { status: 404 })

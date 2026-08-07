@@ -5,7 +5,7 @@ import {
   Input,
   ScrollArea,
 } from "@stdlib/shadcn"
-import { BellRing, MessageSquarePlus, Search, Square } from "lucide-react"
+import { BellRing, MessageSquarePlus, Pin, Search, Square } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Link, useLoaderData } from "react-router"
 
@@ -14,7 +14,9 @@ import { ChatComposer } from "./ChatComposer"
 import { Conversation } from "./Conversation"
 import { GroupAvatarStack } from "./GroupAvatar"
 import { GroupChatProvider, useGroupChat } from "./GroupChat"
+import { GroupRowMenu } from "./GroupRowMenu"
 import { loader } from "./loader"
+import { ShareGroupDialog } from "./ShareGroupDialog"
 import {
   AgentTraceProvider,
   AgentTraceSidebar,
@@ -108,6 +110,7 @@ interface GroupPreview {
   initials: string
   unread: number
   active: boolean
+  pinned: boolean
   sortAt: number
 }
 
@@ -181,6 +184,7 @@ function useData(query: string): readonly GroupPreview[] {
           createdAt: new Date(0).toISOString(),
           lastMessage: null,
           unreadCount: 0,
+          pinned: false,
         },
         ...groups,
       ]
@@ -205,52 +209,73 @@ function useData(query: string): readonly GroupPreview[] {
         initials: groupInitials(group.name),
         unread: active ? 0 : group.unreadCount,
         active,
+        pinned: group.pinned,
         sortAt: Date.parse(message?.sentAt ?? group.createdAt),
       }
     })
     .filter(({ name }) => name.toLocaleLowerCase().includes(normalizedQuery))
-    .toSorted((left, right) => right.sortAt - left.sortAt)
+    .toSorted(
+      (left, right) =>
+        Number(right.pinned) - Number(left.pinned) ||
+        right.sortAt - left.sortAt
+    )
 }
 
 function GroupListItem({ group }: { group: GroupPreview }) {
   return (
-    <Link
-      to={`/?${new URLSearchParams({ chatId: group.id })}`}
-      role="listitem"
-      aria-current={group.active ? "page" : undefined}
-      className={`flex min-h-18 items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-accent/70 focus-visible:outline-2 focus-visible:outline-primary ${
-        group.active ? "bg-accent" : ""
-      }`}
-    >
-      <Avatar size="lg" className="shrink-0">
-        <AvatarFallback className="bg-muted font-medium">
-          {group.initials}
-        </AvatarFallback>
-      </Avatar>
-      <div className="min-w-0 flex-1 border-b border-border/60 py-1.5">
-        <div className="flex items-baseline gap-2">
-          <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
-            {group.name}
-          </h2>
-          <time className="shrink-0 text-[11px] text-muted-foreground">
-            {group.time}
-          </time>
+    <div role="listitem" className="group/row relative">
+      <Link
+        to={`/?${new URLSearchParams({ chatId: group.id })}`}
+        aria-current={group.active ? "page" : undefined}
+        className={`flex min-h-18 items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-accent/70 focus-visible:outline-2 focus-visible:outline-primary ${
+          group.active ? "bg-accent" : ""
+        }`}
+      >
+        <Avatar size="lg" className="shrink-0">
+          <AvatarFallback className="bg-muted font-medium">
+            {group.initials}
+          </AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1 border-b border-border/60 py-1.5">
+          <div className="flex items-baseline gap-2">
+            <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
+              {group.name}
+            </h2>
+            <time className="shrink-0 text-[11px] text-muted-foreground">
+              {group.time}
+            </time>
+          </div>
+          <div className="mt-0.5 flex items-center gap-2">
+            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+              {group.preview}
+            </p>
+            {group.pinned && (
+              <Pin
+                aria-label="Pinned"
+                className="size-3 shrink-0 text-muted-foreground"
+              />
+            )}
+            {group.unread > 0 && (
+              <span
+                aria-label={`${group.unread} unread messages`}
+                className="grid min-w-5 shrink-0 place-items-center rounded-full bg-primary px-1.5 text-[10px] leading-5 font-semibold text-primary-foreground"
+              >
+                {group.unread}
+              </span>
+            )}
+            <span className="w-6 shrink-0" aria-hidden="true" />
+          </div>
         </div>
-        <div className="mt-0.5 flex items-center gap-2">
-          <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
-            {group.preview}
-          </p>
-          {group.unread > 0 && (
-            <span
-              aria-label={`${group.unread} unread messages`}
-              className="grid min-w-5 shrink-0 place-items-center rounded-full bg-primary px-1.5 text-[10px] leading-5 font-semibold text-primary-foreground"
-            >
-              {group.unread}
-            </span>
-          )}
-        </div>
+      </Link>
+      <div className="absolute end-3 bottom-4">
+        <GroupRowMenu
+          groupId={group.id}
+          name={group.name}
+          pinned={group.pinned}
+          active={group.active}
+        />
       </div>
-    </Link>
+    </div>
   )
 }
 
@@ -307,6 +332,7 @@ function GroupHeader() {
           {stopping ? "Stopping…" : "Stop"}
         </Button>
       )}
+      <ShareGroupDialog groupId={chatId} />
     </header>
   )
 }

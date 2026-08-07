@@ -60,6 +60,10 @@ export function useAgentTraceSelection() {
   return selection
 }
 
+export function useOptionalAgentTraceSelection() {
+  return useContext(AgentTraceContext)
+}
+
 export function AgentTraceSidebar() {
   const { agent, close } = useAgentTraceSelection()
 

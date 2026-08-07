@@ -31,6 +31,17 @@ export default function (router: Hono<AppEnv>) {
     await next()
   })
 
+  router.use("/chat/:chatId/*", async (context, next) => {
+    const chatId = context.req.param("chatId")
+    const group = context.var.dependencies.getGroup(
+      context.get("userId"),
+      chatId
+    )
+    if (!group) return context.json({ error: "Chat not found." }, 404)
+
+    await next()
+  })
+
   /**
    * @openapi getChatState
    * @tags chat

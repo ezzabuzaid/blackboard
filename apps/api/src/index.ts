@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs"
+import { rm } from "node:fs/promises"
 import { resolve } from "node:path"
 
 import { createTerminus } from "@godaddy/terminus"
@@ -11,11 +12,12 @@ import { createAuthentication } from "./auth.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import { GroupStore } from "./group/group-store.js"
 import { MarketplaceGroupTemplateStore } from "./group/marketplace-group-template-store.js"
+import { GroupShareStore } from "./group/share-store.js"
 import { loadAgentCatalog } from "./group/participants/agent-catalog.js"
 import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
 import { createParticipantDefaults } from "./participant-defaults.js"
-import { openArtifact } from "./sandbox.js"
+import { openArtifact, sandboxRoot } from "./sandbox.js"
 
 const dataDirectory = process.env.ZUKHRUF_DATA_DIR
 if (!dataDirectory) throw new Error("ZUKHRUF_DATA_DIR is required")
@@ -84,6 +86,8 @@ const marketplaceTemplates = new MarketplaceGroupTemplateStore(
   agents.map(({ id }) => id)
 )
 resources.defer(() => marketplaceTemplates[Symbol.dispose]())
+const shares = new GroupShareStore(resolve(dataDirectory, "shares.sqlite"))
+resources.defer(() => shares[Symbol.dispose]())
 const participants = new ParticipantDirectory({
   databasePath: resolve(dataDirectory, "participants.sqlite"),
   builtinsDirectory: resolve(import.meta.dirname, "../../../participants"),
@@ -132,8 +136,24 @@ const app = createApp({
   agents,
   createGroup: (userId, input) => groups.create(userId, input),
   listGroups: (userId) => groups.list(userId),
+  getGroup: (userId, groupId) => groups.get(userId, groupId),
+  groupOwner: (groupId) => groups.ownerOf(groupId),
   markGroupRead: (userId, groupId) => groups.markRead(userId, groupId),
+  setGroupPinned: (userId, groupId, pinned) =>
+    groups.setPinned(userId, groupId, pinned),
+  setGroupArchived: (userId, groupId, archived) =>
+    groups.setArchived(userId, groupId, archived),
+  clearGroupChat: async (userId, groupId) => {
+    const conversation = { chatId: groupId, userId }
+    await runtime.clear(conversation)
+    await rm(sandboxRoot(dataDirectory, conversation), {
+      recursive: true,
+      force: true,
+    })
+    groups.clearMessages(userId, groupId)
+  },
   marketplaceTemplates,
+  shares,
   auth: {
     handler: authentication.auth.handler,
     getSession: (headers) => authentication.auth.api.getSession({ headers }),

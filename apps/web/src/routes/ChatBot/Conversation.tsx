@@ -135,10 +135,10 @@ function GroupActivityIndicator({
 interface MessageClusterProps {
   cluster: GroupMessageCluster
   messagesById: ReadonlyMap<string, GroupMessage>
-  onReply(message: GroupMessage): void
+  onReply?: (message: GroupMessage) => void
 }
 
-function UserMessageCluster({
+export function UserMessageCluster({
   cluster,
   messagesById,
   onReply,
@@ -177,13 +177,13 @@ function UserMessageCluster({
   )
 }
 
-function GroupReplyCluster({
+export function GroupReplyCluster({
   chatId,
   cluster,
   messagesById,
   onReply,
 }: MessageClusterProps & {
-  chatId: string
+  chatId?: string
 }) {
   return (
     <Message
@@ -239,8 +239,9 @@ function ReplyButton({
 }: {
   message: GroupMessage
   align: "start" | "end"
-  onReply(message: GroupMessage): void
+  onReply?: (message: GroupMessage) => void
 }) {
+  if (!onReply) return null
   return (
     <Button
       type="button"
@@ -298,7 +299,7 @@ function MessageTimestamp({ sentAt }: { sentAt: string }) {
 
 interface AssistantMarkdownProps {
   active: boolean
-  chatId: string
+  chatId?: string
   text: string
 }
 
@@ -307,12 +308,17 @@ export function AssistantMarkdown({
   chatId,
   text,
 }: AssistantMarkdownProps) {
-  const remarkPlugins = useMemo(() => artifactRemarkPlugins(chatId), [chatId])
-  const trustedArtifactBaseUrl = artifactBaseUrl(chatId)
+  const remarkPlugins = useMemo(
+    () => (chatId ? artifactRemarkPlugins(chatId) : undefined),
+    [chatId]
+  )
+  const trustedArtifactBaseUrl = chatId ? artifactBaseUrl(chatId) : null
   const linkSafety = useMemo(
     () => ({
       enabled: true,
-      onLinkCheck: (url: string) => url.startsWith(trustedArtifactBaseUrl),
+      onLinkCheck: (url: string) =>
+        trustedArtifactBaseUrl !== null &&
+        url.startsWith(trustedArtifactBaseUrl),
     }),
     [trustedArtifactBaseUrl]
   )

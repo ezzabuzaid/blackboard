@@ -46,7 +46,10 @@ export const userDataRoot = (dataDirectory: string, userId: string) =>
     createHash("sha256").update(userId).digest("hex")
   )
 
-const sandboxRoot = (dataDirectory: string, conversation: ConversationId) =>
+export const sandboxRoot = (
+  dataDirectory: string,
+  conversation: ConversationId
+) =>
   resolve(
     userDataRoot(dataDirectory, conversation.userId),
     "sandboxes",

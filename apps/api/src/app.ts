@@ -3,6 +3,7 @@ import { evlog, useLogger } from "evlog/hono"
 import {
   ZUKHRUF_ROUTE_PREFIX,
   zukhruf,
+  type ConversationId,
 } from "@deepagents/experimental/zukhruf"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
@@ -10,6 +11,7 @@ import { cors } from "hono/cors"
 import type { WhatsAppChatRuntime } from "./group/chat-runtime.js"
 import type { GroupRecord } from "./group/group-store.js"
 import type { MarketplaceGroupTemplateStore } from "./group/marketplace-group-template-store.js"
+import type { GroupShareStore } from "./group/share-store.js"
 import type { AgentTemplate } from "./group/participants/agent-catalog.js"
 import type { OpenArtifact } from "./routes/chat.route.js"
 
@@ -21,6 +23,7 @@ const routes = await Promise.all([
   import("./routes/auth.route.js"),
   import("./routes/groups.route.js"),
   import("./routes/chat.route.js"),
+  import("./routes/shares.route.js"),
 ])
 
 export interface AppDependencies {
@@ -31,7 +34,13 @@ export interface AppDependencies {
     input: { name: string; agentIds: readonly string[] }
   ): GroupRecord
   listGroups(userId: string): GroupRecord[]
+  getGroup(userId: string, groupId: string): GroupRecord | null
+  groupOwner(groupId: string): string | null
   markGroupRead(userId: string, groupId: string): boolean
+  setGroupPinned(userId: string, groupId: string, pinned: boolean): boolean
+  setGroupArchived(userId: string, groupId: string, archived: boolean): boolean
+  clearGroupChat(userId: string, groupId: string): Promise<void>
+  shares: Pick<GroupShareStore, "create" | "active" | "revoke" | "resolve">
   marketplaceTemplates: Pick<
     MarketplaceGroupTemplateStore,
     | "create"
@@ -48,7 +57,7 @@ export interface AppDependencies {
   }
   runtime: Pick<
     WhatsAppChatRuntime,
-    "post" | "snapshot" | "stop" | "traces"
+    "post" | "snapshot" | "stop" | "traces" | "transcript" | "clear"
   > &
     Parameters<typeof zukhruf>[0]
   openArtifact: OpenArtifact
@@ -56,6 +65,32 @@ export interface AppDependencies {
 
 export type AppEnv = {
   Variables: { userId: string; dependencies: AppDependencies }
+}
+
+/**
+ * Zukhruf derives its own session ids from the authenticated user, so only the
+ * routes accepting a caller-supplied session id can reach another user's group.
+ */
+function ownedSessionsOnly({
+  runtime,
+  groupOwner,
+}: AppDependencies): Parameters<typeof zukhruf>[0] {
+  const reachable = ({ chatId, userId }: ConversationId) => {
+    const owner = groupOwner(chatId)
+    return owner === null || owner === userId
+  }
+
+  return {
+    info: runtime.info,
+    createSession: (conversation) => runtime.createSession(conversation),
+    enqueue: (conversation, turn) => runtime.enqueue(conversation, turn),
+    sessionExists: async (conversation) =>
+      reachable(conversation) && (await runtime.sessionExists(conversation)),
+    observe: (conversation) =>
+      reachable(conversation)
+        ? runtime.observe(conversation)
+        : { cancel: async () => {}, resume: async () => null },
+  }
 }
 
 export function createApp(dependencies: AppDependencies) {
@@ -110,7 +145,7 @@ export function createApp(dependencies: AppDependencies) {
     if (session) context.set("userId", session.user.id)
     await next()
   })
-  app.route(zukhrufPath, zukhruf(dependencies.runtime))
+  app.route(zukhrufPath, zukhruf(ownedSessionsOnly(dependencies)))
 
   for (const route of routes) {
     route.default(app.basePath("/api"))

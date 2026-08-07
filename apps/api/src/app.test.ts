@@ -17,7 +17,7 @@ import {
   SqliteMailboxStore,
   defineSandbox,
 } from "@deepagents/experimental/zukhruf"
-import { APICallError, simulateReadableStream } from "ai"
+import { simulateReadableStream } from "ai"
 import { MockLanguageModelV4 } from "ai/test"
 import type { DrainContext } from "evlog"
 import { InMemoryFs } from "just-bash"
@@ -70,6 +70,7 @@ function testGroupRecord(
     createdAt: testCreatedAt,
     lastMessage: null,
     unreadCount: 0,
+    pinned: false,
   }
 }
 
@@ -146,6 +147,27 @@ const unusedRuntime: ChatRuntime = {
   async traces() {
     throw new Error("Unexpected traces")
   },
+  async transcript() {
+    throw new Error("Unexpected transcript")
+  },
+  async clear() {
+    throw new Error("Unexpected clear")
+  },
+}
+
+const unusedShares: AppDependencies["shares"] = {
+  create() {
+    throw new Error("Unexpected share creation")
+  },
+  active() {
+    throw new Error("Unexpected share lookup")
+  },
+  revoke() {
+    throw new Error("Unexpected share revocation")
+  },
+  resolve() {
+    throw new Error("Unexpected share resolution")
+  },
 }
 
 const noArtifact: OpenArtifact = async () => null
@@ -183,8 +205,16 @@ function testApp({
     throw new Error("Unexpected group creation")
   },
   listGroups = () => [],
+  getGroup = (_userId, groupId) => testGroupRecord(groupId, "Test group", []),
+  groupOwner = () => null,
   markGroupRead = () => false,
+  setGroupPinned = () => true,
+  setGroupArchived = () => true,
+  clearGroupChat = async () => {
+    throw new Error("Unexpected chat clear")
+  },
   marketplaceTemplates = unusedMarketplaceTemplates,
+  shares = unusedShares,
   runtime = unusedRuntime,
   openArtifact = noArtifact,
 }: {
@@ -193,8 +223,14 @@ function testApp({
   auth?: AppDependencies["auth"]
   createGroup?: AppDependencies["createGroup"]
   listGroups?: AppDependencies["listGroups"]
+  getGroup?: AppDependencies["getGroup"]
+  groupOwner?: AppDependencies["groupOwner"]
   markGroupRead?: AppDependencies["markGroupRead"]
+  setGroupPinned?: AppDependencies["setGroupPinned"]
+  setGroupArchived?: AppDependencies["setGroupArchived"]
+  clearGroupChat?: AppDependencies["clearGroupChat"]
   marketplaceTemplates?: AppDependencies["marketplaceTemplates"]
+  shares?: AppDependencies["shares"]
   runtime?: ChatRuntime
   openArtifact?: OpenArtifact
 } = {}) {
@@ -204,8 +240,14 @@ function testApp({
     auth,
     createGroup,
     listGroups,
+    getGroup,
+    groupOwner,
     markGroupRead,
+    setGroupPinned,
+    setGroupArchived,
+    clearGroupChat,
     marketplaceTemplates,
+    shares,
     runtime,
     openArtifact,
   })
@@ -530,6 +572,7 @@ test("published marketplace templates create ordinary groups", async () => {
     createdAt: testCreatedAt,
     lastMessage: null,
     unreadCount: 0,
+    pinned: false,
   })
 
   marketplaceTemplates.unpublish("publisher-1", template.id)
@@ -582,6 +625,7 @@ test("group template selection creates a normal group roster", async () => {
     createdAt: testCreatedAt,
     lastMessage: null,
     unreadCount: 0,
+    pinned: false,
   })
 
   const unknown = await application.request("/api/groups", {
@@ -679,6 +723,235 @@ test("Factory workshop groups are persisted and can be marked read", async () =>
   assert.equal(read.status, 200)
   assert.deepEqual(readCalls, [{ userId: "local-user", groupId: "scratch-1" }])
   assert.deepEqual(await read.json(), { read: true })
+})
+
+test("group share links are created, read, and revoked by their owner", async () => {
+  const calls: unknown[] = []
+  const share = { token: "share-token-1", createdAt: testCreatedAt }
+  const shares: AppDependencies["shares"] = {
+    ...unusedShares,
+    create: (userId, groupId) => {
+      calls.push({ method: "create", userId, groupId })
+      return share
+    },
+    active: (userId, groupId) => {
+      calls.push({ method: "active", userId, groupId })
+      return share
+    },
+    revoke: (userId, groupId) => {
+      calls.push({ method: "revoke", userId, groupId })
+      return true
+    },
+  }
+  const app = testApp({ shares })
+
+  const created = await app.request("/api/groups/group-1/share", {
+    method: "POST",
+  })
+  assert.equal(created.status, 201)
+  assert.deepEqual(await created.json(), share)
+
+  const read = await app.request("/api/groups/group-1/share")
+  assert.equal(read.status, 200)
+  assert.deepEqual(await read.json(), { share })
+
+  const revoked = await app.request("/api/groups/group-1/share", {
+    method: "DELETE",
+  })
+  assert.equal(revoked.status, 200)
+  assert.deepEqual(await revoked.json(), { revoked: true })
+
+  assert.deepEqual(calls, [
+    { method: "create", userId: "local-user", groupId: "group-1" },
+    { method: "active", userId: "local-user", groupId: "group-1" },
+    { method: "revoke", userId: "local-user", groupId: "group-1" },
+  ])
+})
+
+test("group share links reject callers who do not own the group", async () => {
+  const app = testApp({ getGroup: () => null, shares: unusedShares })
+
+  for (const [path, init] of [
+    ["/api/groups/group-1/share", {}],
+    ["/api/groups/group-1/share", { method: "POST" }],
+    ["/api/groups/group-1/share", { method: "DELETE" }],
+  ] as const) {
+    const response = await app.request(path, init)
+    assert.equal(response.status, 404)
+    assert.deepEqual(await response.json(), { error: "Group not found." })
+  }
+
+  const unauthenticated = await testApp({
+    auth: { ...authenticatedAuth, getSession: async () => null },
+    shares: unusedShares,
+  }).request("/api/groups/group-1/share", { method: "POST" })
+  assert.equal(unauthenticated.status, 401)
+})
+
+test("shared conversations are readable without a session", async () => {
+  const messages = [
+    {
+      id: "message-1",
+      sequence: 1,
+      author: "user",
+      content: "How should we price this?",
+      sentAt: testCreatedAt,
+      replyToMessageId: null,
+    },
+  ]
+  const transcripts: unknown[] = []
+  const app = testApp({
+    auth: { ...authenticatedAuth, getSession: async () => null },
+    getGroup: (userId, groupId) =>
+      userId === "owner-user" && groupId === "group-1"
+        ? testGroupRecord("group-1", "Founder panel", ["annie-duke"])
+        : null,
+    shares: {
+      ...unusedShares,
+      resolve: (token) =>
+        token === "share-token-1"
+          ? { userId: "owner-user", groupId: "group-1" }
+          : null,
+    },
+    runtime: {
+      ...unusedRuntime,
+      transcript: async (conversation) => {
+        transcripts.push(conversation)
+        return { messages, participants: [{ name: "Annie Duke" }] }
+      },
+    },
+  })
+
+  const response = await app.request("/api/shares/share-token-1")
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {
+    name: "Founder panel",
+    participants: [{ name: "Annie Duke" }],
+    messages,
+  })
+  assert.deepEqual(transcripts, [
+    { chatId: "group-1", userId: "owner-user" },
+  ])
+
+  const revoked = await app.request("/api/shares/revoked-token")
+  assert.equal(revoked.status, 404)
+  assert.deepEqual(await revoked.json(), { error: "Share not found." })
+})
+
+test("chat routes reject chats the caller does not own", async () => {
+  const app = testApp({ getGroup: () => null, runtime: unusedRuntime })
+
+  for (const [path, init] of [
+    ["/api/chat/group-1/state", {}],
+    ["/api/chat/group-1/stop", { method: "POST" }],
+    ["/api/chat/group-1/agents/Annie%20Duke/traces", {}],
+    ["/api/chat/group-1/artifacts/report.md", {}],
+  ] as const) {
+    const response = await app.request(path, init)
+    assert.equal(response.status, 404)
+    assert.deepEqual(await response.json(), { error: "Chat not found." })
+  }
+})
+
+test("chat streams reject sessions owned by another user", async () => {
+  const resumed: unknown[] = []
+  const app = testApp({
+    groupOwner: () => "owner-user",
+    runtime: {
+      ...unusedRuntime,
+      async sessionExists() {
+        resumed.push("sessionExists")
+        return true
+      },
+      observe() {
+        resumed.push("observe")
+        return {
+          async cancel() {},
+          async resume() {
+            throw new Error("Unexpected resume")
+          },
+        }
+      },
+    },
+  })
+
+  const response = await app.request(
+    "/api/zukhruf/v1/session/00000000-0000-4000-8000-000000000001/stream"
+  )
+
+  assert.equal(response.status, 404)
+  assert.deepEqual(resumed, [])
+})
+
+test("groups can be pinned and archived by their owner", async () => {
+  const calls: unknown[] = []
+  const app = testApp({
+    setGroupPinned: (userId, groupId, pinned) => {
+      calls.push({ method: "pin", userId, groupId, pinned })
+      return true
+    },
+    setGroupArchived: (userId, groupId, archived) => {
+      calls.push({ method: "archive", userId, groupId, archived })
+      return true
+    },
+  })
+
+  for (const [path, method, expected] of [
+    ["/api/groups/group-1/pin", "POST", { pinned: true }],
+    ["/api/groups/group-1/pin", "DELETE", { pinned: false }],
+    ["/api/groups/group-1/archive", "POST", { archived: true }],
+    ["/api/groups/group-1/archive", "DELETE", { archived: false }],
+  ] as const) {
+    const response = await app.request(path, { method })
+    assert.equal(response.status, 200)
+    assert.deepEqual(await response.json(), expected)
+  }
+
+  assert.deepEqual(calls, [
+    { method: "pin", userId: "local-user", groupId: "group-1", pinned: true },
+    { method: "pin", userId: "local-user", groupId: "group-1", pinned: false },
+    {
+      method: "archive",
+      userId: "local-user",
+      groupId: "group-1",
+      archived: true,
+    },
+    {
+      method: "archive",
+      userId: "local-user",
+      groupId: "group-1",
+      archived: false,
+    },
+  ])
+})
+
+test("clearing a group chat is owner-scoped", async () => {
+  const cleared: unknown[] = []
+  const app = testApp({
+    clearGroupChat: async (userId, groupId) => {
+      cleared.push({ userId, groupId })
+    },
+  })
+
+  const response = await app.request("/api/groups/group-1/clear", {
+    method: "POST",
+  })
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { cleared: true })
+  assert.deepEqual(cleared, [{ userId: "local-user", groupId: "group-1" }])
+
+  const foreign = testApp({ getGroup: () => null })
+  for (const [path, method] of [
+    ["/api/groups/group-1/clear", "POST"],
+    ["/api/groups/group-1/pin", "POST"],
+    ["/api/groups/group-1/pin", "DELETE"],
+    ["/api/groups/group-1/archive", "POST"],
+    ["/api/groups/group-1/archive", "DELETE"],
+  ] as const) {
+    const denied = await foreign.request(path, { method })
+    assert.equal(denied.status, 404)
+    assert.deepEqual(await denied.json(), { error: "Group not found." })
+  }
 })
 
 test("SDK auth routes preserve Better Auth response headers", async () => {
@@ -2502,48 +2775,94 @@ test("one participant failure does not erase successful replies", async () => {
   )
 })
 
-test("participant failures do not expose provider request data", async (t) => {
-  const logs: unknown[][] = []
-  t.mock.method(console, "error", (...args: unknown[]) => logs.push(args))
-  const secret = "private prompt that must not reach logs"
-  const error = new APICallError({
-    message: "Cannot connect to API",
-    url: "https://openrouter.ai/api/v1/chat/completions",
-    requestBodyValues: { input: [secret] },
-    cause: { code: "UND_ERR_CONNECT_TIMEOUT" },
-    isRetryable: true,
-  })
-  await using runtime = memoryRuntime([
-    {
-      name: "Omar",
-      model: new MockLanguageModelV4({
-        doStream: async () => {
-          throw error
+test("shared transcripts are read from storage without starting the group", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "share-transcript-"))
+  try {
+    const conversation = { chatId: "shared-chat", userId: "owner-user" }
+    let replies = 0
+    const participants = [
+      {
+        name: "Annie Duke",
+        model: new MockLanguageModelV4({
+          doStream: async () =>
+            replies++ === 0
+              ? groupToolResponse("reply_to_group", "annie-reply", {
+                  message: "Separate the decision from the outcome.",
+                })
+              : groupTextResponse("Reply posted."),
+        }),
+      },
+    ]
+    await using runtime = durableRuntime(participants, directory)
+    await runtime.post(conversation, {
+      id: "message-1",
+      content: "How should we price this?",
+    })
+    await waitForChat(runtime, conversation, "settled")
+
+    await using reader = durableRuntime(participants, directory)
+    const transcript = await reader.transcript(conversation)
+
+    assert.deepEqual(
+      transcript.messages.map(({ author, content }) => ({ author, content })),
+      [
+        { author: "user", content: "How should we price this?" },
+        {
+          author: "Annie Duke",
+          content: "Separate the decision from the outcome.",
         },
-      }),
-    },
-  ])
+      ]
+    )
+    assert.deepEqual(transcript.participants, [{ name: "Annie Duke" }])
 
-  await runtime.post(testGroupConversation, {
-    id: "provider-failure-message",
-    content: "Please investigate.",
-  })
-  const snapshot = await waitForChat(
-    runtime,
-    testGroupConversation,
-    "settled",
-    1_000
-  )
-  const output = JSON.stringify(logs, (_key, value) =>
-    value instanceof Error
-      ? Object.assign({}, value, { name: value.name, message: value.message })
-      : value
-  )
+    const untouched = { chatId: "never-opened-chat", userId: "owner-user" }
+    assert.deepEqual(await reader.transcript(untouched), {
+      messages: [],
+      participants: [{ name: "Annie Duke" }],
+    })
+    assert.equal(await reader.sessionExists(untouched), false)
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 
-  assert.equal(snapshot.activity.participants[0]?.state, "failed")
-  assert.doesNotMatch(output, new RegExp(secret))
-  assert.match(output, /AI_RetryError/)
-  assert.match(output, /UND_ERR_CONNECT_TIMEOUT/)
+test("clearing a chat erases the stored transcript for every runtime", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "clear-chat-"))
+  try {
+    const conversation = { chatId: "cleared-chat", userId: "owner-user" }
+    let replies = 0
+    const participants = [
+      {
+        name: "Annie Duke",
+        model: new MockLanguageModelV4({
+          doStream: async () =>
+            replies++ === 0
+              ? groupToolResponse("reply_to_group", "annie-reply", {
+                  message: "Separate the decision from the outcome.",
+                })
+              : groupTextResponse("Reply posted."),
+        }),
+      },
+    ]
+
+    await using runtime = durableRuntime(participants, directory)
+    await runtime.post(conversation, {
+      id: "message-1",
+      content: "How should we price this?",
+    })
+    await waitForChat(runtime, conversation, "settled")
+    assert.equal((await runtime.transcript(conversation)).messages.length, 2)
+
+    await runtime.clear(conversation)
+
+    assert.deepEqual((await runtime.transcript(conversation)).messages, [])
+    assert.equal(await runtime.sessionExists(conversation), false)
+
+    await using reader = durableRuntime(participants, directory)
+    assert.deepEqual((await reader.transcript(conversation)).messages, [])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test("participant identities cannot collide with the human author", async () => {

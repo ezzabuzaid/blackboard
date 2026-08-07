@@ -12,6 +12,7 @@ export interface GroupRecord {
     sentAt: string
   } | null
   unreadCount: number
+  pinned: boolean
 }
 
 interface GroupRow {
@@ -23,6 +24,7 @@ interface GroupRow {
   last_message_content: string | null
   last_message_at: number | null
   unread_count: number
+  pinned_at: number | null
 }
 
 export class GroupInputError extends Error {
@@ -50,6 +52,8 @@ export class GroupStore implements Disposable {
         last_message_content TEXT,
         last_message_at INTEGER,
         unread_count INTEGER NOT NULL DEFAULT 0,
+        pinned_at INTEGER,
+        archived_at INTEGER,
         PRIMARY KEY (user_id, id)
       ) STRICT
     `)
@@ -65,6 +69,8 @@ export class GroupStore implements Disposable {
       ["last_message_content", "TEXT"],
       ["last_message_at", "INTEGER"],
       ["unread_count", "INTEGER NOT NULL DEFAULT 0"],
+      ["pinned_at", "INTEGER"],
+      ["archived_at", "INTEGER"],
     ] as const) {
       if (!columns.has(name)) {
         this.#database.exec(
@@ -103,6 +109,7 @@ export class GroupStore implements Disposable {
       createdAt: new Date(createdAt).toISOString(),
       lastMessage: null,
       unreadCount: 0,
+      pinned: false,
     }
     this.#database
       .prepare(
@@ -116,8 +123,7 @@ export class GroupStore implements Disposable {
   get(userId: string, id: string): GroupRecord | null {
     const row = this.#database
       .prepare(
-        `SELECT id, name, agent_ids, created_at, last_message_author,
-                last_message_content, last_message_at, unread_count
+        `SELECT ${groupColumns}
          FROM groups
          WHERE user_id = ? AND id = ?`
       )
@@ -126,13 +132,23 @@ export class GroupStore implements Disposable {
     return row ? groupRecord(row) : null
   }
 
-  list(userId: string): GroupRecord[] {
+  ownerOf(id: string): string | null {
+    const row = this.#database
+      .prepare(`SELECT user_id FROM groups WHERE id = ? LIMIT 1`)
+      .get(id) as { user_id: string } | undefined
+
+    return row?.user_id ?? null
+  }
+
+  list(
+    userId: string,
+    options: { includeArchived?: boolean } = {}
+  ): GroupRecord[] {
     const rows = this.#database
       .prepare(
-        `SELECT id, name, agent_ids, created_at, last_message_author,
-                last_message_content, last_message_at, unread_count
+        `SELECT ${groupColumns}
          FROM groups
-         WHERE user_id = ?
+         WHERE user_id = ?${options.includeArchived ? "" : " AND archived_at IS NULL"}
          ORDER BY COALESCE(last_message_at, created_at) DESC, rowid DESC`
       )
       .all(userId) as unknown as GroupRow[]
@@ -170,10 +186,50 @@ export class GroupStore implements Disposable {
     )
   }
 
+  setPinned(userId: string, id: string, pinned: boolean) {
+    return this.#setTimestamp("pinned_at", userId, id, pinned)
+  }
+
+  setArchived(userId: string, id: string, archived: boolean) {
+    return this.#setTimestamp("archived_at", userId, id, archived)
+  }
+
+  clearMessages(userId: string, id: string) {
+    return (
+      this.#database
+        .prepare(
+          `UPDATE groups
+           SET last_message_author = NULL, last_message_content = NULL,
+               last_message_at = NULL, unread_count = 0
+           WHERE user_id = ? AND id = ?`
+        )
+        .run(userId, id).changes > 0
+    )
+  }
+
+  #setTimestamp(
+    column: "pinned_at" | "archived_at",
+    userId: string,
+    id: string,
+    set: boolean
+  ) {
+    return (
+      this.#database
+        .prepare(
+          `UPDATE groups SET ${column} = ? WHERE user_id = ? AND id = ?`
+        )
+        .run(set ? Date.now() : null, userId, id).changes > 0
+    )
+  }
+
   [Symbol.dispose]() {
     this.#database.close()
   }
 }
+
+const groupColumns = `id, name, agent_ids, created_at, last_message_author,
+                      last_message_content, last_message_at, unread_count,
+                      pinned_at`
 
 function groupRecord(row: GroupRow): GroupRecord {
   return {
@@ -192,5 +248,6 @@ function groupRecord(row: GroupRow): GroupRecord {
             sentAt: new Date(row.last_message_at).toISOString(),
           },
     unreadCount: row.unread_count,
+    pinned: row.pinned_at !== null,
   }
 }

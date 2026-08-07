@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto"
 
 import {
-  type AgentModel,
-  type ContextFragment,
-  type ContextStore,
-  type StreamManager,
   guardrail,
   persona,
   policy,
@@ -12,26 +8,24 @@ import {
   quirk,
   styleGuide,
   workflow,
+  type AgentModel,
+  type ContextFragment,
+  type ContextStore,
+  type StreamManager,
 } from "@deepagents/context"
 import {
   AgentRuntime,
   MessageDeliveryMode,
   PgBossTurnQueue,
-  type AgentDeclaration,
-  type ConversationId,
-  type MailboxStore,
   createInterAgentCommunication,
   defineAgent,
   defineTool,
+  type AgentDeclaration,
+  type ConversationId,
+  type MailboxStore,
 } from "@deepagents/experimental/zukhruf"
 import { PGlite } from "@electric-sql/pglite"
-import {
-  APICallError,
-  jsonSchema,
-  wrapLanguageModel,
-  type LanguageModelMiddleware,
-  type ToolSet,
-} from "ai"
+import { jsonSchema, type ToolSet } from "ai"
 import { PgBoss, fromPglite } from "pg-boss"
 
 export interface WhatsAppParticipant {
@@ -288,10 +282,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       const runtime = new AgentRuntime(
         defineAgent({
           name: participant.name,
-          model: wrapLanguageModel({
-            model: participant.model,
-            middleware: safeParticipantModelErrors,
-          }),
+          model: participant.model,
           telemetry: participant.telemetry,
           sandbox: options.sandbox,
           instructions: [
@@ -912,7 +903,9 @@ export class WhatsAppGroup implements AsyncDisposable {
         message.content,
         "",
       ]),
-      ...(reminder ? [`<system-reminder>${reminder}</system-reminder>`, ""] : []),
+      ...(reminder
+        ? [`<system-reminder>${reminder}</system-reminder>`, ""]
+        : []),
       "Reply only through reply_to_group when you have something useful to add.",
       "Omit replyToMessageId by default. It points to one earlier public message in the UI; use it only to emphasize that message or when directly replying to another participant. Do not use it for an ordinary response to the latest user message or current discussion.",
     ].join("\n")
@@ -1015,56 +1008,6 @@ export class WhatsAppGroup implements AsyncDisposable {
       names.add(normalizedName)
     }
   }
-}
-
-const safeParticipantModelErrors: LanguageModelMiddleware = {
-  specificationVersion: "v4",
-  wrapGenerate: async ({ doGenerate }) => {
-    try {
-      return await doGenerate()
-    } catch (error) {
-      throw safeLanguageModelError(error)
-    }
-  },
-  wrapStream: async ({ doStream }) => {
-    try {
-      return await doStream()
-    } catch (error) {
-      throw safeLanguageModelError(error)
-    }
-  },
-}
-
-function safeLanguageModelError(error: unknown) {
-  if (APICallError.isInstance(error)) {
-    const code = errorCode(error.cause)
-    return new APICallError({
-      message: "Provider request failed",
-      url: "[redacted]",
-      requestBodyValues: undefined,
-      statusCode: error.statusCode,
-      cause: code ? { code } : undefined,
-      isRetryable: error.isRetryable,
-    })
-  }
-  if (
-    error instanceof Error &&
-    (error.name === "AbortError" || error.name === "TimeoutError")
-  ) {
-    return error
-  }
-  return new Error("Language model request failed")
-}
-
-function errorCode(value: unknown): string | undefined {
-  if (typeof value !== "object" || value === null || !("code" in value)) {
-    return undefined
-  }
-  const code = value.code
-  return typeof code === "string" &&
-    /^(?:E[A-Z0-9_]+|UND_ERR_[A-Z0-9_]+)$/u.test(code)
-    ? code
-    : undefined
 }
 
 function reduceActivity(

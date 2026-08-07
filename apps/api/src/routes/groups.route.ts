@@ -17,6 +17,7 @@ const authenticate: MiddlewareHandler<AppEnv> = async (context, next) => {
   await next()
 }
 
+
 export default function (router: Hono<AppEnv>) {
   router.use("/groups", authenticate)
   router.use("/groups/*", authenticate)
@@ -32,14 +33,25 @@ export default function (router: Hono<AppEnv>) {
     (context) => {
       const groups = context.var.dependencies
         .listGroups(context.get("userId"))
-        .map(({ id, name, agentIds, createdAt, lastMessage, unreadCount }) => ({
-          id,
-          name,
-          agentIds,
-          createdAt,
-          lastMessage,
-          unreadCount,
-        }))
+        .map(
+          ({
+            id,
+            name,
+            agentIds,
+            createdAt,
+            lastMessage,
+            unreadCount,
+            pinned,
+          }) => ({
+            id,
+            name,
+            agentIds,
+            createdAt,
+            lastMessage,
+            unreadCount,
+            pinned,
+          })
+        )
       return context.json({ groups })
     }
   )
@@ -125,6 +137,185 @@ export default function (router: Hono<AppEnv>) {
         }
         throw error
       }
+    }
+  )
+
+  /**
+   * @openapi getGroupShare
+   * @tags groups
+   * @description Gets the active share link for the authenticated user's group.
+   */
+  router.get(
+    "/groups/:groupId/share",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    (context) => {
+      const userId = context.get("userId")
+      const { groupId } = context.var.input
+      if (!context.var.dependencies.getGroup(userId, groupId)) {
+        return context.json({ error: "Group not found." }, 404)
+      }
+
+      return context.json({
+        share: context.var.dependencies.shares.active(userId, groupId),
+      })
+    }
+  )
+
+  /**
+   * @openapi createGroupShare
+   * @tags groups
+   * @description Creates a share link, replacing any existing one.
+   */
+  router.post(
+    "/groups/:groupId/share",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    (context) => {
+      const userId = context.get("userId")
+      const { groupId } = context.var.input
+      if (!context.var.dependencies.getGroup(userId, groupId)) {
+        return context.json({ error: "Group not found." }, 404)
+      }
+
+      return context.json(
+        context.var.dependencies.shares.create(userId, groupId),
+        201
+      )
+    }
+  )
+
+  /**
+   * @openapi revokeGroupShare
+   * @tags groups
+   * @description Revokes the active share link for a group.
+   */
+  router.delete(
+    "/groups/:groupId/share",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    (context) => {
+      const userId = context.get("userId")
+      const { groupId } = context.var.input
+      if (!context.var.dependencies.getGroup(userId, groupId)) {
+        return context.json({ error: "Group not found." }, 404)
+      }
+
+      context.var.dependencies.shares.revoke(userId, groupId)
+      return context.json({ revoked: true })
+    }
+  )
+
+  /**
+   * @openapi pinGroup
+   * @tags groups
+   * @description Pins a group to the top of the list.
+   */
+  router.post(
+    "/groups/:groupId/pin",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    (context) => {
+      const userId = context.get("userId")
+      const { groupId } = context.var.input
+      if (!context.var.dependencies.getGroup(userId, groupId)) {
+        return context.json({ error: "Group not found." }, 404)
+      }
+
+      context.var.dependencies.setGroupPinned(userId, groupId, true)
+      return context.json({ pinned: true })
+    }
+  )
+
+  /**
+   * @openapi unpinGroup
+   * @tags groups
+   * @description Removes a group's pin.
+   */
+  router.delete(
+    "/groups/:groupId/pin",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    (context) => {
+      const userId = context.get("userId")
+      const { groupId } = context.var.input
+      if (!context.var.dependencies.getGroup(userId, groupId)) {
+        return context.json({ error: "Group not found." }, 404)
+      }
+
+      context.var.dependencies.setGroupPinned(userId, groupId, false)
+      return context.json({ pinned: false })
+    }
+  )
+
+  /**
+   * @openapi archiveGroup
+   * @tags groups
+   * @description Archives a group, hiding it from the group list.
+   */
+  router.post(
+    "/groups/:groupId/archive",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    (context) => {
+      const userId = context.get("userId")
+      const { groupId } = context.var.input
+      if (!context.var.dependencies.getGroup(userId, groupId)) {
+        return context.json({ error: "Group not found." }, 404)
+      }
+
+      context.var.dependencies.setGroupArchived(userId, groupId, true)
+      return context.json({ archived: true })
+    }
+  )
+
+  /**
+   * @openapi unarchiveGroup
+   * @tags groups
+   * @description Restores an archived group to the group list.
+   */
+  router.delete(
+    "/groups/:groupId/archive",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    (context) => {
+      const userId = context.get("userId")
+      const { groupId } = context.var.input
+      if (!context.var.dependencies.getGroup(userId, groupId)) {
+        return context.json({ error: "Group not found." }, 404)
+      }
+
+      context.var.dependencies.setGroupArchived(userId, groupId, false)
+      return context.json({ archived: false })
+    }
+  )
+
+  /**
+   * @openapi clearGroupChat
+   * @tags groups
+   * @description Permanently deletes a group's messages, agent memory, and files.
+   */
+  router.post(
+    "/groups/:groupId/clear",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    async (context) => {
+      const userId = context.get("userId")
+      const { groupId } = context.var.input
+      if (!context.var.dependencies.getGroup(userId, groupId)) {
+        return context.json({ error: "Group not found." }, 404)
+      }
+
+      await context.var.dependencies.clearGroupChat(userId, groupId)
+      return context.json({ cleared: true })
     }
   )
 

@@ -16,6 +16,7 @@ export interface GroupSummary {
     sentAt: string
   } | null
   unreadCount: number
+  pinned: boolean
 }
 
 export async function loader(args: LoaderFunctionArgs) {
@@ -103,7 +104,8 @@ function isGroupSummary(value: unknown): value is GroupSummary {
         typeof value.lastMessage.sentAt === "string" &&
         !Number.isNaN(Date.parse(value.lastMessage.sentAt)))) &&
     Number.isSafeInteger(value.unreadCount) &&
-    Number(value.unreadCount) >= 0
+    Number(value.unreadCount) >= 0 &&
+    typeof value.pinned === "boolean"
   )
 }
 

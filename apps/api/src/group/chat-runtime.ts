@@ -29,6 +29,7 @@ const CHAT_EVENT_TYPE = "data-whatsapp-chat-event"
 interface ChatSession {
   group: WhatsAppGroup
   participants: WhatsAppParticipant[]
+  resources: AsyncDisposableStack
 }
 
 export class WhatsAppChatRuntime implements AsyncDisposable {
@@ -127,9 +128,51 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     return group.snapshot()
   }
 
+  async transcript(conversation: ConversationId) {
+    const chunks = await this.#streamStore.getChunks(streamId(conversation))
+    const messages: WhatsAppMessage[] = []
+    for (const { seq, data, createdAt } of chunks) {
+      const event = chatEvent(data, seq, createdAt)
+      if (event.type === "message") messages.push(event.message)
+    }
+    const participants = (await this.#loadChatParticipants(conversation)).map(
+      ({ name }) => ({ name })
+    )
+    return { messages, participants }
+  }
+
   async stop(conversation: ConversationId) {
     const { group } = await this.#chat(conversation)
     return group.stop()
+  }
+
+  /**
+   * Disposal must precede deletion: tearing the group down persists a final
+   * stopped event, which fails the stream's foreign key once the row is gone.
+   */
+  async clear(conversation: ConversationId) {
+    const key = conversation.chatId
+    const pending = this.#chats.get(key)
+    this.#chats.delete(key)
+    const session = await pending?.catch(() => undefined)
+    await session?.resources.disposeAsync()
+
+    await this.#streamStore.deleteStream(streamId(conversation))
+
+    const { userId } = conversation
+    const prefix = `${key}:participant:`
+    const roots = (await this.#store.listChats({ userId })).filter(({ id }) =>
+      id.startsWith(prefix)
+    )
+    for (const root of roots) {
+      const tree = await this.#store.listChats({
+        metadata: { key: "zukhrufTreeId", value: root.id },
+      })
+      for (const id of new Set([...tree.map(({ id }) => id), root.id])) {
+        await this.#store.deleteChat(id, { userId })
+      }
+      await this.#mailboxStore.drain({ chatId: root.id, userId })
+    }
   }
 
   async traces(conversation: ConversationId, participantName: string) {
@@ -148,7 +191,14 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   }
 
   async [Symbol.asyncDispose]() {
-    await Promise.allSettled(this.#chats.values())
+    const sessions = await Promise.allSettled(this.#chats.values())
+    await Promise.allSettled(
+      sessions.map((session) =>
+        session.status === "fulfilled"
+          ? session.value.resources.disposeAsync()
+          : undefined
+      )
+    )
     await this.#resources.disposeAsync()
   }
 
@@ -159,7 +209,9 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
 
     const chat = this.#createChat(conversation)
     this.#chats.set(key, chat)
-    void chat.catch(() => this.#chats.delete(key))
+    void chat.catch(() => {
+      if (this.#chats.get(key) === chat) this.#chats.delete(key)
+    })
     return chat
   }
 
@@ -213,9 +265,10 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
           },
         ]),
     })
-    this.#resources.use(group)
+    const resources = new AsyncDisposableStack()
+    resources.use(group)
     await group.recoverInterrupted()
-    return { group, participants }
+    return { group, participants, resources }
   }
 
   async #loadChatParticipants(conversation: ConversationId) {
