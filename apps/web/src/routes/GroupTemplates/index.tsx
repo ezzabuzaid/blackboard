@@ -2,6 +2,10 @@ import {
   Avatar,
   AvatarFallback,
   AvatarGroup,
+  Button,
+  FieldError,
+  Input,
+  ScrollArea,
   Sheet,
   SheetContent,
   SheetDescription,
@@ -9,16 +13,8 @@ import {
   SheetTitle,
   cn,
 } from "@stdlib/shadcn"
-import {
-  ArrowLeft,
-  ArrowRight,
-  Check,
-  MessageCircle,
-  Plus,
-  Search,
-} from "lucide-react"
-import { motion, useReducedMotion } from "motion/react"
-import { useState } from "react"
+import { ArrowLeft, ArrowRight, Check, Plus, Search } from "lucide-react"
+import { useId, useRef, useState } from "react"
 import {
   Link,
   useLoaderData,
@@ -89,7 +85,6 @@ export default function GroupTemplates() {
   const [startError, setStartError] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
   const navigate = useNavigate()
-  const reduceMotion = useReducedMotion()
   const selectedAgents = selectedAgentIds.flatMap((id) => {
     const agent = catalogAgents.find((candidate) => candidate.id === id)
     return agent
@@ -157,50 +152,29 @@ export default function GroupTemplates() {
   }
 
   return (
-    <main className="min-h-svh bg-[#03130c] text-[#f5f3ed] selection:bg-[#eef771] selection:text-[#03130c]">
-      <header className="sticky top-0 z-30 border-b border-white/10 bg-[#03130c]/95 backdrop-blur">
-        <div className="mx-auto flex h-16 w-full max-w-[1440px] items-center justify-between px-5 sm:px-8 lg:px-12">
-          <Link
-            to="/"
-            className="flex items-center gap-2.5 text-sm font-semibold tracking-[0.14em] uppercase focus-visible:rounded-md focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#eef771]"
-          >
-            <MessageCircle
-              aria-hidden="true"
-              className="size-5 text-[#eef771]"
-            />
-            Baseera
-          </Link>
-          <Link
-            to="/"
-            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm font-medium text-[#b8cdc3] transition-colors hover:text-white focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#eef771]"
-          >
-            <ArrowLeft aria-hidden="true" className="size-4" />
-            Back to group
-          </Link>
-        </div>
-      </header>
-
-      <div className="mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-[1440px]">
+    <main className="flex h-svh flex-col bg-background">
+      <div className="flex min-h-0 w-full flex-1">
         <section
           aria-labelledby="templates-heading"
-          className="min-w-0 flex-1 px-5 pt-9 pb-32 sm:px-8 lg:border-r lg:border-[#173429] lg:px-10 lg:pt-11 lg:pb-14"
+          className="min-w-0 flex-1 overflow-y-auto px-4 pt-6 pb-32 sm:px-6 md:px-8 md:pb-12"
         >
-          <motion.div
-            className="mb-8"
-            initial={reduceMotion ? false : { opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: reduceMotion ? 0 : 0.3 }}
-          >
+          <div className="mb-8 animate-in duration-300 ease-out fade-in slide-in-from-bottom-2">
+            <Button variant="ghost" size="sm" className="-ms-2 mb-3" asChild>
+              <Link to="/">
+                <ArrowLeft aria-hidden="true" />
+                Back to group
+              </Link>
+            </Button>
             <h1
               id="templates-heading"
-              className="text-3xl leading-none font-medium tracking-[-0.04em] sm:text-4xl"
+              className="text-2xl font-semibold tracking-tight sm:text-3xl"
             >
               Build your group.
             </h1>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-[#8ca79a]">
+            <p className="mt-2 max-w-xl text-sm text-muted-foreground">
               Choose a ready-made team or select the exact characters you want.
             </p>
-          </motion.div>
+          </div>
 
           <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-1">
             {filters.map((filter) => {
@@ -212,52 +186,52 @@ export default function GroupTemplates() {
                   type="button"
                   onClick={() => setActiveFilter(filter.id)}
                   className={cn(
-                    "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#eef771]",
+                    "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary",
                     active
-                      ? "bg-[#d8ede2] text-[#03130c]"
-                      : "text-[#9db3a8] hover:bg-[#102a1f] hover:text-white"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
                 >
                   {filter.label}
                 </button>
               )
             })}
-            <span className="ml-auto hidden shrink-0 text-xs text-[#6f8b7e] sm:block">
+            <span className="ms-auto hidden shrink-0 text-xs text-muted-foreground sm:block">
               {visibleTemplates.length}{" "}
               {visibleTemplates.length === 1 ? "group" : "groups"}
             </span>
           </div>
 
           <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
-            {visibleTemplates.map((template, index) => (
+            {visibleTemplates.map((template) => (
               <TemplateCard
                 key={template.id}
                 template={template}
-                index={index}
                 selected={selectedId === template.id}
-                reduceMotion={!!reduceMotion}
                 onSelect={() => selectTemplate(template.id)}
               />
             ))}
           </div>
         </section>
 
-        <aside className="hidden w-[340px] shrink-0 lg:block">
-          <div className="sticky top-16 h-[calc(100svh-4rem)] overflow-y-auto bg-[#071a12] px-7 py-8">
-            <SelectedGroupPanel
-              template={selected}
-              starting={startingId === selected?.id}
-              startingFactory={startingId === "factory"}
-              error={startError}
-              catalogAgents={catalogAgents}
-              selectedAgentIds={selectedAgentIds}
-              customName={customName}
-              onCustomNameChange={setCustomName}
-              onToggleAgent={toggleAgent}
-              onStart={startSelectedGroup}
-              onStartFactory={startFactory}
-            />
-          </div>
+        <aside className="hidden w-[clamp(18rem,22vw,22rem)] shrink-0 flex-col border-s bg-card md:flex">
+          <ScrollArea className="min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:h-full">
+            <div className="flex min-h-full flex-col px-6 pt-6 pb-6">
+              <SelectedGroupPanel
+                template={selected}
+                starting={startingId === selected?.id}
+                startingFactory={startingId === "factory"}
+                error={startError}
+                catalogAgents={catalogAgents}
+                selectedAgentIds={selectedAgentIds}
+                customName={customName}
+                onCustomNameChange={setCustomName}
+                onToggleAgent={toggleAgent}
+                onStart={startSelectedGroup}
+                onStartFactory={startFactory}
+              />
+            </div>
+          </ScrollArea>
         </aside>
       </div>
 
@@ -265,19 +239,19 @@ export default function GroupTemplates() {
         <button
           type="button"
           onClick={() => setReviewOpen(true)}
-          className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-3 border-t border-[#29483b] bg-[#d8ede2] px-5 py-3 text-left text-[#03130c] lg:hidden"
+          className="fixed inset-x-0 bottom-0 z-30 flex animate-in items-center gap-3 border-t bg-card px-4 py-3 text-left transition-colors duration-200 ease-out slide-in-from-bottom focus-visible:outline-2 focus-visible:outline-primary md:hidden"
           style={{
             paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)",
           }}
         >
-          <AgentAvatarGroup
-            agents={selected.agents}
-            ringClassName="ring-[#d8ede2]!"
-          />
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+          <AgentAvatarGroup agents={selected.agents} />
+          <span
+            dir="auto"
+            className="min-w-0 flex-1 truncate text-sm font-semibold"
+          >
             {selected.name}
           </span>
-          <span className="flex shrink-0 items-center gap-1 text-xs font-semibold">
+          <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-primary">
             Review
             <ArrowRight aria-hidden="true" className="size-4" />
           </span>
@@ -287,7 +261,7 @@ export default function GroupTemplates() {
       <Sheet open={reviewOpen} onOpenChange={setReviewOpen}>
         <SheetContent
           side="bottom"
-          className="max-h-[86svh] overflow-y-auto rounded-t-2xl border-[#29483b] bg-[#071a12] px-6 py-7 text-[#f5f3ed]"
+          className="max-h-[86svh] overflow-y-auto rounded-t-2xl px-4 py-6"
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Selected group</SheetTitle>
@@ -316,43 +290,33 @@ export default function GroupTemplates() {
 
 function TemplateCard({
   template,
-  index,
   selected,
-  reduceMotion,
   onSelect,
 }: {
   template: GroupTemplate
-  index: number
   selected: boolean
-  reduceMotion: boolean
   onSelect(): void
 }) {
   return (
-    <motion.button
+    <button
       type="button"
       aria-pressed={selected}
       aria-label={`${template.name} — ${selected ? "selected" : "select"}`}
       onClick={onSelect}
       className={cn(
-        "group relative flex h-full flex-col overflow-hidden rounded-[10px] border bg-[#091f16] text-left transition-[border-color,background-color] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#eef771]",
+        "group relative flex h-full animate-in flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors duration-200 ease-out fade-in slide-in-from-bottom-2 focus-visible:outline-2 focus-visible:outline-primary",
         selected
-          ? "border-[#eef771] bg-[#0c271b]"
-          : "border-[#173429] hover:border-[#4d735f]"
+          ? "border-primary/30 bg-primary/5"
+          : "border-border hover:border-ring"
       )}
-      initial={reduceMotion ? false : { opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{
-        duration: reduceMotion ? 0 : 0.28,
-        delay: reduceMotion ? 0 : index * 0.05,
-      }}
     >
       <span
         aria-hidden="true"
         className={cn(
           "absolute top-3 right-3 z-10 grid size-5 place-items-center rounded-full border transition-colors",
           selected
-            ? "border-[#eef771] bg-[#eef771] text-[#03130c]"
-            : "border-[#5b776a] bg-[#091f16]/70"
+            ? "border-primary bg-primary text-primary-foreground"
+            : "border-border bg-background/70"
         )}
       >
         {selected && <Check className="size-3" />}
@@ -360,21 +324,24 @@ function TemplateCard({
       <TemplateArtwork id={template.id} source={template.source} />
 
       <div className="flex flex-1 flex-col p-4">
-        <h2 className="text-base font-semibold tracking-[-0.02em] text-[#d8ede2]">
+        <h2
+          dir="auto"
+          className="text-base font-semibold tracking-tight [unicode-bidi:plaintext]"
+        >
           {template.name}
         </h2>
-        <span className="mt-1 text-[10px] font-semibold tracking-[0.14em] text-[#789487] uppercase">
+        <span className="mt-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
           {template.source === "marketplace"
             ? `Marketplace · ${template.category}`
             : template.category}
         </span>
-        <p className="mt-2 text-xs leading-[1.55] text-[#8ca79a]">
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
           {template.outcome}
         </p>
 
         <div className="mt-auto flex items-center gap-2 pt-4">
           <AgentAvatarGroup agents={template.agents} />
-          <span className="text-[11px] text-[#789487]">
+          <span className="text-[11px] text-muted-foreground">
             {template.custom && template.agents.length === 0
               ? "Choose characters"
               : `${template.agents.length} ${
@@ -383,7 +350,7 @@ function TemplateCard({
           </span>
         </div>
       </div>
-    </motion.button>
+    </button>
   )
 }
 
@@ -430,57 +397,46 @@ function SelectedGroupPanel({
   }
 
   return (
-    <div className="flex min-h-full flex-col">
-      <p className="text-[10px] font-semibold tracking-[0.16em] text-[#789487] uppercase">
-        Selected group
-      </p>
-
+    <div className="flex min-h-full flex-1 flex-col">
       {!template ? (
         <div className="grid flex-1 place-items-center py-16 text-center">
           <div>
-            <span className="mx-auto grid size-10 place-items-center rounded-full border border-dashed border-[#4d735f] text-[#789487]">
+            <span className="mx-auto grid size-10 place-items-center rounded-full border border-dashed text-muted-foreground">
               <Plus aria-hidden="true" className="size-4" />
             </span>
-            <p className="mt-4 text-sm font-medium text-[#d8ede2]">
-              Pick a group
-            </p>
-            <p className="mt-2 max-w-48 text-xs leading-5 text-[#789487]">
+            <p className="mt-4 text-sm font-medium">Pick a group</p>
+            <p className="mt-2 max-w-48 text-xs leading-5 text-muted-foreground">
               Select a template to review its agents and responsibilities.
             </p>
           </div>
         </div>
       ) : (
         <>
-          <div className="mt-6">
-            <span className="text-[10px] font-semibold tracking-[0.14em] text-[#789487] uppercase">
-              {template.source === "marketplace"
-                ? `Marketplace · ${template.category}`
-                : template.category}
-            </span>
-            <h2 className="mt-2 text-2xl font-medium tracking-[-0.035em] text-[#d8ede2]">
+          <div>
+            <h2
+              dir="auto"
+              className="text-xl font-semibold tracking-tight [unicode-bidi:plaintext]"
+            >
               {template.name}
             </h2>
-            <p className="mt-3 text-sm leading-6 text-[#8ca79a]">
+            <p className="mt-3 text-sm text-muted-foreground">
               {template.outcome}
             </p>
           </div>
 
           <div className="mt-8 flex-1">
-            <p className="mb-1 text-[10px] font-semibold tracking-[0.14em] text-[#789487] uppercase">
+            <p className="mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
               {template.agents.length}{" "}
               {template.agents.length === 1 ? "agent" : "agents"}
             </p>
-            {template.agents.map((agent, index) => (
-              <div
-                key={agent.name}
-                className="flex gap-3 border-t border-[#173429] py-4"
-              >
-                <AgentAvatar agent={agent} index={index} />
+            {template.agents.map((agent) => (
+              <div key={agent.name} className="flex gap-3 border-t py-4">
+                <AgentAvatar agent={agent} />
                 <div className="min-w-0">
-                  <h3 className="text-sm font-semibold text-[#d8ede2]">
+                  <h3 dir="auto" className="text-sm font-semibold">
                     {agent.name}
                   </h3>
-                  <p className="mt-1 text-xs leading-5 text-[#789487]">
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
                     {agent.responsibility}
                   </p>
                 </div>
@@ -488,17 +444,21 @@ function SelectedGroupPanel({
             ))}
           </div>
 
-          <button
+          <Button
             type="button"
+            size="lg"
+            className="mt-6 w-full"
             onClick={onStart}
             disabled={starting}
-            className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#eef771] px-4 py-3 text-sm font-semibold text-[#03130c] transition-colors hover:bg-[#f8fba8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#eef771]"
           >
             {starting ? "Starting…" : "Start with this group"}
-            {!starting && <ArrowRight aria-hidden="true" className="size-4" />}
-          </button>
+            {!starting && <ArrowRight aria-hidden="true" />}
+          </Button>
           {error && (
-            <p role="alert" className="mt-3 text-xs text-[#ffb4a8]">
+            <p
+              role="alert"
+              className="mt-3 animate-in text-xs text-destructive duration-150 ease-out fade-in slide-in-from-top-1"
+            >
               {error}
             </p>
           )}
@@ -542,55 +502,89 @@ function CustomGroupPanel({
       )
     : agents
   const selectionFull = selectedAgentIds.length >= 8
+  const nameInputRef = useRef<HTMLInputElement>(null)
+  const nameErrorId = useId()
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [agentsError, setAgentsError] = useState<string | null>(null)
+
+  function startGroup() {
+    const missingName = !name.trim()
+    const missingAgents = selectedAgentIds.length === 0
+    setNameError(missingName ? "Name your group to continue." : null)
+    setAgentsError(missingAgents ? "Pick at least one character." : null)
+    if (missingName) {
+      nameInputRef.current?.focus({ preventScroll: true })
+      nameInputRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+          ? "auto"
+          : "smooth",
+        block: "center",
+      })
+    }
+    if (missingName || missingAgents) return
+    onStart()
+  }
 
   return (
-    <div className="flex min-h-full flex-col">
-      <p className="text-[10px] font-semibold tracking-[0.16em] text-[#789487] uppercase">
-        Build your own
-      </p>
-      <h2 className="mt-5 text-2xl font-medium tracking-[-0.035em] text-[#d8ede2]">
+    <div className="flex min-h-full flex-1 flex-col">
+      <h2 className="text-xl font-semibold tracking-tight">
         Choose your characters.
       </h2>
-      <p className="mt-2 text-sm leading-6 text-[#8ca79a]">
+      <p className="mt-2 text-sm text-muted-foreground">
         Select up to eight people for this group.
       </p>
 
-      <label className="mt-6 block text-[10px] font-semibold tracking-[0.14em] text-[#789487] uppercase">
+      <label className="mt-6 block text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
         Group name
-        <input
+        <Input
+          ref={nameInputRef}
+          dir="auto"
+          aria-invalid={nameError ? true : undefined}
+          aria-describedby={nameError ? nameErrorId : undefined}
           value={name}
-          onChange={(event) => onNameChange(event.target.value)}
+          onChange={(event) => {
+            setNameError(null)
+            onNameChange(event.target.value)
+          }}
           maxLength={100}
           placeholder="e.g. Product council"
-          className="mt-2 h-10 w-full rounded-md border border-[#29483b] bg-[#091f16] px-3 text-sm font-medium tracking-normal text-[#d8ede2] normal-case outline-none placeholder:text-[#5b776a] focus:border-[#eef771]"
+          className="mt-2 h-10 border-transparent bg-muted tracking-normal normal-case shadow-none"
         />
       </label>
+      {nameError && (
+        <FieldError
+          id={nameErrorId}
+          className="mt-2 animate-in text-xs duration-150 ease-out fade-in slide-in-from-top-1"
+        >
+          {nameError}
+        </FieldError>
+      )}
 
       <div className="mt-6 flex items-center justify-between">
-        <p className="text-[10px] font-semibold tracking-[0.14em] text-[#789487] uppercase">
+        <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
           Characters
         </p>
-        <span className="text-xs text-[#8ca79a]">
+        <span className="text-xs text-muted-foreground">
           {selectedAgentIds.length}/8 selected
         </span>
       </div>
-      <label className="relative mt-3 block">
-        <span className="sr-only">Search characters</span>
+      <div className="relative mt-3">
         <Search
           aria-hidden="true"
-          className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-[#6f8b7e]"
+          className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
         />
-        <input
+        <Input
           type="search"
+          aria-label="Search characters"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search characters"
-          className="h-10 w-full rounded-md border border-[#29483b] bg-[#091f16] pr-3 pl-9 text-sm text-[#d8ede2] outline-none placeholder:text-[#5b776a] focus:border-[#eef771]"
+          className="h-10 rounded-full border-transparent bg-muted pr-4 pl-10 shadow-none"
         />
-      </label>
+      </div>
 
-      <div className="mt-3 border-y border-[#173429]">
-        {visibleAgents.map((agent, index) => {
+      <div className="mt-3">
+        {visibleAgents.map((agent) => {
           const selected = selectedAgentIds.includes(agent.id)
           return (
             <button
@@ -598,8 +592,11 @@ function CustomGroupPanel({
               type="button"
               aria-pressed={selected}
               disabled={!selected && selectionFull}
-              onClick={() => onToggleAgent(agent.id)}
-              className="flex w-full items-center gap-3 border-b border-[#173429] py-3 text-left transition-colors last:border-b-0 hover:bg-[#102a1f] disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => {
+                setAgentsError(null)
+                onToggleAgent(agent.id)
+              }}
+              className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-accent/70 focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
             >
               <AgentAvatar
                 agent={{
@@ -607,13 +604,12 @@ function CustomGroupPanel({
                   name: agent.name,
                   responsibility: agent.headline,
                 }}
-                index={index}
               />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold text-[#d8ede2]">
+                <span dir="auto" className="block truncate text-sm font-medium">
                   {agent.name}
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-[#789487]">
+                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
                   {agent.category} · {agent.headline}
                 </span>
               </span>
@@ -622,8 +618,8 @@ function CustomGroupPanel({
                 className={cn(
                   "grid size-5 shrink-0 place-items-center rounded-full border",
                   selected
-                    ? "border-[#eef771] bg-[#eef771] text-[#03130c]"
-                    : "border-[#4d735f]"
+                    ? "border-primary bg-primary text-primary-foreground"
+                    : "border-border"
                 )}
               >
                 {selected && <Check className="size-3" />}
@@ -632,38 +628,49 @@ function CustomGroupPanel({
           )
         })}
         {visibleAgents.length === 0 && (
-          <p className="py-8 text-center text-xs text-[#789487]">
+          <p className="py-8 text-center text-sm text-muted-foreground">
             No characters match that search.
           </p>
         )}
       </div>
 
-      <button
+      <Button
         type="button"
-        onClick={onStart}
-        disabled={starting || !name.trim() || selectedAgentIds.length === 0}
-        className="mt-6 flex w-full items-center justify-center gap-2 rounded-lg bg-[#eef771] px-4 py-3 text-sm font-semibold text-[#03130c] transition-colors hover:bg-[#f8fba8] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#eef771] disabled:cursor-not-allowed disabled:opacity-40"
+        size="lg"
+        className="mt-6 w-full"
+        onClick={startGroup}
+        disabled={starting}
       >
         {starting ? "Creating…" : "Create group"}
-        {!starting && <ArrowRight aria-hidden="true" className="size-4" />}
-      </button>
+        {!starting && <ArrowRight aria-hidden="true" />}
+      </Button>
+      {agentsError && (
+        <FieldError className="mt-3 animate-in text-xs duration-150 ease-out fade-in slide-in-from-top-1">
+          {agentsError}
+        </FieldError>
+      )}
 
-      <div className="mt-5 border-t border-[#29483b] pt-5">
-        <p className="text-xs leading-5 text-[#789487]">
+      <div className="mt-5 border-t pt-5">
+        <p className="text-xs leading-5 text-muted-foreground">
           Need a character that is not in the catalog?
         </p>
-        <button
+        <Button
           type="button"
+          variant="link"
+          size="sm"
+          className="mt-2 h-auto p-0"
           onClick={onStartFactory}
           disabled={startingFactory}
-          className="mt-2 text-sm font-semibold text-[#d8ede2] underline decoration-[#4d735f] underline-offset-4 hover:decoration-[#eef771] focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#eef771] disabled:opacity-40"
         >
           {startingFactory ? "Opening Factory…" : "Create one with Factory"}
-        </button>
+        </Button>
       </div>
 
       {error && (
-        <p role="alert" className="mt-3 text-xs text-[#ffb4a8]">
+        <p
+          role="alert"
+          className="mt-3 animate-in text-xs text-destructive duration-150 ease-out fade-in slide-in-from-top-1"
+        >
           {error}
         </p>
       )}
@@ -679,12 +686,12 @@ function TemplateArtwork({
   source: GroupTemplate["source"]
 }) {
   return (
-    <div className="relative h-24 w-full shrink-0 overflow-hidden bg-[#0d271c]">
+    <div className="relative h-24 w-full shrink-0 overflow-hidden bg-muted/60">
       <svg
         aria-hidden="true"
         viewBox="0 0 400 144"
         preserveAspectRatio="none"
-        className="absolute inset-0 size-full text-[#5b776a]/40 transition-colors duration-300 group-hover:text-[#789487]/55"
+        className="absolute inset-0 size-full text-muted-foreground/30 transition-colors duration-300 group-hover:text-muted-foreground/45"
       >
         {id === "customer-discovery" && <DiscoveryArtwork />}
         {(id === "market-intelligence" || source === "marketplace") && (
@@ -695,7 +702,7 @@ function TemplateArtwork({
         {id === "capital-strategy" && <CapitalArtwork />}
         {id === "custom" && <CustomArtwork />}
       </svg>
-      <span className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent via-[#091f16]/60 to-[#091f16]" />
+      <span className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent via-card/60 to-card" />
     </div>
   )
 }
@@ -789,36 +796,17 @@ function CustomArtwork() {
   )
 }
 
-function AgentAvatarGroup({
-  agents,
-  ringClassName,
-}: {
-  agents: readonly GroupAgent[]
-  ringClassName?: string
-}) {
+function AgentAvatarGroup({ agents }: { agents: readonly GroupAgent[] }) {
   return (
     <AvatarGroup aria-label={agents.map(({ name }) => name).join(", ")}>
-      {agents.map((agent, index) => (
-        <AgentAvatar
-          key={agent.name}
-          agent={agent}
-          index={index}
-          ringClassName={ringClassName}
-        />
+      {agents.map((agent) => (
+        <AgentAvatar key={agent.name} agent={agent} />
       ))}
     </AvatarGroup>
   )
 }
 
-function AgentAvatar({
-  agent,
-  index,
-  ringClassName,
-}: {
-  agent: GroupAgent
-  index: number
-  ringClassName?: string
-}) {
+function AgentAvatar({ agent }: { agent: GroupAgent }) {
   const initials = agent.name
     .split(/\s+/u)
     .map((part) => part[0])
@@ -827,19 +815,8 @@ function AgentAvatar({
     .toUpperCase()
 
   return (
-    <Avatar
-      size="sm"
-      title={agent.name}
-      className={cn("border-0 ring-[#091f16]!", ringClassName)}
-    >
-      <AvatarFallback
-        className={cn(
-          "font-semibold",
-          index % 2 === 0
-            ? "bg-[#dce7c4] text-[#123b28]"
-            : "bg-[#9fc9b4] text-[#0b2a1c]"
-        )}
-      >
+    <Avatar size="sm" title={agent.name} className="bg-background">
+      <AvatarFallback className="bg-muted font-medium text-foreground uppercase">
         {initials}
       </AvatarFallback>
     </Avatar>
