@@ -1,0 +1,12 @@
+{
+  "scope": null,
+  "country": null,
+  "baseCurrency": null,
+  "amountPrecision": null,
+  "owners": [],
+  "dependents": [],
+  "goals": [],
+  "riskTolerance": null,
+  "liquidityNeeds": [],
+  "updatedAt": null
+}

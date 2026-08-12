@@ -134,5 +134,29 @@
         "responsibility": "Tests technical founders, product judgment, and global ambition from MENA."
       }
     ]
+  },
+  {
+    "id": "personal-wealth",
+    "name": "Personal Wealth",
+    "category": "Finance",
+    "outcome": "Understand everything you own and owe, how your wealth changes, and which decisions or risks need attention.",
+    "agents": [
+      {
+        "agentId": "net-worth-keeper",
+        "responsibility": "Maintains the canonical wealth record and confirmed net worth snapshots."
+      },
+      {
+        "agentId": "investment-analyst",
+        "responsibility": "Researches market investments with sourced, dated valuations."
+      },
+      {
+        "agentId": "real-assets-analyst",
+        "responsibility": "Evaluates property, vehicles, businesses, and other real assets."
+      },
+      {
+        "agentId": "wealth-risk-planner",
+        "responsibility": "Finds liquidity, debt, concentration, currency, and downside risks."
+      }
+    ]
   }
 ]
