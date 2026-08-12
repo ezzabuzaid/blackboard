@@ -327,7 +327,7 @@ test("passkey registration requires only a name", async () => {
 test("participant defaults use the configured OpenRouter key", () => {
   const defaults = createParticipantDefaults({ apiKey: "openrouter-key-1" })
   assert.equal(defaults.model.provider, "openrouter")
-  assert.equal(defaults.model.modelId, "deepseek/deepseek-v4-flash-0731")
+  assert.equal(defaults.model.modelId, "~deepseek/deepseek-v4-flash-latest")
   assert.equal(defaults.tools.web_search?.type, "provider")
 })
 
