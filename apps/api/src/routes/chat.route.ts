@@ -179,7 +179,7 @@ export default function (router: Hono<AppEnv>) {
   router.post(
     "/chat/:chatId/messages",
     bodyLimit({
-      maxSize: 10 * 1024,
+      maxSize: 20 * 1024,
       onError: (context) =>
         context.json({ error: "Chat message is too large." }, 413),
     }),
@@ -198,9 +198,16 @@ export default function (router: Hono<AppEnv>) {
         select: payload.body.replyToMessageId,
         against: z.string().optional(),
       },
+      annotations: {
+        select: payload.body.annotations,
+        against: z
+          .array(z.object({ messageId: z.string(), excerpt: z.string() }))
+          .optional(),
+      },
     })),
     async (context) => {
-      const { chatId, id, content, replyToMessageId } = context.var.input
+      const { chatId, id, content, replyToMessageId, annotations } =
+        context.var.input
       const conversation = conversationFrom(context.get("userId"), chatId)
       if (
         !conversation ||
@@ -209,7 +216,16 @@ export default function (router: Hono<AppEnv>) {
         !content.trim() ||
         content.length > 8_000 ||
         (replyToMessageId !== undefined &&
-          (!replyToMessageId.trim() || replyToMessageId.length > 200))
+          (!replyToMessageId.trim() || replyToMessageId.length > 200)) ||
+        (annotations !== undefined &&
+          (annotations.length > 20 ||
+            annotations.some(
+              ({ messageId, excerpt }) =>
+                !messageId.trim() ||
+                messageId.length > 200 ||
+                !excerpt.trim() ||
+                excerpt.length > 8_000
+            )))
       ) {
         return context.json({ error: "Invalid chat message." }, 400)
       }
@@ -222,6 +238,14 @@ export default function (router: Hono<AppEnv>) {
             content: content.trim(),
             ...(replyToMessageId
               ? { replyToMessageId: replyToMessageId.trim() }
+              : {}),
+            ...(annotations?.length
+              ? {
+                  annotations: annotations.map(({ messageId, excerpt }) => ({
+                    messageId: messageId.trim(),
+                    excerpt: excerpt.trim(),
+                  })),
+                }
               : {}),
           }
         )

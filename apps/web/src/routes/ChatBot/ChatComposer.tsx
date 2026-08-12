@@ -15,6 +15,7 @@ import { useGroupChat } from "./GroupChat"
 
 export function ChatComposer() {
   const {
+    annotations,
     apiStatus,
     cancelReply,
     clearError,
@@ -22,10 +23,39 @@ export function ChatComposer() {
     participants,
     postMessage,
     posting,
+    messages,
+    removeAnnotation,
     replyingTo,
   } = useGroupChat()
   const [draft, setDraft] = useState("")
   const disabled = apiStatus === "offline" || participants.length === 0
+  const references = [
+    ...(replyingTo
+      ? [
+          {
+            key: `reply:${replyingTo.id}`,
+            label: `Replying to ${replyingTo.author === "user" ? "yourself" : replyingTo.author}`,
+            text: replyingTo.content,
+            removeLabel: "Cancel reply",
+            remove: cancelReply,
+          },
+        ]
+      : []),
+    ...annotations.flatMap((annotation, index) => {
+      const message = messages.find(({ id }) => id === annotation.messageId)
+      return message
+        ? [
+            {
+              key: `annotation:${annotation.messageId}:${annotation.excerpt}`,
+              label: `Selected from ${message.author === "user" ? "yourself" : message.author}`,
+              text: annotation.excerpt,
+              removeLabel: `Remove annotation ${index + 1}`,
+              remove: () => removeAnnotation(annotation),
+            },
+          ]
+        : []
+    }),
+  ]
 
   async function sendMessage() {
     const text = draft.trim()
@@ -54,32 +84,32 @@ export function ChatComposer() {
             Message
           </FieldLabel>
           <div className="overflow-hidden rounded-[26px] bg-card">
-            {replyingTo && (
-              <div className="flex items-center gap-2 border-b border-border/60 px-4 py-2">
+            {references.map((reference) => (
+              <div
+                key={reference.key}
+                className="flex items-center gap-2 border-b border-border/60 px-4 py-2"
+              >
                 <div className="min-w-0 flex-1 border-l-2 border-primary pl-2 text-start">
                   <p className="text-xs font-medium text-foreground">
-                    Replying to{" "}
-                    {replyingTo.author === "user"
-                      ? "yourself"
-                      : replyingTo.author}
+                    {reference.label}
                   </p>
                   <p
                     dir="auto"
-                    className="truncate text-start text-xs font-normal text-muted-foreground [unicode-bidi:plaintext]"
+                    className="line-clamp-2 text-start text-xs font-normal whitespace-pre-wrap text-muted-foreground [unicode-bidi:plaintext]"
                   >
-                    {replyingTo.content}
+                    {reference.text}
                   </p>
                 </div>
                 <InputGroupButton
                   type="button"
                   size="icon-xs"
-                  aria-label="Cancel reply"
-                  onClick={cancelReply}
+                  aria-label={reference.removeLabel}
+                  onClick={reference.remove}
                 >
                   <X aria-hidden="true" />
                 </InputGroupButton>
               </div>
-            )}
+            ))}
             <InputGroup className="min-h-[52px] rounded-none border-transparent bg-transparent has-disabled:!bg-transparent has-disabled:!opacity-100 has-[[data-slot=input-group-control]:focus-visible]:!border-transparent has-[[data-slot=input-group-control]:focus-visible]:!ring-0">
               <InputGroupTextarea
                 dir="auto"

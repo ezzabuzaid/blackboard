@@ -15,6 +15,7 @@ import {
 } from "./groupActivity"
 import {
   addGroupMessage,
+  addGroupMessageAnnotation,
   groupChatEventFromStreamPart,
   groupMessageClusters,
   reduceGroupChat,
@@ -169,6 +170,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
                 content: "Hello",
                 sentAt,
                 replyToMessageId: null,
+                annotations: [],
               },
               {
                 id: "reply-1",
@@ -177,6 +179,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
                 content: "Hello back",
                 sentAt,
                 replyToMessageId: "message-1",
+                annotations: [],
               },
             ]
           : [],
@@ -208,6 +211,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
             content: "Hello",
             sentAt,
             replyToMessageId: null,
+            annotations: [],
           },
           {
             id: "reply-1",
@@ -216,6 +220,7 @@ test("loader hydrates the selected chat and reports API state", async () => {
             content: "Hello back",
             sentAt,
             replyToMessageId: "message-1",
+            annotations: [],
           },
         ],
         participants: [{ name: "Maya" }],
@@ -251,6 +256,7 @@ test("group messages cluster only consecutive messages from one author", () => {
     content: "First thought",
     sentAt,
     replyToMessageId: null,
+    annotations: [],
   }
   const mayaFollowUp = {
     id: "maya-2",
@@ -259,6 +265,7 @@ test("group messages cluster only consecutive messages from one author", () => {
     content: "One more thing",
     sentAt,
     replyToMessageId: null,
+    annotations: [],
   }
   const omar = {
     id: "omar-1",
@@ -267,6 +274,7 @@ test("group messages cluster only consecutive messages from one author", () => {
     content: "Technical consequence",
     sentAt,
     replyToMessageId: "maya-2",
+    annotations: [{ messageId: "maya-2", excerpt: "One more thing" }],
   }
   const mayaLater = {
     id: "maya-3",
@@ -275,6 +283,7 @@ test("group messages cluster only consecutive messages from one author", () => {
     content: "Returning later",
     sentAt,
     replyToMessageId: null,
+    annotations: [],
   }
 
   assert.deepEqual(
@@ -287,6 +296,23 @@ test("group messages cluster only consecutive messages from one author", () => {
   )
 })
 
+test("annotations append without duplicating an existing excerpt", () => {
+  const first = addGroupMessageAnnotation([], {
+    messageId: "message-1",
+    excerpt: " first point ",
+  })
+  const second = addGroupMessageAnnotation(first, {
+    messageId: "message-2",
+    excerpt: "second point",
+  })
+
+  assert.deepEqual(second, [
+    { messageId: "message-1", excerpt: "first point" },
+    { messageId: "message-2", excerpt: "second point" },
+  ])
+  assert.strictEqual(addGroupMessageAnnotation(second, second[0]!), second)
+})
+
 test("chat events append in order and ignore reconnect duplicates", () => {
   const hydrated: GroupChatState = {
     messages: [
@@ -297,6 +323,7 @@ test("chat events append in order and ignore reconnect duplicates", () => {
         content: "First",
         sentAt,
         replyToMessageId: null,
+        annotations: [],
       },
     ],
     participants: [{ name: "Maya" }],
@@ -319,6 +346,7 @@ test("chat events append in order and ignore reconnect duplicates", () => {
       content: "Start with the evidence.",
       sentAt,
       replyToMessageId: "message-1",
+      annotations: [{ messageId: "message-1", excerpt: "First" }],
     },
   }
   const withReply = reduceGroupChat(hydrated, reply)
@@ -333,6 +361,7 @@ test("chat events append in order and ignore reconnect duplicates", () => {
       content: "What if we narrow it?",
       sentAt,
       replyToMessageId: "reply-1",
+      annotations: [{ messageId: "reply-1", excerpt: "the evidence" }],
     }).map(({ id }) => id),
     ["message-1", "reply-1", "message-2"]
   )

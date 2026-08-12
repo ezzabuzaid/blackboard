@@ -13,6 +13,12 @@ export interface GroupMessage {
   content: string
   sentAt: string
   replyToMessageId: string | null
+  annotations: GroupMessageAnnotation[]
+}
+
+export interface GroupMessageAnnotation {
+  messageId: string
+  excerpt: string
 }
 
 export interface GroupParticipant {
@@ -78,21 +84,38 @@ export function addGroupMessage(
   })
 }
 
+export function addGroupMessageAnnotation(
+  annotations: readonly GroupMessageAnnotation[],
+  annotation: GroupMessageAnnotation
+) {
+  const normalized = { ...annotation, excerpt: annotation.excerpt.trim() }
+  return annotations.some(
+    ({ messageId, excerpt }) =>
+      messageId === normalized.messageId && excerpt === normalized.excerpt
+  )
+    ? annotations
+    : [...annotations, normalized]
+}
+
 export function isGroupMessage(value: unknown): value is GroupMessage {
   return (
     isRecord(value) &&
-    "id" in value &&
     typeof value.id === "string" &&
     Number.isSafeInteger(value.sequence) &&
     Number(value.sequence) > 0 &&
-    "author" in value &&
     typeof value.author === "string" &&
-    "content" in value &&
     typeof value.content === "string" &&
     typeof value.sentAt === "string" &&
     !Number.isNaN(Date.parse(value.sentAt)) &&
     (value.replyToMessageId === null ||
-      typeof value.replyToMessageId === "string")
+      typeof value.replyToMessageId === "string") &&
+    Array.isArray(value.annotations) &&
+    value.annotations.every(
+      (annotation) =>
+        isRecord(annotation) &&
+        typeof annotation.messageId === "string" &&
+        typeof annotation.excerpt === "string"
+    )
   )
 }
 

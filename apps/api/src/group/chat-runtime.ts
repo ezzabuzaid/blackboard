@@ -20,6 +20,7 @@ import {
   type WhatsAppChatEvent,
   type WhatsAppGroupLimits,
   type WhatsAppMessage,
+  type WhatsAppMessageAnnotation,
   type WhatsAppParticipant,
 } from "./whatsapp.js"
 import { readAgentTraces } from "../traces/agent-traces.js"
@@ -90,10 +91,20 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
 
   async post(
     conversation: ConversationId,
-    message: { id: string; content: string; replyToMessageId?: string }
+    message: {
+      id: string
+      content: string
+      replyToMessageId?: string
+      annotations?: WhatsAppMessageAnnotation[]
+    }
   ) {
     const { group } = await this.#chat(conversation)
-    return group.post(message.content, message.id, message.replyToMessageId)
+    return group.post(
+      message.content,
+      message.id,
+      message.replyToMessageId,
+      message.annotations
+    )
   }
 
   async createSession(conversation: ConversationId) {
@@ -309,6 +320,7 @@ function chatEvent(part: StreamPart, sequence: number, createdAt: number) {
       ...event.message,
       sentAt: event.message.sentAt ?? new Date(createdAt).toISOString(),
       replyToMessageId: event.message.replyToMessageId ?? null,
+      annotations: event.message.annotations ?? [],
     },
   }
 }

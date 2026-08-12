@@ -44,6 +44,12 @@ export interface WhatsAppMessage {
   content: string
   sentAt: string
   replyToMessageId: string | null
+  annotations: WhatsAppMessageAnnotation[]
+}
+
+export interface WhatsAppMessageAnnotation {
+  messageId: string
+  excerpt: string
 }
 
 export type WhatsAppParticipantPresence = "idle" | "reading" | "typing" | "seen"
@@ -267,7 +273,8 @@ export class WhatsAppGroup implements AsyncDisposable {
     let publishReply: (
       author: string,
       content: string,
-      replyToMessageId?: string
+      replyToMessageId?: string,
+      annotations?: readonly WhatsAppMessageAnnotation[]
     ) => Promise<WhatsAppReplyResult>
 
     await boss.start()
@@ -327,6 +334,7 @@ export class WhatsAppGroup implements AsyncDisposable {
                 "Decide whether your role-specific instructions give you a useful, non-duplicative contribution.",
                 "If yes, call reply_to_group with the concise message you want everyone to see.",
                 "Omit replyToMessageId for ordinary responses to the latest user message or current discussion. Set it only to emphasize a particular earlier message or directly reply to another participant's message.",
+                "When emphasizing exact quotes, add each one to annotations with its target messageId and verbatim excerpt.",
                 "If reply_to_group reports transcript_changed, reconsider the new messages. When the human addressed the whole group and you have not replied yet, retry your brief acknowledgment; otherwise retry only with a distinct contribution or remain silent.",
                 "If no useful contribution remains, do not call reply_to_group.",
               ],
@@ -360,6 +368,7 @@ export class WhatsAppGroup implements AsyncDisposable {
               inputSchema: jsonSchema<{
                 message: string
                 replyToMessageId?: string
+                annotations?: WhatsAppMessageAnnotation[]
               }>({
                 type: "object",
                 properties: {
@@ -376,17 +385,41 @@ export class WhatsAppGroup implements AsyncDisposable {
                     description:
                       "Optional UI pointer to one earlier public message. Omit replyToMessageId by default. Set it only to emphasize a particular earlier message or when directly replying to another participant's message. Do not set it merely because your contribution answers the latest user message or continues the current discussion.",
                   },
+                  annotations: {
+                    type: "array",
+                    maxItems: 20,
+                    items: {
+                      type: "object",
+                      properties: {
+                        messageId: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: 200,
+                        },
+                        excerpt: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: 8_000,
+                          pattern: "\\S",
+                        },
+                      },
+                      required: ["messageId", "excerpt"],
+                      additionalProperties: false,
+                    },
+                    description:
+                      "Optional exact excerpts to emphasize. Every excerpt must occur verbatim in its target public message.",
+                  },
                 },
                 required: ["message"],
                 additionalProperties: false,
               }),
-              execute: async ({ message, replyToMessageId }) => {
-                return publishReply(
+              execute: ({ message, replyToMessageId, annotations }) =>
+                publishReply(
                   participant.name,
                   message.trim(),
-                  replyToMessageId
-                )
-              },
+                  replyToMessageId,
+                  annotations
+                ),
             }),
           },
         }),
@@ -428,9 +461,8 @@ export class WhatsAppGroup implements AsyncDisposable {
       participants,
       startParticipant,
     })
-    publishReply = async (author, content, replyToMessageId) => {
-      return group.#postParticipant(author, content, replyToMessageId)
-    }
+    publishReply = (author, content, replyToMessageId, annotations) =>
+      group.#postParticipant(author, content, replyToMessageId, annotations)
     return group
   }
 
@@ -448,7 +480,8 @@ export class WhatsAppGroup implements AsyncDisposable {
   async post(
     content: string,
     id: string = randomUUID(),
-    replyToMessageId?: string
+    replyToMessageId?: string,
+    annotations?: readonly WhatsAppMessageAnnotation[]
   ) {
     if (this.#closed) throw new Error("WhatsAppGroup is closed")
     const message = content.trim()
@@ -457,7 +490,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       this.#stopRequested = null
       this.#agentMessages = 0
     }
-    return this.#post("user", message, id, replyToMessageId)
+    return this.#post("user", message, id, replyToMessageId, annotations)
   }
 
   snapshot(): WhatsAppGroupSnapshot {
@@ -534,7 +567,8 @@ export class WhatsAppGroup implements AsyncDisposable {
     author: string,
     content: string,
     id: string = randomUUID(),
-    replyToMessageId?: string
+    replyToMessageId?: string,
+    annotations: readonly WhatsAppMessageAnnotation[] = []
   ) {
     const existing = this.#messagesById.get(id)
     if (existing) return existing
@@ -546,6 +580,24 @@ export class WhatsAppGroup implements AsyncDisposable {
     if (replyToMessageId && !this.#messagesById.has(replyToMessageId)) {
       throw new WhatsAppReplyTargetError("Reply target was not found")
     }
+    const normalizedAnnotations = annotations.map(({ messageId, excerpt }) => ({
+      messageId: messageId.trim(),
+      excerpt: excerpt.trim(),
+    }))
+    for (const annotation of normalizedAnnotations) {
+      const target = this.#messagesById.get(annotation.messageId)
+      if (
+        !target ||
+        !annotation.excerpt ||
+        !normalizedText(target.content).includes(
+          normalizedText(annotation.excerpt)
+        )
+      ) {
+        throw new WhatsAppReplyTargetError(
+          "Annotation excerpt was not found in its target"
+        )
+      }
+    }
 
     const message = {
       id,
@@ -554,6 +606,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       content,
       sentAt: new Date().toISOString(),
       replyToMessageId: replyToMessageId ?? null,
+      annotations: normalizedAnnotations,
     }
     this.#messages.push(message)
     this.#messagesById.set(id, message)
@@ -570,7 +623,8 @@ export class WhatsAppGroup implements AsyncDisposable {
   async #postParticipant(
     author: string,
     content: string,
-    replyToMessageId?: string
+    replyToMessageId?: string,
+    annotations?: readonly WhatsAppMessageAnnotation[]
   ): Promise<WhatsAppReplyResult> {
     if (this.#stopRequested) return { posted: false, reason: "stopped" }
     if (
@@ -596,14 +650,18 @@ export class WhatsAppGroup implements AsyncDisposable {
     }
 
     this.#agentMessages++
-    await this.#post(
-      author,
-      content,
-      randomUUID(),
-      replyToMessageId && this.#messagesById.has(replyToMessageId)
-        ? replyToMessageId
+    const normalizedTargetId = replyToMessageId?.trim()
+    const targetId =
+      normalizedTargetId && this.#messagesById.has(normalizedTargetId)
+        ? normalizedTargetId
         : undefined
-    )
+    const targetAnnotations = annotations
+      ?.map(({ messageId, excerpt }) => ({
+        messageId: messageId.trim(),
+        excerpt: excerpt.trim(),
+      }))
+      .filter(({ messageId }) => this.#messagesById.has(messageId))
+    await this.#post(author, content, randomUUID(), targetId, targetAnnotations)
     return { posted: true }
   }
 
@@ -900,6 +958,9 @@ export class WhatsAppGroup implements AsyncDisposable {
         ...(message.replyToMessageId
           ? [this.#replyContext(message.replyToMessageId)]
           : []),
+        ...message.annotations.map((annotation) =>
+          this.#annotationContext(annotation)
+        ),
         message.content,
         "",
       ]),
@@ -908,6 +969,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         : []),
       "Reply only through reply_to_group when you have something useful to add.",
       "Omit replyToMessageId by default. It points to one earlier public message in the UI; use it only to emphasize that message or when directly replying to another participant. Do not use it for an ordinary response to the latest user message or current discussion.",
+      "Use annotations only for exact excerpts you want to emphasize; each annotation names its own earlier public message.",
     ].join("\n")
   }
 
@@ -916,6 +978,13 @@ export class WhatsAppGroup implements AsyncDisposable {
     return target
       ? `Replying to [${target.id}] ${target.author}: ${target.content}`
       : `Replying to [${replyToMessageId}]`
+  }
+
+  #annotationContext({ messageId, excerpt }: WhatsAppMessageAnnotation) {
+    const target = this.#messagesById.get(messageId)
+    return target
+      ? `Annotated excerpt from [${target.id}] ${target.author}: ${JSON.stringify(excerpt)}`
+      : `Annotated excerpt from [${messageId}]: ${JSON.stringify(excerpt)}`
   }
 
   async #deliverToActiveParticipants(message: WhatsAppMessage) {
@@ -932,6 +1001,14 @@ export class WhatsAppGroup implements AsyncDisposable {
         ?.conversation ?? this.#user
     const delivered = new Set<string>()
     this.#mailboxRecipients.set(message.id, delivered)
+    const context = [
+      ...(message.replyToMessageId
+        ? [this.#replyContext(message.replyToMessageId)]
+        : []),
+      ...message.annotations.map((annotation) =>
+        this.#annotationContext(annotation)
+      ),
+    ]
 
     await Promise.all(
       recipients.map(async (participant) => {
@@ -943,15 +1020,15 @@ export class WhatsAppGroup implements AsyncDisposable {
             otherRecipients: eligibleRecipients
               .filter(({ name }) => name !== participant.name)
               .map(({ conversation }) => conversation),
-            content: message.replyToMessageId
-              ? `${this.#replyContext(message.replyToMessageId)}\n${
-                  message.content
-                }`
-              : message.content,
+            content:
+              context.length > 0
+                ? `${context.join("\n")}\n${message.content}`
+                : message.content,
             metadata: {
               chatMessageId: message.id,
               chatSequence: message.sequence,
               replyToMessageId: message.replyToMessageId,
+              annotations: message.annotations,
               authorPath: message.author,
               recipientPath: participant.name,
               otherRecipientNames: eligibleRecipients
@@ -1008,6 +1085,10 @@ export class WhatsAppGroup implements AsyncDisposable {
       names.add(normalizedName)
     }
   }
+}
+
+function normalizedText(value: string) {
+  return value.normalize("NFC").replace(/\s+/gu, " ").trim()
 }
 
 function reduceActivity(

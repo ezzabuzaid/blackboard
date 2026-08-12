@@ -9,12 +9,14 @@ import {
 import { api, apiUrl } from "./api"
 import {
   addGroupMessage,
+  addGroupMessageAnnotation,
   groupChatEventFromStreamPart,
   isGroupChatState,
   isGroupMessage,
   reduceGroupChat,
   type GroupChatState,
   type GroupMessage,
+  type GroupMessageAnnotation,
 } from "./groupMessages"
 
 interface GroupChat extends GroupChatState {
@@ -23,9 +25,12 @@ interface GroupChat extends GroupChatState {
   posting: boolean
   stopping: boolean
   replyingTo: GroupMessage | null
+  annotations: readonly GroupMessageAnnotation[]
   error: Error | null
   clearError(): void
   replyTo(message: GroupMessage): void
+  addAnnotation(message: GroupMessage, excerpt: string): void
+  removeAnnotation(annotation: GroupMessageAnnotation): void
   cancelReply(): void
   postMessage(content: string): Promise<void>
   stop(): Promise<void>
@@ -57,14 +62,16 @@ export function GroupChatProvider({
   const [posting, setPosting] = useState(false)
   const [stopping, setStopping] = useState(false)
   const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null)
+  const [annotations, setAnnotations] = useState<
+    readonly GroupMessageAnnotation[]
+  >([])
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
     if (!streamPath) return
-    const source = new EventSource(
-      `${apiUrl}${streamPath}`,
-      { withCredentials: true }
-    )
+    const source = new EventSource(`${apiUrl}${streamPath}`, {
+      withCredentials: true,
+    })
     const receive = ({ data }: MessageEvent<string>) => {
       try {
         const event = groupChatEventFromStreamPart(JSON.parse(data))
@@ -93,6 +100,7 @@ export function GroupChatProvider({
         id: crypto.randomUUID(),
         content,
         ...(replyingTo ? { replyToMessageId: replyingTo.id } : {}),
+        ...(annotations.length > 0 ? { annotations: [...annotations] } : {}),
       })
       const message =
         isRecord(body) && isGroupMessage(body.message) ? body.message : null
@@ -104,6 +112,7 @@ export function GroupChatProvider({
         messages: addGroupMessage(current.messages, message),
       }))
       setReplyingTo(null)
+      setAnnotations([])
     } catch (cause) {
       const nextError =
         cause instanceof Error
@@ -148,9 +157,25 @@ export function GroupChatProvider({
         posting,
         stopping,
         replyingTo,
+        annotations,
         error,
         clearError: () => setError(null),
         replyTo: setReplyingTo,
+        addAnnotation: (message, excerpt) =>
+          setAnnotations((current) =>
+            addGroupMessageAnnotation(current, {
+              messageId: message.id,
+              excerpt,
+            })
+          ),
+        removeAnnotation: (annotation) =>
+          setAnnotations((current) =>
+            current.filter(
+              ({ messageId, excerpt }) =>
+                messageId !== annotation.messageId ||
+                excerpt !== annotation.excerpt
+            )
+          ),
         cancelReply: () => setReplyingTo(null),
         postMessage,
         stop,

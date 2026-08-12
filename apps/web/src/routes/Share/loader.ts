@@ -32,7 +32,8 @@ function isSharedGroup(value: unknown): value is SharedGroup {
     typeof value.name === "string" &&
     Array.isArray(value.participants) &&
     value.participants.every(
-      (participant) => isRecord(participant) && typeof participant.name === "string"
+      (participant) =>
+        isRecord(participant) && typeof participant.name === "string"
     ) &&
     Array.isArray(value.messages) &&
     value.messages.every(isGroupMessage)
@@ -49,7 +50,14 @@ function isGroupMessage(value: unknown): value is GroupMessage {
     typeof value.sentAt === "string" &&
     !Number.isNaN(Date.parse(value.sentAt)) &&
     (value.replyToMessageId === null ||
-      typeof value.replyToMessageId === "string")
+      typeof value.replyToMessageId === "string") &&
+    Array.isArray(value.annotations) &&
+    value.annotations.every(
+      (annotation) =>
+        isRecord(annotation) &&
+        typeof annotation.messageId === "string" &&
+        typeof annotation.excerpt === "string"
+    )
   )
 }
 

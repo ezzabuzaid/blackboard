@@ -14,8 +14,8 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@stdlib/shadcn"
-import { CornerUpLeft } from "lucide-react"
-import { useMemo } from "react"
+import { CornerUpLeft, MessageSquareQuote } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 
 import { artifactBaseUrl, artifactRemarkPlugins } from "./artifactLinks"
@@ -38,16 +38,40 @@ const messageTime = new Intl.DateTimeFormat(undefined, {
 })
 
 export function Conversation() {
-  const { apiStatus, activity, chatId, messages, participants, replyTo } =
-    useGroupChat()
+  const {
+    addAnnotation,
+    apiStatus,
+    activity,
+    chatId,
+    messages,
+    participants,
+    replyTo,
+  } = useGroupChat()
   const messagesById = useMemo(
     () => new Map(messages.map((message) => [message.id, message])),
     [messages]
   )
   const activityIndicator = groupActivityIndicator(activity)
+  const [selection, setSelection] = useState<{
+    message: GroupMessage
+    excerpt: string
+    x: number
+    y: number
+    below: boolean
+  } | null>(null)
+
+  useEffect(() => {
+    const update = () => setSelection(selectedMessageText(messagesById))
+    document.addEventListener("selectionchange", update)
+    return () => document.removeEventListener("selectionchange", update)
+  }, [messagesById])
 
   return (
-    <section aria-label="Conversation" className="min-h-0 flex-1 bg-muted/60">
+    <section
+      aria-label="Conversation"
+      className="min-h-0 flex-1 bg-muted/60"
+      onScrollCapture={() => setSelection(null)}
+    >
       <MessageScrollerProvider autoScroll>
         <MessageScroller>
           <MessageScrollerViewport>
@@ -97,6 +121,29 @@ export function Conversation() {
           <MessageScrollerButton />
         </MessageScroller>
       </MessageScrollerProvider>
+      {selection && (
+        <Button
+          type="button"
+          size="sm"
+          className="fixed z-50 h-8 -translate-x-1/2 gap-1.5 rounded-full px-3 shadow-lg"
+          style={{
+            left: selection.x,
+            top: selection.below ? selection.y : undefined,
+            bottom: selection.below
+              ? undefined
+              : globalThis.innerHeight - selection.y,
+          }}
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => {
+            addAnnotation(selection.message, selection.excerpt)
+            globalThis.getSelection()?.removeAllRanges()
+            setSelection(null)
+          }}
+        >
+          <MessageSquareQuote aria-hidden="true" />
+          Add to chat
+        </Button>
+      )}
     </section>
   )
 }
@@ -164,8 +211,17 @@ export function UserMessageCluster({
                       : undefined
                   }
                 />
+                {message.annotations.map((annotation, index) => (
+                  <ReplyQuote
+                    key={`${annotation.messageId}:${index}`}
+                    message={messagesById.get(annotation.messageId)}
+                    excerpt={annotation.excerpt}
+                  />
+                ))}
                 <p dir="auto" className="text-start [unicode-bidi:plaintext]">
-                  {message.content}
+                  <span data-annotation-message-id={message.id}>
+                    {message.content}
+                  </span>
                   <MessageTimestamp sentAt={message.sentAt} />
                 </p>
               </BubbleContent>
@@ -216,12 +272,24 @@ export function GroupReplyCluster({
                     : undefined
                 }
               />
-              <div dir="auto" className="text-start [unicode-bidi:plaintext]">
-                <AssistantMarkdown
-                  active={false}
-                  chatId={chatId}
-                  text={message.content}
+              {message.annotations.map((annotation, index) => (
+                <ReplyQuote
+                  key={`${annotation.messageId}:${index}`}
+                  message={messagesById.get(annotation.messageId)}
+                  excerpt={annotation.excerpt}
                 />
+              ))}
+              <div dir="auto" className="text-start [unicode-bidi:plaintext]">
+                <div
+                  className="contents"
+                  data-annotation-message-id={message.id}
+                >
+                  <AssistantMarkdown
+                    active={false}
+                    chatId={chatId}
+                    text={message.content}
+                  />
+                </div>
                 <MessageTimestamp sentAt={message.sentAt} />
               </div>
             </BubbleContent>
@@ -261,7 +329,13 @@ function ReplyButton({
   )
 }
 
-function ReplyQuote({ message }: { message?: GroupMessage }) {
+function ReplyQuote({
+  message,
+  excerpt,
+}: {
+  message?: GroupMessage
+  excerpt?: string
+}) {
   if (!message) return null
   return (
     <div className="mb-1.5 rounded-[6px] border-l-[3px] border-primary bg-muted/70 px-2 py-1">
@@ -277,10 +351,44 @@ function ReplyQuote({ message }: { message?: GroupMessage }) {
         dir="auto"
         className="line-clamp-2 text-start text-xs text-muted-foreground [unicode-bidi:plaintext]"
       >
-        {message.content}
+        {excerpt ?? message.content}
       </p>
     </div>
   )
+}
+
+function selectedMessageText(messagesById: ReadonlyMap<string, GroupMessage>) {
+  const selection = globalThis.getSelection?.()
+  if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
+    return null
+  }
+
+  const range = selection.getRangeAt(0)
+  const start = annotationTarget(range.startContainer)
+  const end = annotationTarget(range.endContainer)
+  if (!start || start !== end) return null
+
+  const message = messagesById.get(start.dataset.annotationMessageId ?? "")
+  const excerpt = selection.toString().trim()
+  if (!message || !excerpt) return null
+
+  const bounds = range.getBoundingClientRect()
+  const below = bounds.top < 48
+  return {
+    message,
+    excerpt,
+    x: Math.max(
+      64,
+      Math.min(globalThis.innerWidth - 64, bounds.left + bounds.width / 2)
+    ),
+    y: below ? bounds.bottom + 8 : bounds.top - 8,
+    below,
+  }
+}
+
+function annotationTarget(node: Node) {
+  const element = node instanceof Element ? node : node.parentElement
+  return element?.closest<HTMLElement>("[data-annotation-message-id]") ?? null
 }
 
 function MessageTimestamp({ sentAt }: { sentAt: string }) {

@@ -797,6 +797,7 @@ test("shared conversations are readable without a session", async () => {
       content: "How should we price this?",
       sentAt: testCreatedAt,
       replyToMessageId: null,
+      annotations: [],
     },
   ]
   const transcripts: unknown[] = []
@@ -829,9 +830,7 @@ test("shared conversations are readable without a session", async () => {
     participants: [{ name: "Annie Duke" }],
     messages,
   })
-  assert.deepEqual(transcripts, [
-    { chatId: "group-1", userId: "owner-user" },
-  ])
+  assert.deepEqual(transcripts, [{ chatId: "group-1", userId: "owner-user" }])
 
   const revoked = await app.request("/api/shares/revoked-token")
   assert.equal(revoked.status, 404)
@@ -1027,6 +1026,45 @@ test("a user with no participants gets an empty group", async () => {
     message?: { content?: unknown }
   }
   assert.equal(body.message?.content, "Anyone here?")
+})
+
+test("chat messages retain multiple excerpt annotations", async () => {
+  await using runtime = memoryRuntime([])
+  const groupApp = testApp({ runtime })
+  const post = (body: object) =>
+    groupApp.request("/api/chat/chat-1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+
+  await post({ id: "message-1", content: "Validate one market first." })
+  await post({ id: "message-2", content: "Then measure activation." })
+  const response = await post({
+    id: "message-3",
+    content: "These two points belong together.",
+    replyToMessageId: "message-2",
+    annotations: [
+      { messageId: "message-1", excerpt: "one market" },
+      { messageId: "message-2", excerpt: "measure activation" },
+    ],
+  })
+
+  assert.equal(response.status, 201)
+  const body = (await response.json()) as { message: { sentAt: string } }
+  assert.match(body.message.sentAt, /^\d{4}-\d{2}-\d{2}T/u)
+  assert.deepEqual(body.message, {
+    id: "message-3",
+    sequence: 3,
+    author: "user",
+    content: "These two points belong together.",
+    sentAt: body.message.sentAt,
+    replyToMessageId: "message-2",
+    annotations: [
+      { messageId: "message-1", excerpt: "one market" },
+      { messageId: "message-2", excerpt: "measure activation" },
+    ],
+  })
 })
 
 test("chat runtime reports new messages to the group summary sink", async () => {
@@ -1479,6 +1517,7 @@ test("chat message POST returns before active participants settle", async () => 
         content: "What should we do first?",
         sentAt: posted.message.sentAt,
         replyToMessageId: null,
+        annotations: [],
       },
     })
     assert.deepEqual(await (await request()).json(), {
@@ -1489,6 +1528,7 @@ test("chat message POST returns before active participants settle", async () => 
         content: "What should we do first?",
         sentAt: posted.message.sentAt,
         replyToMessageId: null,
+        annotations: [],
       },
     })
     await participantStarted.promise
@@ -1505,6 +1545,7 @@ test("chat message POST returns before active participants settle", async () => 
           content: "What should we do first?",
           sentAt: posted.message.sentAt,
           replyToMessageId: null,
+          annotations: [],
         },
       ],
       participants: [{ name: "Maya" }],
@@ -1533,10 +1574,7 @@ test("chat message POST returns before active participants settle", async () => 
         response.headers.get("content-type") ?? "",
         /text\/event-stream/
       )
-      assert.equal(
-        response.headers.get("x-vercel-ai-ui-message-stream"),
-        "v1"
-      )
+      assert.equal(response.headers.get("x-vercel-ai-ui-message-stream"), "v1")
       const reader = response.body!.getReader()
       let events = ""
       while (!events.includes('"type":"settled"')) {
@@ -1613,6 +1651,16 @@ test("chat messages and Zukhruf session ids are validated at the boundary", asyn
     { id: "", content: "Hello" },
     { id: "message-1", content: "   " },
     { id: "message-1", content: "Hello", replyToMessageId: "" },
+    {
+      id: "message-1",
+      content: "Hello",
+      annotations: [{ messageId: "", excerpt: "Hello" }],
+    },
+    {
+      id: "message-1",
+      content: "Hello",
+      annotations: [{ messageId: "message-0", excerpt: "" }],
+    },
   ]) {
     const response = await app.request("/api/chat/chat-1/messages", {
       method: "POST",
@@ -1623,11 +1671,8 @@ test("chat messages and Zukhruf session ids are validated at the boundary", asyn
   }
 
   assert.equal(
-    (
-      await app.request(
-        "/api/zukhruf/v1/session/not-a-session-id/stream"
-      )
-    ).status,
+    (await app.request("/api/zukhruf/v1/session/not-a-session-id/stream"))
+      .status,
     400
   )
   assert.equal((await app.request("/api/chat/chat-1/events")).status, 404)
@@ -1645,7 +1690,7 @@ test("chat messages and Zukhruf session ids are validated at the boundary", asyn
   const oversized = await app.request("/api/chat/chat-1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: "message-1", content: "x".repeat(12_000) }),
+    body: JSON.stringify({ id: "message-1", content: "x".repeat(24_000) }),
   })
   assert.equal(oversized.status, 413)
 
@@ -1902,7 +1947,7 @@ test("an active member sees a peer reply before its next model step", async () =
   )
 })
 
-test("quoted replies persist resolved context and emit real presence", async () => {
+test("agents can publish multiple excerpt annotations", async () => {
   const prompts: unknown[] = []
   let calls = 0
   const participant = new MockLanguageModelV4({
@@ -1917,6 +1962,10 @@ test("quoted replies persist resolved context and emit real presence", async () 
         return groupToolResponse("reply_to_group", "reply-1", {
           message: "Start with the evidence.",
           replyToMessageId: messageId,
+          annotations: [
+            { messageId, excerpt: "What should" },
+            { messageId, excerpt: "do first" },
+          ],
         })
       }
       return groupTextResponse("Nothing else to add.")
@@ -1946,8 +1995,18 @@ test("quoted replies persist resolved context and emit real presence", async () 
   assert.ok(reply, JSON.stringify({ messages, activity, prompts }))
 
   assert.equal(reply.replyToMessageId, original.id)
+  assert.deepEqual(reply.annotations, [
+    { messageId: original.id, excerpt: "What should" },
+    { messageId: original.id, excerpt: "do first" },
+  ])
   assert.match(reply.sentAt, /^\d{4}-\d{2}-\d{2}T/)
   assert.deepEqual(activity, ["reading", "typing", "reading", "seen"])
+  await assert.rejects(
+    group.post("That is not a quote.", "invalid-annotation", original.id, [
+      { messageId: original.id, excerpt: "missing" },
+    ]),
+    /Annotation excerpt was not found/u
+  )
 
   const settled = Promise.withResolvers<void>()
   using subscription = group.subscribe({
@@ -1955,12 +2014,15 @@ test("quoted replies persist resolved context and emit real presence", async () 
       if (event.type === "settled") settled.resolve()
     },
   })
-  await group.post("Can you clarify that?", "follow-up", reply.id)
+  await group.post("Can you clarify that?", "follow-up", reply.id, [
+    { messageId: reply.id, excerpt: "the evidence" },
+  ])
   await settled.promise
 
-  assert.match(
-    JSON.stringify(prompts.at(-1)),
-    new RegExp(`Replying to \\[${reply.id}] Maya: Start with the evidence\\.`)
+  assert.ok(
+    JSON.stringify(prompts.at(-1)).includes(
+      `Annotated excerpt from [${reply.id}] Maya: \\"the evidence\\"`
+    )
   )
 })
 
@@ -2013,6 +2075,7 @@ test("ordinary agent contributions do not quote their triggering message", async
     /Set it only to emphasize a particular earlier message or directly reply to another participant/u
   )
   assert.equal(reply.replyToMessageId, null)
+  assert.deepEqual(reply.annotations, [])
 })
 
 test("each group member uses its own telemetry", async () => {
@@ -2406,7 +2469,9 @@ test("the previous responder answers an ambiguous short follow-up", async () => 
             return groupTextResponse("The follow-up belongs to Omar.")
           }
           if (!instructions.includes(followUpOwnerRule)) {
-            return groupTextResponse("The follow-up does not require an answer.")
+            return groupTextResponse(
+              "The follow-up does not require an answer."
+            )
           }
           return groupToolResponse("reply_to_group", `${name}-thanks`, {
             message: `${name} asked what needs clarification.`,
