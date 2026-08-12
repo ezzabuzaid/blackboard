@@ -43,6 +43,7 @@ import {
 } from "./group/whatsapp.js"
 import { readAgentTraces } from "./traces/agent-traces.js"
 import { openArtifact } from "./sandbox.js"
+import { createOpenRouterTranscriber } from "./transcription.js"
 
 type ChatRuntime = AppDependencies["runtime"]
 
@@ -222,6 +223,9 @@ function testApp({
   marketplaceTemplates = unusedMarketplaceTemplates,
   shares = unusedShares,
   runtime = unusedRuntime,
+  transcribeAudio = async () => {
+    throw new Error("Unexpected transcription")
+  },
   openArtifact = noArtifact,
 }: {
   structuredLogDrain?: AppDependencies["structuredLogDrain"]
@@ -238,6 +242,7 @@ function testApp({
   marketplaceTemplates?: AppDependencies["marketplaceTemplates"]
   shares?: AppDependencies["shares"]
   runtime?: ChatRuntime
+  transcribeAudio?: AppDependencies["transcribeAudio"]
   openArtifact?: OpenArtifact
 } = {}) {
   return createApp({
@@ -255,6 +260,7 @@ function testApp({
     marketplaceTemplates,
     shares,
     runtime,
+    transcribeAudio,
     openArtifact,
   })
 }
@@ -1210,6 +1216,85 @@ test("chat routes require a Better Auth session", async () => {
   )
 })
 
+test("chat transcription sends browser audio through the configured transcriber", async () => {
+  let received: Parameters<AppDependencies["transcribeAudio"]>[0] | undefined
+  const transcriptionApp = testApp({
+    transcribeAudio: async (audio) => {
+      received = audio
+      return "Hello from the microphone"
+    },
+  })
+  const form = new FormData()
+  form.set("audio", new Blob(["voice"], { type: "audio/webm" }))
+
+  const response = await transcriptionApp.request(
+    "/api/chat/chat-1/transcription",
+    { method: "POST", body: form }
+  )
+
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), {
+    text: "Hello from the microphone",
+  })
+  assert.equal(received?.format, "webm")
+  assert.deepEqual(received?.bytes, new TextEncoder().encode("voice"))
+})
+
+test("chat transcription rejects empty and unsupported recordings", async () => {
+  const empty = new FormData()
+  empty.set("audio", new Blob([], { type: "audio/webm" }))
+  const emptyResponse = await app.request("/api/chat/chat-1/transcription", {
+    method: "POST",
+    body: empty,
+  })
+  assert.equal(emptyResponse.status, 400)
+
+  const unsupported = new FormData()
+  unsupported.set("audio", new Blob(["voice"], { type: "text/plain" }))
+  const unsupportedResponse = await app.request(
+    "/api/chat/chat-1/transcription",
+    { method: "POST", body: unsupported }
+  )
+  assert.equal(unsupportedResponse.status, 415)
+})
+
+test("OpenRouter transcription uses the dedicated speech-to-text endpoint", async () => {
+  let outbound: Request | undefined
+  const transcribe = createOpenRouterTranscriber({
+    apiKey: "openrouter-test-key",
+    model: "openai/gpt-4o-mini-transcribe",
+    appUrl: "https://baseera.test",
+    fetch: async (input, init) => {
+      outbound = new Request(input, init)
+      return Response.json({ text: "Transcribed" })
+    },
+  })
+
+  assert.equal(
+    await transcribe({
+      bytes: new TextEncoder().encode("voice"),
+      format: "webm",
+    }),
+    "Transcribed"
+  )
+  assert.ok(outbound)
+  assert.equal(
+    outbound.url,
+    "https://openrouter.ai/api/v1/audio/transcriptions"
+  )
+  assert.equal(
+    outbound.headers.get("Authorization"),
+    "Bearer openrouter-test-key"
+  )
+  assert.deepEqual(JSON.parse(await outbound.text()), {
+    model: "openai/gpt-4o-mini-transcribe",
+    input_audio: {
+      data: Buffer.from("voice").toString("base64"),
+      format: "webm",
+    },
+  })
+})
+
 test("a user with no participants gets an empty group", async () => {
   await using runtime = memoryRuntime([])
   const groupApp = testApp({ runtime })
@@ -1277,6 +1362,48 @@ test("chat messages retain multiple excerpt annotations", async () => {
     annotations: [
       { messageId: "message-1", excerpt: "one market" },
       { messageId: "message-2", excerpt: "measure activation" },
+    ],
+  })
+})
+
+test("chat accepts annotation-only messages with per-selection comments", async () => {
+  await using runtime = memoryRuntime([])
+  const groupApp = testApp({ runtime })
+  const post = (body: object) =>
+    groupApp.request("/api/chat/chat-1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+
+  await post({ id: "message-1", content: "Validate one market first." })
+  const response = await post({
+    id: "message-2",
+    content: "",
+    annotations: [
+      {
+        messageId: "message-1",
+        excerpt: "one market",
+        comment: "Why only one?",
+      },
+    ],
+  })
+
+  assert.equal(response.status, 201)
+  const body = (await response.json()) as { message: { sentAt: string } }
+  assert.deepEqual(body.message, {
+    id: "message-2",
+    sequence: 2,
+    author: "user",
+    content: "",
+    sentAt: body.message.sentAt,
+    replyToMessageId: null,
+    annotations: [
+      {
+        messageId: "message-1",
+        excerpt: "one market",
+        comment: "Why only one?",
+      },
     ],
   })
 })
@@ -2235,9 +2362,72 @@ test("agents can publish multiple excerpt annotations", async () => {
 
   assert.ok(
     JSON.stringify(prompts.at(-1)).includes(
-      `Annotated excerpt from [${reply.id}] Maya: \\"the evidence\\"`
+      `\\"text\\":\\"the evidence\\",\\"annotation\\":\\"\\"`
     )
   )
+})
+
+test("annotation notifications use the Codex protocol and bind directives to replies", async () => {
+  const prompts: unknown[] = []
+  let calls = 0
+  const participant = new MockLanguageModelV4({
+    doStream: async ({ prompt }) => {
+      prompts.push(prompt)
+      calls++
+      if (calls === 1) return groupTextResponse("Nothing to add.")
+      return calls === 2
+        ? groupToolResponse("reply_to_group", "annotated-reply", {
+            message: 'The scope is deliberate. :codex-annotation{index="1"}',
+          })
+        : groupTextResponse("Nothing else to add.")
+    },
+  })
+
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [{ name: "Maya", model: participant }],
+    })
+  )
+
+  await group.send("Validate one market first.")
+  const source = group.snapshot().messages[0]!
+  const settled = Promise.withResolvers<void>()
+  using subscription = group.subscribe({
+    onActivity(event) {
+      if (event.type === "settled") settled.resolve()
+    },
+  })
+  await group.post("", "annotation-message", undefined, [
+    {
+      messageId: source.id,
+      excerpt: "one market",
+      comment: "Why only one?",
+    },
+  ])
+  await settled.promise
+
+  const prompt = JSON.stringify(prompts[1])
+  assert.match(prompt, /# Response annotations:/u)
+  assert.match(
+    prompt,
+    /\\"text\\":\\"one market\\",\\"annotation\\":\\"Why only one\?\\"/u
+  )
+  assert.match(prompt, /:codex-annotation\{index=\\"N\\"\}/u)
+
+  const reply = group
+    .snapshot()
+    .messages.find(({ author }) => author === "Maya")
+  assert.deepEqual(reply?.responseAnnotations, [
+    {
+      messageId: source.id,
+      excerpt: "one market",
+      comment: "Why only one?",
+    },
+  ])
 })
 
 test("ordinary agent contributions do not quote their triggering message", async () => {

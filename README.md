@@ -22,7 +22,8 @@ app and create a passkey with only your name. Returning users sign in with their
 device passkey and no form fields. Better Auth stores users, passkeys, and
 sessions in `auth.sqlite` under `ZUKHRUF_DATA_DIR`. Agent requests use the
 server's `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` (`openrouter/auto-beta` by
-default).
+default). Voice input uses the same key and `OPENROUTER_TRANSCRIPTION_MODEL`
+(`openai/gpt-4o-mini-transcribe` by default).
 
 ## Agents
 

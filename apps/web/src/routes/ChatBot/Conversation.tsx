@@ -14,11 +14,12 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@stdlib/shadcn"
+import { Annotation } from "@genui/annotation"
 import { CornerUpLeft, MessageSquareQuote } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { Streamdown } from "streamdown"
 
-import { artifactBaseUrl, artifactRemarkPlugins } from "./artifactLinks"
+import { artifactBaseUrl } from "./artifactLinks"
 import {
   GroupAvatar,
   GroupAvatarStack,
@@ -29,8 +30,13 @@ import { groupActivityIndicator } from "./groupActivity"
 import {
   groupMessageClusters,
   type GroupMessage,
+  type GroupMessageAnnotation,
   type GroupMessageCluster,
 } from "./groupMessages"
+import {
+  responseAnnotationComponents,
+  responseAnnotationRemarkPlugins,
+} from "./responseAnnotations"
 
 const messageTime = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
@@ -122,27 +128,29 @@ export function Conversation() {
         </MessageScroller>
       </MessageScrollerProvider>
       {selection && (
-        <Button
-          type="button"
-          size="sm"
-          className="fixed z-50 h-8 -translate-x-1/2 gap-1.5 rounded-full px-3 shadow-lg"
-          style={{
-            left: selection.x,
-            top: selection.below ? selection.y : undefined,
-            bottom: selection.below
-              ? undefined
-              : globalThis.innerHeight - selection.y,
-          }}
-          onPointerDown={(event) => event.preventDefault()}
-          onClick={() => {
-            addAnnotation(selection.message, selection.excerpt)
-            globalThis.getSelection()?.removeAllRanges()
-            setSelection(null)
-          }}
-        >
-          <MessageSquareQuote aria-hidden="true" />
-          Add to chat
-        </Button>
+        <Annotation.Selection>
+          <Button
+            type="button"
+            size="sm"
+            className="fixed z-50 h-8 -translate-x-1/2 gap-1.5 rounded-full px-3 text-sm shadow-lg"
+            style={{
+              left: selection.x,
+              top: selection.below ? selection.y : undefined,
+              bottom: selection.below
+                ? undefined
+                : globalThis.innerHeight - selection.y,
+            }}
+            onPointerDown={(event) => event.preventDefault()}
+            onClick={() => {
+              addAnnotation(selection.message, selection.excerpt)
+              globalThis.getSelection()?.removeAllRanges()
+              setSelection(null)
+            }}
+          >
+            <MessageSquareQuote aria-hidden="true" />
+            Add to chat
+          </Button>
+        </Annotation.Selection>
       )}
     </section>
   )
@@ -216,6 +224,7 @@ export function UserMessageCluster({
                     key={`${annotation.messageId}:${index}`}
                     message={messagesById.get(annotation.messageId)}
                     excerpt={annotation.excerpt}
+                    comment={annotation.comment}
                   />
                 ))}
                 <p dir="auto" className="text-start [unicode-bidi:plaintext]">
@@ -277,6 +286,7 @@ export function GroupReplyCluster({
                   key={`${annotation.messageId}:${index}`}
                   message={messagesById.get(annotation.messageId)}
                   excerpt={annotation.excerpt}
+                  comment={annotation.comment}
                 />
               ))}
               <div dir="auto" className="text-start [unicode-bidi:plaintext]">
@@ -288,6 +298,7 @@ export function GroupReplyCluster({
                     active={false}
                     chatId={chatId}
                     text={message.content}
+                    responseAnnotations={message.responseAnnotations}
                   />
                 </div>
                 <MessageTimestamp sentAt={message.sentAt} />
@@ -332,9 +343,11 @@ function ReplyButton({
 function ReplyQuote({
   message,
   excerpt,
+  comment,
 }: {
   message?: GroupMessage
   excerpt?: string
+  comment?: string
 }) {
   if (!message) return null
   return (
@@ -353,6 +366,7 @@ function ReplyQuote({
       >
         {excerpt ?? message.content}
       </p>
+      {comment && <p className="mt-1 text-xs text-foreground">{comment}</p>}
     </div>
   )
 }
@@ -409,16 +423,22 @@ interface AssistantMarkdownProps {
   active: boolean
   chatId?: string
   text: string
+  responseAnnotations?: readonly GroupMessageAnnotation[]
 }
 
 export function AssistantMarkdown({
   active,
   chatId,
   text,
+  responseAnnotations = [],
 }: AssistantMarkdownProps) {
   const remarkPlugins = useMemo(
-    () => (chatId ? artifactRemarkPlugins(chatId) : undefined),
+    () => responseAnnotationRemarkPlugins(chatId),
     [chatId]
+  )
+  const components = useMemo(
+    () => responseAnnotationComponents(responseAnnotations),
+    [responseAnnotations]
   )
   const trustedArtifactBaseUrl = chatId ? artifactBaseUrl(chatId) : null
   const linkSafety = useMemo(
@@ -434,6 +454,8 @@ export function AssistantMarkdown({
   return (
     <Streamdown
       className="contents space-y-2 [&>p:last-child]:inline"
+      allowedTags={{ "codex-annotation": ["index"] }}
+      components={components}
       linkSafety={linkSafety}
       mode={active ? "streaming" : "static"}
       remarkPlugins={remarkPlugins}

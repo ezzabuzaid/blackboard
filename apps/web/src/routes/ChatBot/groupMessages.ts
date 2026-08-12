@@ -14,11 +14,13 @@ export interface GroupMessage {
   sentAt: string
   replyToMessageId: string | null
   annotations: GroupMessageAnnotation[]
+  responseAnnotations?: GroupMessageAnnotation[]
 }
 
 export interface GroupMessageAnnotation {
   messageId: string
   excerpt: string
+  comment?: string
 }
 
 export interface GroupParticipant {
@@ -97,6 +99,19 @@ export function addGroupMessageAnnotation(
     : [...annotations, normalized]
 }
 
+export function updateGroupMessageAnnotationComment(
+  annotations: readonly GroupMessageAnnotation[],
+  target: GroupMessageAnnotation,
+  comment: string
+) {
+  return annotations.map((annotation) =>
+    annotation.messageId === target.messageId &&
+    annotation.excerpt === target.excerpt
+      ? { ...annotation, comment }
+      : annotation
+  )
+}
+
 export function isGroupMessage(value: unknown): value is GroupMessage {
   return (
     isRecord(value) &&
@@ -114,8 +129,20 @@ export function isGroupMessage(value: unknown): value is GroupMessage {
       (annotation) =>
         isRecord(annotation) &&
         typeof annotation.messageId === "string" &&
-        typeof annotation.excerpt === "string"
-    )
+        typeof annotation.excerpt === "string" &&
+        (annotation.comment === undefined ||
+          typeof annotation.comment === "string")
+    ) &&
+    (value.responseAnnotations === undefined ||
+      (Array.isArray(value.responseAnnotations) &&
+        value.responseAnnotations.every(
+          (annotation) =>
+            isRecord(annotation) &&
+            typeof annotation.messageId === "string" &&
+            typeof annotation.excerpt === "string" &&
+            (annotation.comment === undefined ||
+              typeof annotation.comment === "string")
+        )))
   )
 }
 

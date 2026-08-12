@@ -18,6 +18,7 @@ import { ParticipantDirectory } from "./group/participants/index.js"
 import { createWhatsAppSandbox } from "./group/sandbox.js"
 import { createParticipantDefaults } from "./participant-defaults.js"
 import { openArtifact, sandboxRoot } from "./sandbox.js"
+import { createOpenRouterTranscriber } from "./transcription.js"
 
 const dataDirectory = process.env.ZUKHRUF_DATA_DIR
 if (!dataDirectory) throw new Error("ZUKHRUF_DATA_DIR is required")
@@ -51,6 +52,13 @@ if (!openRouterAPIKey) throw new Error("OPENROUTER_API_KEY is required")
 const participantDefaults = createParticipantDefaults({
   apiKey: openRouterAPIKey,
   modelId: process.env.OPENROUTER_MODEL?.trim() || undefined,
+  appUrl: process.env.WEB_ORIGIN,
+})
+const transcribeAudio = createOpenRouterTranscriber({
+  apiKey: openRouterAPIKey,
+  model:
+    process.env.OPENROUTER_TRANSCRIPTION_MODEL?.trim() ||
+    "openai/gpt-4o-mini-transcribe",
   appUrl: process.env.WEB_ORIGIN,
 })
 
@@ -164,6 +172,7 @@ const app = createApp({
       }),
   },
   runtime,
+  transcribeAudio,
   openArtifact: (conversation, path) =>
     openArtifact(dataDirectory, conversation, path),
 })

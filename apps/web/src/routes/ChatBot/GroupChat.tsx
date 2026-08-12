@@ -8,6 +8,10 @@ import {
 
 import { api, apiUrl } from "./api"
 import {
+  readChatReferenceDraft,
+  writeChatReferenceDraft,
+} from "./chatReferenceDraft"
+import {
   addGroupMessage,
   addGroupMessageAnnotation,
   groupChatEventFromStreamPart,
@@ -17,6 +21,7 @@ import {
   type GroupChatState,
   type GroupMessage,
   type GroupMessageAnnotation,
+  updateGroupMessageAnnotationComment,
 } from "./groupMessages"
 
 interface GroupChat extends GroupChatState {
@@ -30,6 +35,10 @@ interface GroupChat extends GroupChatState {
   clearError(): void
   replyTo(message: GroupMessage): void
   addAnnotation(message: GroupMessage, excerpt: string): void
+  updateAnnotationComment(
+    annotation: GroupMessageAnnotation,
+    comment: string
+  ): void
   removeAnnotation(annotation: GroupMessageAnnotation): void
   cancelReply(): void
   postMessage(content: string): Promise<void>
@@ -58,13 +67,27 @@ export function GroupChatProvider({
   streamPath,
   children,
 }: GroupChatProviderProps) {
+  const [initialReferences] = useState(() => readChatReferenceDraft(chatId))
   const [chat, setChat] = useState(initialState)
   const [posting, setPosting] = useState(false)
   const [stopping, setStopping] = useState(false)
-  const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(null)
+  const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(() =>
+    initialReferences.replyToMessageId
+      ? (initialState.messages.find(
+          ({ id }) => id === initialReferences.replyToMessageId
+        ) ?? null)
+      : null
+  )
   const [annotations, setAnnotations] = useState<
     readonly GroupMessageAnnotation[]
-  >([])
+  >(() =>
+    initialReferences.annotations.filter((annotation) => {
+      const target = initialState.messages.find(
+        ({ id }) => id === annotation.messageId
+      )
+      return target?.content.includes(annotation.excerpt)
+    })
+  )
   const [error, setError] = useState<Error | null>(null)
 
   useEffect(() => {
@@ -113,6 +136,10 @@ export function GroupChatProvider({
       }))
       setReplyingTo(null)
       setAnnotations([])
+      writeChatReferenceDraft(chatId, {
+        replyToMessageId: null,
+        annotations: [],
+      })
     } catch (cause) {
       const nextError =
         cause instanceof Error
@@ -160,23 +187,58 @@ export function GroupChatProvider({
         annotations,
         error,
         clearError: () => setError(null),
-        replyTo: setReplyingTo,
+        replyTo: (message) => {
+          setReplyingTo(message)
+          writeChatReferenceDraft(chatId, {
+            replyToMessageId: message.id,
+            annotations: [...annotations],
+          })
+        },
         addAnnotation: (message, excerpt) =>
-          setAnnotations((current) =>
-            addGroupMessageAnnotation(current, {
+          setAnnotations((current) => {
+            const next = addGroupMessageAnnotation(current, {
               messageId: message.id,
               excerpt,
             })
-          ),
+            writeChatReferenceDraft(chatId, {
+              replyToMessageId: replyingTo?.id ?? null,
+              annotations: [...next],
+            })
+            return next
+          }),
+        updateAnnotationComment: (annotation, comment) =>
+          setAnnotations((current) => {
+            const next = updateGroupMessageAnnotationComment(
+              current,
+              annotation,
+              comment
+            )
+            writeChatReferenceDraft(chatId, {
+              replyToMessageId: replyingTo?.id ?? null,
+              annotations: next,
+            })
+            return next
+          }),
         removeAnnotation: (annotation) =>
-          setAnnotations((current) =>
-            current.filter(
+          setAnnotations((current) => {
+            const next = current.filter(
               ({ messageId, excerpt }) =>
                 messageId !== annotation.messageId ||
                 excerpt !== annotation.excerpt
             )
-          ),
-        cancelReply: () => setReplyingTo(null),
+            writeChatReferenceDraft(chatId, {
+              replyToMessageId: replyingTo?.id ?? null,
+              annotations: [...next],
+            })
+            return next
+          }),
+        cancelReply: () => {
+          setReplyingTo(null)
+          writeChatReferenceDraft(chatId, {
+            replyToMessageId: null,
+            annotations: [...annotations],
+          })
+        },
         postMessage,
         stop,
       }}

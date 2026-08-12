@@ -4,6 +4,7 @@ import {
 } from "@deepagents/experimental/zukhruf"
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
+import { HTTPException } from "hono/http-exception"
 import { getMimeType } from "hono/utils/mime"
 import { validate } from "@sdk-it/hono/runtime"
 import { z } from "zod"
@@ -14,11 +15,23 @@ import {
   WhatsAppGroupLimitError,
   WhatsAppReplyTargetError,
 } from "../group/whatsapp.js"
+import type { TranscriptionAudio } from "../transcription.js"
 
 export type OpenArtifact = (
   conversation: ConversationId,
   path: string
 ) => Promise<{ body: Uint8Array<ArrayBuffer>; size: number } | null>
+
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024
+const audioFormats = new Map<string, TranscriptionAudio["format"]>([
+  ["audio/aac", "aac"],
+  ["audio/flac", "flac"],
+  ["audio/mp4", "m4a"],
+  ["audio/mpeg", "mp3"],
+  ["audio/ogg", "ogg"],
+  ["audio/wav", "wav"],
+  ["audio/webm", "webm"],
+])
 
 export default function (router: Hono<AppEnv>) {
   router.use("/chat/*", async (context, next) => {
@@ -172,6 +185,48 @@ export default function (router: Hono<AppEnv>) {
   )
 
   /**
+   * @openapi transcribeChatAudio
+   * @tags chat
+   * @description Transcribes a recorded chat message with the configured OpenRouter model.
+   */
+  router.post(
+    "/chat/:chatId/transcription",
+    bodyLimit({
+      maxSize: MAX_AUDIO_BYTES,
+      onError: (context) =>
+        context.json({ error: "Audio recording is too large." }, 413),
+    }),
+    validate("multipart/form-data", (payload) => ({
+      chatId: { select: payload.params.chatId, against: z.string() },
+      audio: { select: payload.body.audio, against: z.instanceof(Blob) },
+    })),
+    async (context) => {
+      const { audio } = context.var.input
+      if (audio.size === 0) {
+        return context.json({ error: "Audio recording is empty." }, 400)
+      }
+
+      const format = audioFormats.get(audio.type)
+      if (!format) {
+        return context.json({ error: "Unsupported audio format." }, 415)
+      }
+
+      try {
+        const text = await context.var.dependencies.transcribeAudio({
+          bytes: new Uint8Array(await audio.arrayBuffer()),
+          format,
+        })
+        return context.json({ text })
+      } catch (cause) {
+        throw new HTTPException(502, {
+          message: "Voice transcription failed.",
+          cause,
+        })
+      }
+    }
+  )
+
+  /**
    * @openapi postChatMessage
    * @tags chat
    * @description Posts a message to a chat.
@@ -201,7 +256,13 @@ export default function (router: Hono<AppEnv>) {
       annotations: {
         select: payload.body.annotations,
         against: z
-          .array(z.object({ messageId: z.string(), excerpt: z.string() }))
+          .array(
+            z.object({
+              messageId: z.string(),
+              excerpt: z.string(),
+              comment: z.string().optional(),
+            })
+          )
           .optional(),
       },
     })),
@@ -213,18 +274,19 @@ export default function (router: Hono<AppEnv>) {
         !conversation ||
         !id.trim() ||
         id.length > 200 ||
-        !content.trim() ||
+        (!content.trim() && !annotations?.length) ||
         content.length > 8_000 ||
         (replyToMessageId !== undefined &&
           (!replyToMessageId.trim() || replyToMessageId.length > 200)) ||
         (annotations !== undefined &&
           (annotations.length > 20 ||
             annotations.some(
-              ({ messageId, excerpt }) =>
+              ({ messageId, excerpt, comment }) =>
                 !messageId.trim() ||
                 messageId.length > 200 ||
                 !excerpt.trim() ||
-                excerpt.length > 8_000
+                excerpt.length > 8_000 ||
+                (comment !== undefined && comment.length > 8_000)
             )))
       ) {
         return context.json({ error: "Invalid chat message." }, 400)
@@ -241,10 +303,13 @@ export default function (router: Hono<AppEnv>) {
               : {}),
             ...(annotations?.length
               ? {
-                  annotations: annotations.map(({ messageId, excerpt }) => ({
-                    messageId: messageId.trim(),
-                    excerpt: excerpt.trim(),
-                  })),
+                  annotations: annotations.map(
+                    ({ messageId, excerpt, comment }) => ({
+                      messageId: messageId.trim(),
+                      excerpt: excerpt.trim(),
+                      ...(comment?.trim() ? { comment: comment.trim() } : {}),
+                    })
+                  ),
                 }
               : {}),
           }

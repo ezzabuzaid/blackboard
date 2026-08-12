@@ -8,6 +8,10 @@ import { Streamdown } from "streamdown"
 
 import { artifactRemarkPlugins, sandboxArtifactUrl } from "./artifactLinks"
 import {
+  readChatReferenceDraft,
+  writeChatReferenceDraft,
+} from "./chatReferenceDraft"
+import {
   groupActivityIndicator,
   initialGroupActivity,
   reduceGroupActivity,
@@ -19,8 +23,13 @@ import {
   groupChatEventFromStreamPart,
   groupMessageClusters,
   reduceGroupChat,
+  updateGroupMessageAnnotationComment,
   type GroupChatState,
 } from "./groupMessages"
+import {
+  responseAnnotationComponents,
+  responseAnnotationRemarkPlugins,
+} from "./responseAnnotations"
 import { traceItems } from "./traces/agentTrace"
 import { loader } from "./loader"
 
@@ -311,6 +320,48 @@ test("annotations append without duplicating an existing excerpt", () => {
     { messageId: "message-2", excerpt: "second point" },
   ])
   assert.strictEqual(addGroupMessageAnnotation(second, second[0]!), second)
+})
+
+test("annotation comments update in place without changing selection order", () => {
+  const annotations = [
+    { messageId: "message-1", excerpt: "first" },
+    { messageId: "message-2", excerpt: "second" },
+  ]
+
+  assert.deepEqual(
+    updateGroupMessageAnnotationComment(annotations, annotations[0]!, "why?"),
+    [
+      { messageId: "message-1", excerpt: "first", comment: "why?" },
+      { messageId: "message-2", excerpt: "second" },
+    ]
+  )
+})
+
+test("annotation-only drafts retain ordered comments", () => {
+  try {
+    localStorage.clear()
+    const draft = {
+      replyToMessageId: null,
+      annotations: [
+        {
+          messageId: "message-1",
+          excerpt: "first",
+          comment: "Why?",
+        },
+        { messageId: "message-2", excerpt: "second" },
+      ],
+    }
+
+    writeChatReferenceDraft("chat-1", draft)
+
+    assert.deepEqual(readChatReferenceDraft("chat-1"), draft)
+    assert.deepEqual(readChatReferenceDraft("chat-2"), {
+      replyToMessageId: null,
+      annotations: [],
+    })
+  } finally {
+    localStorage.clear()
+  }
 })
 
 test("chat events append in order and ignore reconnect duplicates", () => {
@@ -629,4 +680,29 @@ test("assistant artifact links resolve through the chat API", () => {
 
   assert.match(html, /data-streamdown="link"/)
   assert.doesNotMatch(html, /\[blocked\]/)
+})
+
+test("assistant annotation directives render as numbered inline controls", () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      Streamdown,
+      {
+        mode: "static",
+        allowedTags: { "codex-annotation": ["index"] },
+        components: responseAnnotationComponents([
+          {
+            messageId: "message-1",
+            excerpt: "one market",
+            comment: "Why only one?",
+          },
+        ]),
+        remarkPlugins: responseAnnotationRemarkPlugins(),
+      },
+      'That scope is deliberate. :codex-annotation{index="1"}'
+    )
+  )
+
+  assert.match(html, /<button[^>]+aria-label="Annotation 1: one market"/u)
+  assert.match(html, />Annotation 1<\/button>/u)
+  assert.doesNotMatch(html, /:codex-annotation/u)
 })

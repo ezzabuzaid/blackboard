@@ -45,11 +45,13 @@ export interface WhatsAppMessage {
   sentAt: string
   replyToMessageId: string | null
   annotations: WhatsAppMessageAnnotation[]
+  responseAnnotations?: WhatsAppMessageAnnotation[]
 }
 
 export interface WhatsAppMessageAnnotation {
   messageId: string
   excerpt: string
+  comment?: string
 }
 
 export type WhatsAppParticipantPresence = "idle" | "reading" | "typing" | "seen"
@@ -160,6 +162,7 @@ interface RunningParticipant {
   active: boolean
   seenThroughSequence: number
   pendingReminder?: string
+  responseAnnotations: WhatsAppMessageAnnotation[]
   turnId?: string
 }
 
@@ -335,6 +338,7 @@ export class WhatsAppGroup implements AsyncDisposable {
                 "If yes, call reply_to_group with the concise message you want everyone to see.",
                 "Omit replyToMessageId for ordinary responses to the latest user message or current discussion. Set it only to emphasize a particular earlier message or directly reply to another participant's message.",
                 "When emphasizing exact quotes, add each one to annotations with its target messageId and verbatim excerpt.",
+                'When a notification includes "# Response annotations", address every comment and append :codex-annotation{index="N"} for each annotation you address, using its one-based array index.',
                 "If reply_to_group reports transcript_changed, reconsider the new messages. When the human addressed the whole group and you have not replied yet, retry your brief acknowledgment; otherwise retry only with a distinct contribution or remain silent.",
                 "If no useful contribution remains, do not call reply_to_group.",
               ],
@@ -402,6 +406,10 @@ export class WhatsAppGroup implements AsyncDisposable {
                           maxLength: 8_000,
                           pattern: "\\S",
                         },
+                        comment: {
+                          type: "string",
+                          maxLength: 8_000,
+                        },
                       },
                       required: ["messageId", "excerpt"],
                       additionalProperties: false,
@@ -440,6 +448,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         runtime,
         active: false,
         seenThroughSequence: 0,
+        responseAnnotations: [],
         pendingReminder: joining
           ? "You just joined an ongoing group chat. Read the full public conversation included in this notification, then greet the group once with a brief, natural introduction."
           : options.participants.length === 1
@@ -485,7 +494,9 @@ export class WhatsAppGroup implements AsyncDisposable {
   ) {
     if (this.#closed) throw new Error("WhatsAppGroup is closed")
     const message = content.trim()
-    if (!message) throw new Error("WhatsAppGroup message cannot be empty")
+    if (!message && !annotations?.length) {
+      throw new Error("WhatsAppGroup message cannot be empty")
+    }
     if (!this.#pump) {
       this.#stopRequested = null
       this.#agentMessages = 0
@@ -568,7 +579,8 @@ export class WhatsAppGroup implements AsyncDisposable {
     content: string,
     id: string = randomUUID(),
     replyToMessageId?: string,
-    annotations: readonly WhatsAppMessageAnnotation[] = []
+    annotations: readonly WhatsAppMessageAnnotation[] = [],
+    responseAnnotations: readonly WhatsAppMessageAnnotation[] = []
   ) {
     const existing = this.#messagesById.get(id)
     if (existing) return existing
@@ -580,10 +592,13 @@ export class WhatsAppGroup implements AsyncDisposable {
     if (replyToMessageId && !this.#messagesById.has(replyToMessageId)) {
       throw new WhatsAppReplyTargetError("Reply target was not found")
     }
-    const normalizedAnnotations = annotations.map(({ messageId, excerpt }) => ({
-      messageId: messageId.trim(),
-      excerpt: excerpt.trim(),
-    }))
+    const normalizedAnnotations = annotations.map(
+      ({ messageId, excerpt, comment }) => ({
+        messageId: messageId.trim(),
+        excerpt: excerpt.trim(),
+        ...(comment?.trim() ? { comment: comment.trim() } : {}),
+      })
+    )
     for (const annotation of normalizedAnnotations) {
       const target = this.#messagesById.get(annotation.messageId)
       if (
@@ -607,6 +622,13 @@ export class WhatsAppGroup implements AsyncDisposable {
       sentAt: new Date().toISOString(),
       replyToMessageId: replyToMessageId ?? null,
       annotations: normalizedAnnotations,
+      ...(responseAnnotations.length > 0
+        ? {
+            responseAnnotations: responseAnnotations.map((item) => ({
+              ...item,
+            })),
+          }
+        : {}),
     }
     this.#messages.push(message)
     this.#messagesById.set(id, message)
@@ -656,12 +678,20 @@ export class WhatsAppGroup implements AsyncDisposable {
         ? normalizedTargetId
         : undefined
     const targetAnnotations = annotations
-      ?.map(({ messageId, excerpt }) => ({
+      ?.map(({ messageId, excerpt, comment }) => ({
         messageId: messageId.trim(),
         excerpt: excerpt.trim(),
+        ...(comment?.trim() ? { comment: comment.trim() } : {}),
       }))
       .filter(({ messageId }) => this.#messagesById.has(messageId))
-    await this.#post(author, content, randomUUID(), targetId, targetAnnotations)
+    await this.#post(
+      author,
+      content,
+      randomUUID(),
+      targetId,
+      targetAnnotations,
+      participant.responseAnnotations
+    )
     return { posted: true }
   }
 
@@ -798,6 +828,9 @@ export class WhatsAppGroup implements AsyncDisposable {
       notifications.at(-1)?.sequence ?? 0
     )
     participant.active = true
+    participant.responseAnnotations = notifications.flatMap(
+      ({ annotations }) => annotations
+    )
     try {
       await this.#emitActivity({
         type: "participant",
@@ -887,6 +920,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       }
     } finally {
       participant.active = false
+      participant.responseAnnotations = []
       participant.turnId = undefined
     }
   }
@@ -950,6 +984,9 @@ export class WhatsAppGroup implements AsyncDisposable {
   }
 
   #notification(messages: WhatsAppMessage[], reminder?: string) {
+    const responseAnnotations = messages.flatMap(
+      ({ annotations }) => annotations
+    )
     return [
       "New WhatsApp group messages:",
       "",
@@ -958,18 +995,18 @@ export class WhatsAppGroup implements AsyncDisposable {
         ...(message.replyToMessageId
           ? [this.#replyContext(message.replyToMessageId)]
           : []),
-        ...message.annotations.map((annotation) =>
-          this.#annotationContext(annotation)
-        ),
         message.content,
         "",
       ]),
+      ...(responseAnnotations.length > 0
+        ? [responseAnnotationsPrompt(responseAnnotations), ""]
+        : []),
       ...(reminder
         ? [`<system-reminder>${reminder}</system-reminder>`, ""]
         : []),
       "Reply only through reply_to_group when you have something useful to add.",
       "Omit replyToMessageId by default. It points to one earlier public message in the UI; use it only to emphasize that message or when directly replying to another participant. Do not use it for an ordinary response to the latest user message or current discussion.",
-      "Use annotations only for exact excerpts you want to emphasize; each annotation names its own earlier public message.",
+      "Use annotations in reply_to_group only for exact excerpts you want to emphasize; each annotation names its own earlier public message.",
     ].join("\n")
   }
 
@@ -978,13 +1015,6 @@ export class WhatsAppGroup implements AsyncDisposable {
     return target
       ? `Replying to [${target.id}] ${target.author}: ${target.content}`
       : `Replying to [${replyToMessageId}]`
-  }
-
-  #annotationContext({ messageId, excerpt }: WhatsAppMessageAnnotation) {
-    const target = this.#messagesById.get(messageId)
-    return target
-      ? `Annotated excerpt from [${target.id}] ${target.author}: ${JSON.stringify(excerpt)}`
-      : `Annotated excerpt from [${messageId}]: ${JSON.stringify(excerpt)}`
   }
 
   async #deliverToActiveParticipants(message: WhatsAppMessage) {
@@ -1005,13 +1035,14 @@ export class WhatsAppGroup implements AsyncDisposable {
       ...(message.replyToMessageId
         ? [this.#replyContext(message.replyToMessageId)]
         : []),
-      ...message.annotations.map((annotation) =>
-        this.#annotationContext(annotation)
-      ),
+      ...(message.annotations.length > 0
+        ? [responseAnnotationsPrompt(message.annotations)]
+        : []),
     ]
 
     await Promise.all(
       recipients.map(async (participant) => {
+        participant.responseAnnotations.push(...message.annotations)
         await participant.runtime.deliver(
           createInterAgentCommunication({
             id: `${message.id}:${participant.conversation.chatId}`,
@@ -1085,6 +1116,23 @@ export class WhatsAppGroup implements AsyncDisposable {
       names.add(normalizedName)
     }
   }
+}
+
+function responseAnnotationsPrompt(
+  annotations: readonly WhatsAppMessageAnnotation[]
+) {
+  return [
+    "# Response annotations:",
+    'Each item contains text selected from an earlier response and may include a user comment. Treat items as Annotation 1, Annotation 2, and so on in array order. Use every selection as context and address every comment. For every annotation you address, include its inline directive `:codex-annotation{index="N"}`, where N is its one-based array position. Do not use unstructured annotation labels.',
+    "<response-annotations>",
+    JSON.stringify(
+      annotations.map(({ excerpt, comment }) => ({
+        text: excerpt,
+        annotation: comment ?? "",
+      }))
+    ),
+    "</response-annotations>",
+  ].join("\n")
 }
 
 function normalizedText(value: string) {

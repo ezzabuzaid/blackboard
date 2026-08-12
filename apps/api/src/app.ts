@@ -15,6 +15,7 @@ import type { MarketplaceGroupTemplateStore } from "./group/marketplace-group-te
 import type { GroupShareStore } from "./group/share-store.js"
 import type { AgentTemplate } from "./group/participants/agent-catalog.js"
 import type { OpenArtifact } from "./routes/chat.route.js"
+import type { TranscriptionAudio } from "./transcription.js"
 
 const configuredOrigin = process.env.WEB_ORIGIN
 const routes = await Promise.all([
@@ -65,6 +66,7 @@ export interface AppDependencies {
   > &
     Parameters<typeof zukhruf>[0]
   openArtifact: OpenArtifact
+  transcribeAudio(audio: TranscriptionAudio): Promise<string>
 }
 
 export type AppEnv = {
