@@ -7,6 +7,8 @@ export type MarketplaceGroupTemplateInput = Omit<GroupTemplate, "id">
 
 export interface MarketplaceGroupTemplate {
   id: string
+  sourceGroupId: string | null
+  publisherName: string | null
   name: string
   category: string
   outcome: string
@@ -16,6 +18,8 @@ export interface MarketplaceGroupTemplate {
 
 type MarketplaceGroupTemplateRow = {
   id: string
+  source_group_id: string | null
+  publisher_name: string | null
   name: string
   category: string
   outcome: string
@@ -41,6 +45,8 @@ export class MarketplaceGroupTemplateStore implements Disposable {
       CREATE TABLE IF NOT EXISTS marketplace_group_templates (
         id TEXT PRIMARY KEY,
         publisher_id TEXT NOT NULL,
+        publisher_name TEXT NOT NULL,
+        source_group_id TEXT,
         name TEXT NOT NULL,
         category TEXT NOT NULL,
         outcome TEXT NOT NULL,
@@ -48,27 +54,55 @@ export class MarketplaceGroupTemplateStore implements Disposable {
         published INTEGER NOT NULL CHECK (published IN (0, 1))
       ) STRICT
     `)
+    const columns = new Set(
+      (
+        this.#database
+          .prepare("PRAGMA table_info(marketplace_group_templates)")
+          .all() as { name: string }[]
+      ).map(({ name }) => name)
+    )
+    if (!columns.has("publisher_name")) {
+      this.#database.exec(
+        "ALTER TABLE marketplace_group_templates ADD COLUMN publisher_name TEXT"
+      )
+    }
+    if (!columns.has("source_group_id")) {
+      this.#database.exec(
+        "ALTER TABLE marketplace_group_templates ADD COLUMN source_group_id TEXT"
+      )
+    }
+    this.#database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS marketplace_group_templates_source_group
+      ON marketplace_group_templates (publisher_id, source_group_id)
+      WHERE source_group_id IS NOT NULL
+    `)
   }
 
   create(
     publisherId: string,
-    input: MarketplaceGroupTemplateInput
+    publisherName: string,
+    input: MarketplaceGroupTemplateInput,
+    sourceGroupId: string | null = null
   ): MarketplaceGroupTemplate {
     const definition = this.#normalize(input)
     const template = {
       id: randomUUID(),
+      sourceGroupId,
+      publisherName,
       ...definition,
       published: false,
     }
     this.#database
       .prepare(
         `INSERT INTO marketplace_group_templates
-           (id, publisher_id, name, category, outcome, agents, published)
-         VALUES (?, ?, ?, ?, ?, ?, 0)`
+           (id, publisher_id, publisher_name, source_group_id, name, category, outcome, agents, published)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`
       )
       .run(
         template.id,
         publisherId,
+        template.publisherName,
+        template.sourceGroupId,
         template.name,
         template.category,
         template.outcome,
@@ -103,7 +137,7 @@ export class MarketplaceGroupTemplateStore implements Disposable {
   published(): readonly MarketplaceGroupTemplate[] {
     const rows = this.#database
       .prepare(
-        `SELECT id, name, category, outcome, agents, published
+        `SELECT id, source_group_id, publisher_name, name, category, outcome, agents, published
          FROM marketplace_group_templates
          WHERE published = 1
          ORDER BY rowid`
@@ -115,11 +149,26 @@ export class MarketplaceGroupTemplateStore implements Disposable {
   findPublished(id: string): MarketplaceGroupTemplate | null {
     const row = this.#database
       .prepare(
-        `SELECT id, name, category, outcome, agents, published
+        `SELECT id, source_group_id, publisher_name, name, category, outcome, agents, published
          FROM marketplace_group_templates
          WHERE id = ? AND published = 1`
       )
       .get(id) as MarketplaceGroupTemplateRow | undefined
+    return row ? toMarketplaceGroupTemplate(row) : null
+  }
+
+  findBySourceGroup(
+    publisherId: string,
+    sourceGroupId: string
+  ): MarketplaceGroupTemplate | null {
+    const row = this.#database
+      .prepare(
+        `SELECT id, source_group_id, publisher_name, name, category, outcome, agents, published
+         FROM marketplace_group_templates
+         WHERE publisher_id = ? AND source_group_id = ?`
+      )
+      .get(publisherId, sourceGroupId) as
+      MarketplaceGroupTemplateRow | undefined
     return row ? toMarketplaceGroupTemplate(row) : null
   }
 
@@ -149,7 +198,7 @@ export class MarketplaceGroupTemplateStore implements Disposable {
   #get(publisherId: string, id: string): MarketplaceGroupTemplate | null {
     const row = this.#database
       .prepare(
-        `SELECT id, name, category, outcome, agents, published
+        `SELECT id, source_group_id, publisher_name, name, category, outcome, agents, published
          FROM marketplace_group_templates
          WHERE publisher_id = ? AND id = ?`
       )
@@ -220,6 +269,8 @@ function toMarketplaceGroupTemplate(
 ): MarketplaceGroupTemplate {
   return {
     id: row.id,
+    sourceGroupId: row.source_group_id,
+    publisherName: row.publisher_name,
     name: row.name,
     category: row.category,
     outcome: row.outcome,

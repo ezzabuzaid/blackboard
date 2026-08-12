@@ -190,11 +190,17 @@ const unusedMarketplaceTemplates: AppDependencies["marketplaceTemplates"] = {
   findPublished() {
     return null
   },
+  findBySourceGroup() {
+    return null
+  },
 }
 const authenticatedAuth: AppDependencies["auth"] = {
   handler: async () => new Response(null, { status: 404 }),
-  getSession: async () => ({ user: { id: "local-user" } }),
-  getSessionResponse: async () => Response.json({ user: { id: "local-user" } }),
+  getSession: async () => ({
+    user: { id: "local-user", name: "Local User" },
+  }),
+  getSessionResponse: async () =>
+    Response.json({ user: { id: "local-user", name: "Local User" } }),
 }
 
 function testApp({
@@ -415,7 +421,9 @@ test("a publisher owns the marketplace template lifecycle", async () => {
     marketplaceTemplates,
     auth: {
       ...authenticatedAuth,
-      getSession: async () => ({ user: { id: userId } }),
+      getSession: async () => ({
+        user: { id: userId, name: "Publisher One" },
+      }),
     },
   })
   const input = {
@@ -437,6 +445,7 @@ test("a publisher owns the marketplace template lifecycle", async () => {
   })
   assert.equal(createResponse.status, 201)
   const created = (await createResponse.json()) as MarketplaceGroupTemplate
+  assert.equal(created.publisherName, "Publisher One")
   assert.equal(created.published, false)
 
   const invalidResponse = await application.request("/api/group-templates", {
@@ -496,11 +505,215 @@ test("a publisher owns the marketplace template lifecycle", async () => {
   )
 })
 
+test("an owned group saves one marketplace template from its roster", async () => {
+  using marketplaceTemplates = new MarketplaceGroupTemplateStore(":memory:", [
+    "annie-duke",
+    "paul-graham",
+  ])
+  let userId = "publisher-1"
+  const group = testGroupRecord("group-1", "Founder Board", [
+    "annie-duke",
+    "paul-graham",
+  ])
+  const application = testApp({
+    agents: [
+      {
+        id: "annie-duke",
+        name: "Annie Duke",
+        category: "Decide",
+        headline: "thinking in bets",
+        tags: ["decision-making"],
+      },
+      {
+        id: "paul-graham",
+        name: "Paul Graham",
+        category: "Fund",
+        headline: "YC's essayist-in-chief",
+        tags: ["strategy"],
+      },
+    ],
+    auth: {
+      ...authenticatedAuth,
+      getSession: async () => ({
+        user: { id: userId, name: "Publisher One" },
+      }),
+    },
+    getGroup: (requestedUserId, groupId) =>
+      requestedUserId === "publisher-1" && groupId === group.id ? group : null,
+    marketplaceTemplates,
+  })
+
+  const initial = await application.request(
+    "/api/groups/group-1/marketplace-template"
+  )
+  assert.equal(initial.status, 200)
+  assert.deepEqual(await initial.json(), {
+    template: null,
+    group: { id: "group-1", name: "Founder Board" },
+    agents: [
+      {
+        id: "annie-duke",
+        name: "Annie Duke",
+        headline: "thinking in bets",
+        responsibility: "thinking in bets",
+      },
+      {
+        id: "paul-graham",
+        name: "Paul Graham",
+        headline: "YC's essayist-in-chief",
+        responsibility: "YC's essayist-in-chief",
+      },
+    ],
+  })
+
+  const input = {
+    category: "Strategy",
+    outcome: "Challenge the next company decision.",
+    agents: [
+      {
+        agentId: "annie-duke",
+        responsibility: "Calibrates uncertain decisions.",
+      },
+      {
+        agentId: "paul-graham",
+        responsibility: "Keeps the company focused on users.",
+      },
+    ],
+  }
+  const createdResponse = await application.request(
+    "/api/groups/group-1/marketplace-template",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    }
+  )
+  assert.equal(createdResponse.status, 201)
+  const created = (await createdResponse.json()) as MarketplaceGroupTemplate
+  assert.deepEqual(created, {
+    id: created.id,
+    sourceGroupId: "group-1",
+    publisherName: "Publisher One",
+    name: "Founder Board",
+    ...input,
+    published: false,
+  })
+
+  const updatedResponse = await application.request(
+    "/api/groups/group-1/marketplace-template",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...input, outcome: "Make one clear decision." }),
+    }
+  )
+  assert.equal(updatedResponse.status, 200)
+  assert.equal(
+    ((await updatedResponse.json()) as MarketplaceGroupTemplate).id,
+    created.id
+  )
+
+  const wrongRoster = await application.request(
+    "/api/groups/group-1/marketplace-template",
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...input, agents: input.agents.slice(0, 1) }),
+    }
+  )
+  assert.equal(wrongRoster.status, 400)
+
+  userId = "publisher-2"
+  assert.equal(
+    (await application.request("/api/groups/group-1/marketplace-template"))
+      .status,
+    404
+  )
+})
+
+test("legacy marketplace listings remain readable when attribution is added", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "marketplace-migration-"))
+  const databasePath = join(directory, "group-templates.sqlite")
+  try {
+    const database = new DatabaseSync(databasePath)
+    database.exec(`
+      CREATE TABLE marketplace_group_templates (
+        id TEXT PRIMARY KEY,
+        publisher_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        outcome TEXT NOT NULL,
+        agents TEXT NOT NULL,
+        published INTEGER NOT NULL CHECK (published IN (0, 1))
+      ) STRICT
+    `)
+    database
+      .prepare(
+        `INSERT INTO marketplace_group_templates
+           (id, publisher_id, name, category, outcome, agents, published)
+         VALUES (?, ?, ?, ?, ?, ?, 1)`
+      )
+      .run(
+        "legacy-template",
+        "publisher-1",
+        "Legacy Board",
+        "Strategy",
+        "Preserve this published group.",
+        JSON.stringify([
+          {
+            agentId: "paul-graham",
+            responsibility: "Keeps the company focused on users.",
+          },
+        ])
+      )
+    database.close()
+
+    using marketplaceTemplates = new MarketplaceGroupTemplateStore(
+      databasePath,
+      ["paul-graham"]
+    )
+    assert.equal(
+      marketplaceTemplates.create("publisher-1", "Publisher One", {
+        name: "Founder Board",
+        category: "Strategy",
+        outcome: "Challenge the next company decision.",
+        agents: [
+          {
+            agentId: "paul-graham",
+            responsibility: "Keeps the company focused on users.",
+          },
+        ],
+      }).publisherName,
+      "Publisher One"
+    )
+    assert.deepEqual(
+      marketplaceTemplates.published().find(({ id }) => id === "legacy-template"),
+      {
+        id: "legacy-template",
+        sourceGroupId: null,
+        publisherName: null,
+        name: "Legacy Board",
+        category: "Strategy",
+        outcome: "Preserve this published group.",
+        agents: [
+          {
+            agentId: "paul-graham",
+            responsibility: "Keeps the company focused on users.",
+          },
+        ],
+        published: true,
+      }
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
 test("published marketplace templates create ordinary groups", async () => {
   using marketplaceTemplates = new MarketplaceGroupTemplateStore(":memory:", [
     "paul-graham",
   ])
-  const template = marketplaceTemplates.create("publisher-1", {
+  const template = marketplaceTemplates.create("publisher-1", "Publisher One", {
     name: "Founder Board",
     category: "Strategy",
     outcome: "Challenge the next company decision.",
@@ -539,6 +752,7 @@ test("published marketplace templates create ordinary groups", async () => {
     list.templates.find(({ id }) => id === template.id),
     {
       id: template.id,
+      publisherName: "Publisher One",
       name: "Founder Board",
       category: "Strategy",
       outcome: "Challenge the next company decision.",

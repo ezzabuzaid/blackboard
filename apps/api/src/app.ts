@@ -5,6 +5,7 @@ import {
   zukhruf,
   type ConversationId,
 } from "@deepagents/experimental/zukhruf"
+import type { User } from "better-auth"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
 
@@ -49,10 +50,13 @@ export interface AppDependencies {
     | "unpublish"
     | "published"
     | "findPublished"
+    | "findBySourceGroup"
   >
   auth: {
     handler(request: Request): Promise<Response>
-    getSession(headers: Headers): Promise<{ user: { id: string } } | null>
+    getSession(
+      headers: Headers
+    ): Promise<{ user: Pick<User, "id" | "name"> } | null>
     getSessionResponse(request: Request): Promise<Response>
   }
   runtime: Pick<
@@ -64,7 +68,11 @@ export interface AppDependencies {
 }
 
 export type AppEnv = {
-  Variables: { userId: string; dependencies: AppDependencies }
+  Variables: {
+    userId: string
+    publisherName: string
+    dependencies: AppDependencies
+  }
 }
 
 /**

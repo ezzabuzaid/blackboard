@@ -105,6 +105,7 @@ function NotificationBanner() {
 interface GroupPreview {
   id: string
   name: string
+  agentIds: readonly string[]
   preview: string
   time: string
   initials: string
@@ -198,6 +199,7 @@ function useData(query: string): readonly GroupPreview[] {
       return {
         id: group.id,
         name: group.name,
+        agentIds: group.agentIds,
         preview: active
           ? activePreview
           : message
@@ -216,8 +218,7 @@ function useData(query: string): readonly GroupPreview[] {
     .filter(({ name }) => name.toLocaleLowerCase().includes(normalizedQuery))
     .toSorted(
       (left, right) =>
-        Number(right.pinned) - Number(left.pinned) ||
-        right.sortAt - left.sortAt
+        Number(right.pinned) - Number(left.pinned) || right.sortAt - left.sortAt
     )
 }
 
@@ -271,6 +272,7 @@ function GroupListItem({ group }: { group: GroupPreview }) {
         <GroupRowMenu
           groupId={group.id}
           name={group.name}
+          agentIds={group.agentIds}
           pinned={group.pinned}
           active={group.active}
         />

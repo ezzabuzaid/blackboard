@@ -14,26 +14,57 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@stdlib/shadcn"
-import { Archive, ChevronDown, CircleMinus, Pin, PinOff } from "lucide-react"
+import {
+  Archive,
+  ChevronDown,
+  CircleMinus,
+  Pin,
+  PinOff,
+  Store,
+} from "lucide-react"
 import { useState } from "react"
 import { useRevalidator } from "react-router"
 
 import { api } from "./api"
+import {
+  loadMarketplaceEditor,
+  MarketplaceTemplateDialog,
+  type MarketplaceEditor,
+} from "./MarketplaceTemplateDialog"
 
 export function GroupRowMenu({
   groupId,
   name,
+  agentIds,
   pinned,
   active,
 }: {
   groupId: string
   name: string
+  agentIds: readonly string[]
   pinned: boolean
   active: boolean
 }) {
   const { revalidate } = useRevalidator()
   const [confirmingClear, setConfirmingClear] = useState(false)
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false)
+  const [marketplaceEditor, setMarketplaceEditor] =
+    useState<MarketplaceEditor | null>(null)
+  const [marketplaceLoading, setMarketplaceLoading] = useState(false)
+  const [marketplaceError, setMarketplaceError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
+
+  async function loadMarketplace() {
+    setMarketplaceLoading(true)
+    setMarketplaceError(null)
+    try {
+      setMarketplaceEditor(await loadMarketplaceEditor(groupId))
+    } catch {
+      setMarketplaceError("Could not load this marketplace template.")
+    } finally {
+      setMarketplaceLoading(false)
+    }
+  }
 
   async function run(action: () => Promise<unknown>) {
     setPending(true)
@@ -49,7 +80,11 @@ export function GroupRowMenu({
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (open && agentIds.length > 0) void loadMarketplace()
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <Button
             type="button"
@@ -81,6 +116,22 @@ export function GroupRowMenu({
               <Pin aria-hidden="true" />
             )}
             {pinned ? "Unpin chat" : "Pin chat"}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={pending || agentIds.length === 0}
+            title={
+              agentIds.length === 0
+                ? "Add at least one agent before publishing"
+                : undefined
+            }
+            onSelect={() => setMarketplaceOpen(true)}
+          >
+            <Store aria-hidden="true" />
+            {marketplaceLoading
+              ? "Loading template…"
+              : marketplaceEditor?.template?.published
+                ? "Manage marketplace template"
+                : "Publish as template"}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={pending}
@@ -135,6 +186,18 @@ export function GroupRowMenu({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {agentIds.length > 0 && (
+        <MarketplaceTemplateDialog
+          open={marketplaceOpen}
+          editor={marketplaceEditor}
+          loading={marketplaceLoading}
+          error={marketplaceError}
+          onOpenChange={setMarketplaceOpen}
+          onEditorChange={setMarketplaceEditor}
+          onRetry={() => void loadMarketplace()}
+        />
+      )}
     </>
   )
 }

@@ -1,10 +1,11 @@
 import type { Context, Hono } from "hono"
 import { validate } from "@sdk-it/hono/runtime"
+import type { User } from "better-auth"
 
 import type { AppEnv } from "../app.js"
 
 interface AuthSession {
-  user: { id: string }
+  user: Pick<User, "id" | "name">
 }
 
 export default function (router: Hono<AppEnv>) {

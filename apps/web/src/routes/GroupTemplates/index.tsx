@@ -19,66 +19,28 @@ import {
   Link,
   useLoaderData,
   useNavigate,
-  type LoaderFunctionArgs,
 } from "react-router"
 
-import { requireIdentity } from "../../auth"
 import { api } from "../ChatBot/api"
-import { toggleAgentSelection } from "./selection"
+import {
+  loader,
+  type CatalogAgent,
+  type GroupAgent,
+  type GroupTemplate,
+} from "./loader"
+import {
+  loginPathForTemplate,
+  matchesTemplateFilter,
+  toggleAgentSelection,
+} from "./selection"
 
-interface GroupAgent {
-  id: string
-  name: string
-  responsibility: string
-}
-
-interface CatalogAgent {
-  id: string
-  name: string
-  category: string
-  headline: string
-  tags: readonly string[]
-}
-
-interface GroupTemplate {
-  id: string
-  name: string
-  category: string
-  outcome: string
-  agents: readonly GroupAgent[]
-  source: "prebuilt" | "marketplace" | "custom"
-  custom?: boolean
-}
-
-const buildOwnTemplate: GroupTemplate = {
-  id: "custom",
-  name: "Build your own",
-  category: "Custom",
-  outcome: "Choose up to eight characters from the catalog.",
-  source: "custom",
-  custom: true,
-  agents: [],
-}
-
-export async function loader(args: LoaderFunctionArgs) {
-  await requireIdentity(args)
-  const [{ templates }, catalog] = await Promise.all([
-    api.request("GET /group-templates", {}, { signal: args.request.signal }),
-    api.request("GET /agents", {}, { signal: args.request.signal }) as Promise<{
-      agents: readonly CatalogAgent[]
-    }>,
-  ])
-  const groupTemplates: readonly GroupTemplate[] = [
-    ...templates,
-    buildOwnTemplate,
-  ]
-  return { catalogAgents: catalog.agents, groupTemplates }
-}
+export { loader }
 
 export default function GroupTemplates() {
-  const { catalogAgents, groupTemplates } = useLoaderData<typeof loader>()
+  const { signedIn, initialSelectedId, catalogAgents, groupTemplates } =
+    useLoaderData<typeof loader>()
   const [activeFilter, setActiveFilter] = useState("all")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId)
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
   const [customName, setCustomName] = useState("")
   const [startingId, setStartingId] = useState<string | null>(null)
@@ -92,22 +54,26 @@ export default function GroupTemplates() {
       : []
   })
   const templates = groupTemplates.map((template) =>
-    template.custom ? { ...template, agents: selectedAgents } : template
+    template.source === "custom"
+      ? { ...template, agents: selectedAgents }
+      : template
   )
   const filters = [
     { id: "all", label: "All" },
     { id: "source:prebuilt", label: "Prebuilt" },
+    { id: "source:marketplace", label: "Marketplace" },
     ...[...new Set(templates.map(({ category }) => category))].map(
       (category) => ({ id: `category:${category}`, label: category })
     ),
   ]
   const selected = templates.find(({ id }) => id === selectedId) ?? null
-  const visibleTemplates = templates.filter(
-    ({ source, category }) =>
-      activeFilter === "all" ||
-      activeFilter === `source:${source}` ||
-      activeFilter === `category:${category}`
+  const visibleTemplates = templates.filter((template) =>
+    matchesTemplateFilter(template, activeFilter)
   )
+
+  function signInFor(templateId: string) {
+    void navigate(loginPathForTemplate(templateId))
+  }
 
   function selectTemplate(id: string) {
     setSelectedId(id === selectedId ? null : id)
@@ -136,8 +102,12 @@ export default function GroupTemplates() {
 
   function startSelectedGroup() {
     if (!selected) return
+    if (!signedIn) {
+      signInFor(selected.id)
+      return
+    }
     void createGroup(
-      selected.custom
+      selected.source === "custom"
         ? {
             name: customName,
             agentIds: [...selectedAgentIds],
@@ -148,6 +118,10 @@ export default function GroupTemplates() {
   }
 
   function startFactory() {
+    if (!signedIn) {
+      signInFor("custom")
+      return
+    }
     void createGroup({ templateId: "scratch" }, "factory")
   }
 
@@ -338,11 +312,16 @@ function TemplateCard({
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           {template.outcome}
         </p>
+        {template.source === "marketplace" && template.publisherName && (
+          <p className="mt-2 text-xs text-muted-foreground">
+            By {template.publisherName}
+          </p>
+        )}
 
         <div className="mt-auto flex items-center gap-2 pt-4">
           <AgentAvatarGroup agents={template.agents} />
           <span className="text-[11px] text-muted-foreground">
-            {template.custom && template.agents.length === 0
+            {template.source === "custom" && template.agents.length === 0
               ? "Choose characters"
               : `${template.agents.length} ${
                   template.agents.length === 1 ? "agent" : "agents"
@@ -379,7 +358,7 @@ function SelectedGroupPanel({
   onStart(): void
   onStartFactory(): void
 }) {
-  if (template?.custom) {
+  if (template?.source === "custom") {
     return (
       <CustomGroupPanel
         agents={catalogAgents}

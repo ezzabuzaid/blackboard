@@ -2,6 +2,7 @@ import { Button, Input, Label } from "@stdlib/shadcn"
 import { KeyRound, LoaderCircle, MessageCircle } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import {
+  Link,
   replace,
   type LoaderFunctionArgs,
   useLocation,
@@ -90,10 +91,19 @@ export default function Login() {
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(2,18,12,0.18)_0%,transparent_45%,rgba(2,18,12,0.35)_100%)]" />
 
       <div className="relative z-10 mx-auto flex min-h-svh w-full max-w-[1440px] flex-col px-6 py-7 sm:px-10 sm:py-9 lg:px-14">
-        <div className="flex items-center gap-2.5 text-sm font-medium tracking-[0.16em] uppercase">
+        <nav
+          aria-label="Public navigation"
+          className="flex items-center gap-2.5 text-sm font-medium tracking-[0.16em] uppercase"
+        >
           <MessageCircle aria-hidden="true" className="size-5 text-[#eef771]" />
           Baseera
-        </div>
+          <Link
+            to="/groups/new"
+            className="ms-4 text-xs text-[#c7e6da]/75 normal-case transition-colors hover:text-[#eef771] focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#eef771]"
+          >
+            Catalog
+          </Link>
+        </nav>
 
         <div className="flex flex-1 items-center py-14 sm:py-20">
           <section

@@ -15,6 +15,7 @@ const authenticate: MiddlewareHandler<AppEnv> = async (context, next) => {
   if (!session) return context.json({ error: "Unauthorized." }, 401)
 
   context.set("userId", session.user.id)
+  context.set("publisherName", session.user.name)
   await next()
 }
 
@@ -38,8 +39,9 @@ export default function (router: Hono<AppEnv>) {
         })),
         ...context.var.dependencies.marketplaceTemplates
           .published()
-          .map(({ id, name, category, outcome, agents }) => ({
+          .map(({ id, publisherName, name, category, outcome, agents }) => ({
             id,
+            publisherName,
             name,
             category,
             outcome,
@@ -58,6 +60,132 @@ export default function (router: Hono<AppEnv>) {
           })),
         })),
       })
+    }
+  )
+
+  /**
+   * @openapi getGroupMarketplaceTemplate
+   * @tags group-templates
+   * @description Gets the marketplace template editor for one owned group.
+   */
+  router.get(
+    "/groups/:groupId/marketplace-template",
+    authenticate,
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    (context) => {
+      const userId = context.get("userId")
+      const group = context.var.dependencies.getGroup(
+        userId,
+        context.var.input.groupId
+      )
+      if (!group) return context.json({ error: "Group not found." }, 404)
+
+      const template =
+        context.var.dependencies.marketplaceTemplates.findBySourceGroup(
+          userId,
+          group.id
+        )
+      const responsibilities = new Map(
+        template?.agents.map(({ agentId, responsibility }) => [
+          agentId,
+          responsibility,
+        ])
+      )
+
+      return context.json({
+        template,
+        group: { id: group.id, name: group.name },
+        agents: group.agentIds.map((id) => {
+          const agent = context.var.dependencies.agents.find(
+            (candidate) => candidate.id === id
+          )!
+          return {
+            id,
+            name: agent.name,
+            headline: agent.headline,
+            responsibility: responsibilities.get(id) ?? agent.headline,
+          }
+        }),
+      })
+    }
+  )
+
+  /**
+   * @openapi saveGroupMarketplaceTemplate
+   * @tags group-templates
+   * @description Creates or updates the marketplace template for one owned group.
+   */
+  router.put(
+    "/groups/:groupId/marketplace-template",
+    authenticate,
+    bodyLimit({
+      maxSize: 10 * 1024,
+      onError: (context) =>
+        context.json({ error: "Group template request is too large." }, 413),
+    }),
+    validator("json", (body) => body),
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+      category: { select: payload.body.category, against: z.string() },
+      outcome: { select: payload.body.outcome, against: z.string() },
+      agents: {
+        select: payload.body.agents,
+        against: z.array(
+          z.object({ agentId: z.string(), responsibility: z.string() })
+        ),
+      },
+    })),
+    (context) => {
+      const userId = context.get("userId")
+      const { groupId, category, outcome, agents } = context.var.input
+      const group = context.var.dependencies.getGroup(userId, groupId)
+      if (!group) return context.json({ error: "Group not found." }, 404)
+
+      const selected = new Set(agents.map(({ agentId }) => agentId))
+      if (
+        selected.size !== agents.length ||
+        agents.length !== group.agentIds.length ||
+        group.agentIds.some((id) => !selected.has(id))
+      ) {
+        return context.json(
+          { error: "Template agents must match the group roster." },
+          400
+        )
+      }
+
+      const definition = { name: group.name, category, outcome, agents }
+      try {
+        const existing =
+          context.var.dependencies.marketplaceTemplates.findBySourceGroup(
+            userId,
+            group.id
+          )
+        if (existing) {
+          return context.json(
+            context.var.dependencies.marketplaceTemplates.update(
+              userId,
+              existing.id,
+              definition
+            )!
+          )
+        }
+        return context.json(
+          context.var.dependencies.marketplaceTemplates.create(
+            userId,
+            context.get("publisherName"),
+            definition,
+            group.id
+          ),
+          201
+        )
+      } catch (error) {
+        if (error instanceof MarketplaceGroupTemplateInputError) {
+          return context.json({ error: error.message }, 400)
+        }
+        throw error
+      }
     }
   )
 
@@ -91,6 +219,7 @@ export default function (router: Hono<AppEnv>) {
         return context.json(
           context.var.dependencies.marketplaceTemplates.create(
             context.get("userId"),
+            context.get("publisherName"),
             context.var.input
           ),
           201
