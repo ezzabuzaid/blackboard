@@ -2,6 +2,8 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { RouterProvider } from "react-router"
 
+import "@genui/annotation/styles.css"
+
 import { router } from "./router"
 
 const root = document.getElementById("root")

@@ -7,11 +7,14 @@
     "dev": "vite",
     "build": "vite build",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
-    "test": "node --import tsx --test src/routes/ChatBot/index.test.ts src/routes/GroupTemplates/index.test.ts",
+    "test": "node --experimental-webstorage --localstorage-file=node_modules/.web-test-localstorage.db --import tsx --test src/routes/ChatBot/index.test.ts src/routes/GroupTemplates/index.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@better-auth/passkey": "^1.6.25",
+    "@genui/annotation": "*",
+    "@genui/input": "*",
+    "@genui/voice": "*",
     "@sdk-it/client": "*",
     "@stdlib/shadcn": "*",
     "better-auth": "^1.6.25",
