@@ -21,25 +21,8 @@ export type {
   ComposerResetProps,
   ComposerShortcutsProps,
   ComposerSubmitProps,
-  ComposerSubmitContext,
   ComposerToolbarProps,
 } from './lib/Composer';
-export { useComposerDraft } from './lib/ComposerDraft';
-export type {
-  ComposerDraftSession,
-  UseComposerDraftOptions,
-} from './lib/ComposerDraft';
-export {
-  createComposerDraftSource,
-  createDraftFromPersistedText,
-  createDraftFromSource,
-  createDraftFromExternalEdit,
-  createDraftFromState,
-  createPersistedTextFromDraft,
-  decodeComposerTextLinkHref,
-  mergeComposerDraftsForRestore,
-  pushComposerHistory,
-} from './lib/ComposerCore';
 export type { ComposerPreparedPayload } from './lib/ComposerCore';
 export { isVisibleInPhase } from './lib/ComposerVisibility';
 export type {
@@ -47,7 +30,6 @@ export type {
   ComposerDropTransfer,
   ComposerVisibility,
   ComposerSubmissionItem,
-  ComposerInitialDraft,
   ComposerDraftSource,
   ComposerLocalImage,
   ComposerItemBinding,

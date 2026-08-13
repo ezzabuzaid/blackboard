@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import { Composer, useComposerDraft } from '../browser';
+import { Composer } from '../browser';
 
 function DraftScenario({
   draftKey,
@@ -11,19 +11,11 @@ function DraftScenario({
   draftKey: string;
   send?: () => Promise<unknown>;
 }) {
-  const draft = useComposerDraft({ key: draftKey });
-
   return (
-    <Composer.Root
-      key={draft.composerKey}
-      initialDraft={draft.initialDraft}
-      onStateChange={draft.onStateChange}
-      onSubmit={(_, context) => draft.trackSend(send(), context)}
-    >
+    <Composer.Root draftKey={draftKey} onSubmit={() => send()}>
       <Composer.Content>
         <Composer.Editor />
       </Composer.Content>
-      <p>Restored: {String(draft.restored)}</p>
     </Composer.Root>
   );
 }
@@ -34,7 +26,7 @@ function promptElement() {
   });
 }
 
-describe('useComposerDraft', () => {
+describe('Composer.Root draftKey', () => {
   it('restores the persisted draft after a remount', async () => {
     try {
       localStorage.clear();
@@ -114,6 +106,29 @@ describe('useComposerDraft', () => {
     }
   });
 
+  it('clears the stored draft when a submission returns no promise', async () => {
+    try {
+      localStorage.clear();
+      const user = userEvent.setup();
+      render(
+        <Composer.Root draftKey="chat-1" onSubmit={() => undefined}>
+          <Composer.Content>
+            <Composer.Editor />
+          </Composer.Content>
+        </Composer.Root>,
+      );
+      await user.click(promptElement());
+      await user.keyboard('fire and forget');
+      expect(localStorage.length).toBe(1);
+
+      await user.keyboard('{Enter}');
+
+      await waitFor(() => expect(localStorage.length).toBe(0));
+    } finally {
+      localStorage.clear();
+    }
+  });
+
   it('keeps the stored draft until the send settles and clears it on success', async () => {
     try {
       localStorage.clear();
@@ -144,7 +159,7 @@ describe('useComposerDraft', () => {
     }
   });
 
-  it('restores the draft into the editor when the send fails', async () => {
+  it('restores the draft into the editor and focuses it when the send fails', async () => {
     try {
       localStorage.clear();
       const user = userEvent.setup();
@@ -169,7 +184,7 @@ describe('useComposerDraft', () => {
       await waitFor(() =>
         expect(promptElement()).toHaveTextContent('will fail'),
       );
-      expect(screen.getByText('Restored: true')).toBeInTheDocument();
+      expect(promptElement()).toHaveFocus();
       expect(localStorage.length).toBe(1);
     } finally {
       localStorage.clear();

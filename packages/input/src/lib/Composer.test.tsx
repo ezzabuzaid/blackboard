@@ -13,15 +13,13 @@ import { describe, expect, it, vi } from 'vitest';
 import { Composer, useComposer } from '../browser';
 import {
   type ComposerPreparedPayload,
+  createComposerDraftSource,
   createComposerState,
   createDraftFromPersistedText,
-  createDraftFromSource,
-  createDraftFromState,
-  mergeComposerDraftsForRestore,
+  createPersistedTextFromDraft,
   prepareComposerPayload,
 } from './ComposerCore';
 import type {
-  ComposerDraftSource,
   ComposerInitialDraft,
   ComposerItem,
   ComposerItemEntry,
@@ -183,6 +181,20 @@ function draftFromState(state: ComposerState): ComposerInitialDraft {
   };
 }
 
+function seedDraft(state: ComposerState): string {
+  const key = `draft-${crypto.randomUUID()}`;
+  localStorage.setItem(
+    `composer-draft:v1:${key}`,
+    JSON.stringify(
+      createComposerDraftSource(
+        state,
+        createPersistedTextFromDraft(draftFromState(state)),
+      ),
+    ),
+  );
+  return key;
+}
+
 function stateFromPersistedPrompt(text: string) {
   return createComposerState({
     commandTriggers: COMMAND_TRIGGERS,
@@ -249,6 +261,7 @@ function RichInputScenario({
       mentionCandidates,
       remoteImageUrls: initialRemoteImageUrls,
     });
+  const [draftKey] = useState(() => seedDraft(initialState));
   const [submissions, setSubmissions] = useState<ComposerSubmission[]>([]);
   const [snapshot, setSnapshot] = useState<{
     state: ComposerState;
@@ -265,7 +278,7 @@ function RichInputScenario({
   return (
     <>
       <Composer.Root
-        initialDraft={draftFromState(initialState)}
+        draftKey={draftKey}
         disabled={disabled}
         isTaskRunning={running}
         maxExpandedTextChars={maxExpandedTextChars}
@@ -326,107 +339,6 @@ function RichInputScenario({
   );
 }
 
-function QueuedRichRestoreScenario() {
-  const [draft, setDraft] = useState<ComposerInitialDraft>({ text: '' });
-  const [revision, setRevision] = useState(0);
-  const [lastSubmittedPrompt, setLastSubmittedPrompt] = useState('');
-  const [queuedDrafts, setQueuedDrafts] = useState<
-    { id: string; source: ComposerDraftSource }[]
-  >([]);
-  const [snapshot, setSnapshot] = useState<ComposerState>(() =>
-    createComposerState({
-      slashCommands: SLASH_COMMANDS,
-      commandTriggers: COMMAND_TRIGGERS,
-    }),
-  );
-
-  const restoreDraft = (nextDraft: ComposerInitialDraft) => {
-    setDraft(nextDraft);
-    setRevision((current) => current + 1);
-  };
-  const editLatestQueued = () => {
-    const latest = queuedDrafts[queuedDrafts.length - 1];
-    if (!latest) {
-      return;
-    }
-    setLastSubmittedPrompt('');
-    setQueuedDrafts((current) => current.slice(0, -1));
-    restoreDraft(
-      createDraftFromSource({
-        source: latest.source,
-        slashCommands: SLASH_COMMANDS,
-        mentionCandidates: MENTION_CANDIDATES,
-      }),
-    );
-  };
-  const interruptRestore = () => {
-    restoreDraft(
-      mergeComposerDraftsForRestore([
-        ...queuedDrafts.map((entry) =>
-          createDraftFromSource({
-            source: entry.source,
-            slashCommands: SLASH_COMMANDS,
-            mentionCandidates: MENTION_CANDIDATES,
-          }),
-        ),
-        createDraftFromState(snapshot),
-      ]),
-    );
-    setQueuedDrafts([]);
-  };
-
-  return (
-    <>
-      <Composer.Root
-        key={revision}
-        initialDraft={draft}
-        isTaskRunning
-        onStateChange={(state) => setSnapshot(state)}
-        onSubmit={(submission, context) => {
-          setLastSubmittedPrompt(submission.prompt);
-          if (submission.mode === 'queued') {
-            setQueuedDrafts((current) => [
-              ...current,
-              {
-                id: submission.id,
-                source: context.editableSource,
-              },
-            ]);
-          }
-        }}
-      >
-        {registryTriggers()}
-        <Composer.Popup />
-        <Composer.Content>
-          <Composer.Editor />
-          <Composer.InsertPaste content={LARGE_PASTE}>
-            Insert queued paste
-          </Composer.InsertPaste>
-        </Composer.Content>
-        <Composer.Shortcuts />
-        <Composer.Footer />
-      </Composer.Root>
-      <button type="button" onClick={editLatestQueued}>
-        Edit latest rich queued
-      </button>
-      <button type="button" onClick={interruptRestore}>
-        Interrupt rich restore
-      </button>
-      <output aria-label="rich queued count">{queuedDrafts.length}</output>
-      <output aria-label="rich queued drafts">
-        {queuedDrafts.map((entry) => entry.source.persistedPrompt).join('|')}
-      </output>
-      <output aria-label="rich restored text">{snapshot.text}</output>
-      <output aria-label="rich restored elements">
-        {snapshot.elements
-          .map((element) => `${element.kind}:${element.label}`)
-          .join('|')}
-      </output>
-      <output aria-label="rich submitted prompt">{lastSubmittedPrompt}</output>
-    </>
-  );
-}
-
 function RichCompoundActionScenario() {
   const initialState = createComposerState({
     commandTriggers: COMMAND_TRIGGERS,
@@ -434,13 +346,14 @@ function RichCompoundActionScenario() {
     slashCommands: SLASH_COMMANDS,
     mentionCandidates: MENTION_CANDIDATES,
   });
+  const [draftKey] = useState(() => seedDraft(initialState));
   const [lastClick, setLastClick] = useState('none');
   const [submissions, setSubmissions] = useState<ComposerSubmission[]>([]);
 
   return (
     <>
       <Composer.Root
-        initialDraft={draftFromState(initialState)}
+        draftKey={draftKey}
         onSubmit={(submission) =>
           setSubmissions((current) => [submission, ...current])
         }
@@ -476,12 +389,13 @@ function RichDisabledAnchorActionScenario() {
     slashCommands: SLASH_COMMANDS,
     mentionCandidates: MENTION_CANDIDATES,
   });
+  const [draftKey] = useState(() => seedDraft(initialState));
   const [submissions, setSubmissions] = useState<ComposerSubmission[]>([]);
 
   return (
     <>
       <Composer.Root
-        initialDraft={draftFromState(initialState)}
+        draftKey={draftKey}
         disabled
         onSubmit={(submission) =>
           setSubmissions((current) => [submission, ...current])
@@ -508,12 +422,13 @@ function RichContextConsumerScenario() {
     slashCommands: SLASH_COMMANDS,
     mentionCandidates: MENTION_CANDIDATES,
   });
+  const [draftKey] = useState(() => seedDraft(initialState));
   const [submissions, setSubmissions] = useState<ComposerSubmission[]>([]);
 
   return (
     <>
       <Composer.Root
-        initialDraft={draftFromState(initialState)}
+        draftKey={draftKey}
         onSubmit={(submission) =>
           setSubmissions((current) => [submission, ...current])
         }
@@ -536,12 +451,13 @@ function RichCustomPopupScenario() {
     slashCommands: SLASH_COMMANDS,
     mentionCandidates: MENTION_CANDIDATES,
   });
+  const [draftKey] = useState(() => seedDraft(initialState));
   const [submissions, setSubmissions] = useState<ComposerSubmission[]>([]);
 
   return (
     <>
       <Composer.Root
-        initialDraft={draftFromState(initialState)}
+        draftKey={draftKey}
         onSubmit={(submission) =>
           setSubmissions((current) => [submission, ...current])
         }
@@ -826,14 +742,6 @@ describe('Composer empty prompt', () => {
       prompt: '',
       persistedPrompt: '',
       items: [],
-    });
-    expect(submitted.mock.calls[0]?.[1]).toMatchObject({
-      editableSource: {
-        persistedPrompt: '',
-        localImages: [],
-        remoteImages: [],
-        pendingPastes: [],
-      },
     });
   });
 
@@ -2606,110 +2514,6 @@ describe('Composer task running behavior', () => {
     );
   });
 
-  it('lets the host edit the latest queued draft and restore rich queued drafts on interrupt', async () => {
-    const user = userEvent.setup();
-    render(<QueuedRichRestoreScenario />);
-    const prompt = screen.getByRole<HTMLElement>('textbox', {
-      name: /rich prompt composer/i,
-    });
-
-    await user.click(prompt);
-    await user.keyboard('first queued');
-    await waitFor(() => expect(prompt).toHaveTextContent('first queued'));
-    fireEditorKeyDown(prompt, { key: 'Enter', code: 'Enter' });
-
-    await waitFor(() =>
-      expect(screen.getByLabelText(/rich queued count/i)).toHaveTextContent(
-        '1',
-      ),
-    );
-
-    await user.keyboard('ask @fro');
-    await user.keyboard('{Tab}');
-    await waitFor(() => expect(prompt).toHaveTextContent('ask @frontend'));
-    fireEditorKeyDown(prompt, { key: 'Enter', code: 'Enter' });
-
-    await waitFor(() =>
-      expect(screen.getByLabelText(/rich queued count/i)).toHaveTextContent(
-        '2',
-      ),
-    );
-
-    await user.click(
-      screen.getByRole('button', { name: /edit latest rich queued/i }),
-    );
-
-    await waitFor(() =>
-      expect(screen.getByLabelText(/rich restored text/i)).toHaveTextContent(
-        'ask @frontend',
-      ),
-    );
-    expect(screen.getByLabelText(/rich queued count/i)).toHaveTextContent('1');
-    expect(screen.getByLabelText(/rich queued drafts/i)).toHaveTextContent(
-      'first queued',
-    );
-    expect(screen.getByLabelText(/rich restored elements/i)).toHaveTextContent(
-      'mention:@frontend',
-    );
-
-    await user.click(
-      screen.getByRole('button', { name: /interrupt rich restore/i }),
-    );
-
-    await waitFor(() =>
-      expect(screen.getByLabelText(/rich restored text/i).textContent).toBe(
-        'first queued\nask @frontend',
-      ),
-    );
-    expect(screen.getByLabelText(/rich queued count/i)).toHaveTextContent('0');
-    expect(screen.getByLabelText(/rich restored elements/i)).toHaveTextContent(
-      'mention:@frontend',
-    );
-  });
-
-  it('restores hidden paste payloads when editing a queued draft', async () => {
-    const user = userEvent.setup();
-    render(<QueuedRichRestoreScenario />);
-    const prompt = screen.getByRole<HTMLElement>('textbox', {
-      name: /rich prompt composer/i,
-    });
-    const placeholder = `[Pasted Content ${Array.from(LARGE_PASTE).length} chars]`;
-
-    await user.click(prompt);
-    await user.keyboard('inspect ');
-    await user.click(
-      screen.getByRole('button', { name: /insert queued paste/i }),
-    );
-    fireEditorKeyDown(prompt, { key: 'Enter', code: 'Enter' });
-
-    await waitFor(() => {
-      expect(screen.getByLabelText(/rich queued count/i)).toHaveTextContent(
-        '1',
-      );
-    });
-
-    await user.click(
-      screen.getByRole('button', { name: /edit latest rich queued/i }),
-    );
-
-    await waitFor(() => {
-      expect(screen.getByLabelText(/rich restored text/i)).toHaveTextContent(
-        placeholder,
-      );
-    });
-
-    const restoredPrompt = screen.getByRole<HTMLElement>('textbox', {
-      name: /rich prompt composer/i,
-    });
-    fireEditorKeyDown(restoredPrompt, { key: 'Enter', code: 'Enter' });
-
-    await waitFor(() => {
-      expect(screen.getByLabelText(/rich submitted prompt/i)).toHaveTextContent(
-        '-- batch 1',
-      );
-    });
-  });
-
   it('keeps a plain prompt editable when Tab is pressed while a task is running', async () => {
     const { user, prompt, submissions } = renderRichInput({
       isTaskRunning: true,
@@ -4399,11 +4203,21 @@ function clipboardData(data: Record<string, string>) {
 function StateChangeCountScenario() {
   const [parentRenders, setParentRenders] = useState(0);
   const [stateChanges, setStateChanges] = useState(0);
+  const [draftKey] = useState(() =>
+    seedDraft(
+      createComposerState({
+        commandTriggers: COMMAND_TRIGGERS,
+        text: 'a draft that produces a prepared payload',
+        slashCommands: SLASH_COMMANDS,
+        mentionCandidates: MENTION_CANDIDATES,
+      }),
+    ),
+  );
 
   return (
     <>
       <Composer.Root
-        initialDraft={{ text: 'a draft that produces a prepared payload' }}
+        draftKey={draftKey}
         onStateChange={() => setStateChanges((current) => current + 1)}
       >
         {registryTriggers()}

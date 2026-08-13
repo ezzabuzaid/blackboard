@@ -30,6 +30,7 @@ import {
   shouldNavigateHistory,
   unknownSlashCommand,
 } from './ComposerCore';
+import { readStoredDraft, writeStoredDraft } from './ComposerDraft';
 import {
   ComposerCommand,
   ComposerMention,
@@ -82,7 +83,7 @@ import {
 } from './tiptap/ComposerTiptapDomain';
 
 export type ComposerRootProps = {
-  initialDraft?: ComposerInitialDraft;
+  draftKey?: string;
   disabled?: boolean;
   isTaskRunning?: boolean;
   queueSubmissions?: boolean;
@@ -92,18 +93,11 @@ export type ComposerRootProps = {
   className?: string;
   children?: ReactNode;
   validateSubmission?: (event: ComposerSubmission) => string | null;
-  onSubmit?: (
-    event: ComposerSubmission,
-    context: ComposerSubmitContext,
-  ) => void;
+  onSubmit?: (event: ComposerSubmission) => void | Promise<unknown>;
   onStateChange?: (
     state: ComposerState,
     preparedPayload: ComposerPreparedPayload,
   ) => void;
-};
-
-export type ComposerSubmitContext = {
-  editableSource: ComposerDraftSource;
 };
 
 export type ComposerContentProps = ComponentPropsWithoutRef<'div'>;
@@ -233,8 +227,20 @@ export function useComposer(componentName = 'useComposer'): ComposerContextApi {
   };
 }
 
-function ComposerRoot({
-  initialDraft,
+function ComposerRoot(props: ComposerRootProps) {
+  return <ComposerRootInner key={props.draftKey ?? ''} {...props} />;
+}
+
+function isThenable(value: unknown): value is Promise<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { then?: unknown }).then === 'function'
+  );
+}
+
+function ComposerRootInner({
+  draftKey,
   disabled = false,
   isTaskRunning = false,
   queueSubmissions = false,
@@ -274,13 +280,16 @@ function ComposerRoot({
   const mentionTriggersRef = useRef(mentionTriggers);
   mentionTriggersRef.current = mentionTriggers;
 
-  const initialRemoteImagesRef = useRef(
-    initialDraft?.remoteImages ??
-      (initialDraft?.remoteImageUrls ?? []).map((url, index) => ({
-        id: stableId('remote-image', url, index),
-        url,
-      })),
-  );
+  const [initialDraft] = useState(() => {
+    if (draftKey === undefined) {
+      return undefined;
+    }
+    const source = readStoredDraft(draftKey);
+    return source
+      ? createDraftFromSource({ source, slashCommands, mentionCandidates })
+      : undefined;
+  });
+  const initialRemoteImagesRef = useRef(initialDraft?.remoteImages ?? []);
   const initialContentRef = useRef(
     contentFromStateOrText({
       state: initialDraft,
@@ -289,6 +298,15 @@ function ComposerRoot({
       triggers,
     }),
   );
+  const pendingSendsRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const [remoteImages, setRemoteImages] = useState<ComposerRemoteImage[]>(
     initialRemoteImagesRef.current,
   );
@@ -441,7 +459,20 @@ function ComposerRoot({
 
   useEffect(() => {
     onStateChangeRef.current?.(composer, preparedPayload);
-  }, [composer, preparedPayload]);
+    if (draftKey === undefined) {
+      return;
+    }
+    if (preparedPayload) {
+      writeStoredDraft(
+        draftKey,
+        createComposerDraftSource(composer, preparedPayload.persistedPrompt),
+      );
+    } else if (pendingSendsRef.current === 0) {
+      // Submit clears the editor before the send settles; keep the stored
+      // draft until the outcome is known so a mid-flight reload loses nothing.
+      writeStoredDraft(draftKey, null);
+    }
+  }, [composer, draftKey, preparedPayload]);
 
   useEffect(() => {
     setComposer((current) =>
@@ -1083,12 +1114,32 @@ function ComposerRoot({
     if (rejectInvalidSubmission(event)) {
       return;
     }
-    onSubmitRef.current?.(event, {
-      editableSource: createComposerDraftSource(
+    const submitResult = onSubmitRef.current?.(event);
+    if (draftKey !== undefined && isThenable(submitResult)) {
+      const editableSource = createComposerDraftSource(
         current,
         prepared.persistedPrompt,
-      ),
-    });
+      );
+      pendingSendsRef.current += 1;
+      submitResult
+        .then(() => writeStoredDraft(draftKey, null))
+        .catch(() => {
+          writeStoredDraft(draftKey, editableSource);
+          if (mountedRef.current) {
+            restoreDraft(
+              createDraftFromSource({
+                source: editableSource,
+                slashCommands,
+                mentionCandidates,
+              }),
+              null,
+            );
+          }
+        })
+        .finally(() => {
+          pendingSendsRef.current -= 1;
+        });
+    }
     const nextHistory = preparedPayload
       ? pushComposerHistory(current, prepared.historyPrompt)
       : current.history;
@@ -1153,7 +1204,7 @@ function ComposerRoot({
       historyCursor === 0 &&
       pendingHistoryDraftRef.current
     ) {
-      restoreHistoryDraft(pendingHistoryDraftRef.current, null);
+      restoreDraft(pendingHistoryDraftRef.current, null);
       pendingHistoryDraftRef.current = null;
       return;
     }
@@ -1181,13 +1232,10 @@ function ComposerRoot({
       slashCommands,
       mentionCandidates,
     });
-    restoreHistoryDraft(draft, historyCursor);
+    restoreDraft(draft, historyCursor);
   }
 
-  function restoreHistoryDraft(
-    draft: ComposerInitialDraft,
-    historyCursor: number | null,
-  ) {
+  function restoreDraft(draft: ComposerInitialDraft, historyCursor: number | null) {
     const remoteImages = draft.remoteImages ?? [];
     remoteImagesRef.current = remoteImages;
     composerRef.current = {

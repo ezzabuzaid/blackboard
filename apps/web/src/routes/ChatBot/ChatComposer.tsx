@@ -10,10 +10,8 @@ import { Annotation } from "@genui/annotation"
 import {
   Composer,
   useComposer,
-  useComposerDraft,
   type ComposerItemEntry,
   type ComposerSubmission,
-  type ComposerSubmitContext,
 } from "@genui/input/browser"
 import "@genui/input/styles.css"
 import { VoiceRecordButton } from "@genui/voice"
@@ -44,16 +42,8 @@ export function ChatComposer() {
     [participants]
   )
   const slashCommands = useMemo(() => chatSlashCommands(activity), [activity])
-  const draft = useComposerDraft({
-    key: chatId,
-    slashCommands,
-    mentionCandidates,
-  })
 
-  function handleSubmit(
-    event: ComposerSubmission,
-    context: ComposerSubmitContext
-  ) {
+  function handleSubmit(event: ComposerSubmission) {
     if (isStopSubmission(event)) {
       void stop().catch(() => undefined)
       return
@@ -62,7 +52,7 @@ export function ChatComposer() {
     if (!text && annotations.length === 0) return
 
     clearError()
-    draft.trackSend(postMessage(text), context)
+    return postMessage(text)
   }
 
   return (
@@ -70,12 +60,10 @@ export function ChatComposer() {
       <div className="mx-auto w-full max-w-3xl px-3 py-3 sm:px-5">
         <Field data-invalid={!!error}>
           <Composer.Root
-            key={draft.composerKey}
-            initialDraft={draft.initialDraft}
+            draftKey={chatId}
             disabled={posting || disabled}
             editorAriaLabel="Message"
             validateSubmission={validateSubmission}
-            onStateChange={draft.onStateChange}
             onSubmit={handleSubmit}
             className="border-0 bg-transparent"
           >
@@ -89,7 +77,6 @@ export function ChatComposer() {
                 <Composer.Mention key={candidate.id} {...candidate} />
               ))}
             </Composer.Trigger>
-            <FocusOnRestore active={draft.restored} />
             <Composer.Popup />
             <div className="overflow-hidden rounded-[26px] bg-card">
               <ReferenceChips />
@@ -314,17 +301,6 @@ function SendFailure() {
   return (
     <FieldError className="min-h-5 px-1 text-xs">{error.message}</FieldError>
   )
-}
-
-function FocusOnRestore({ active }: { active: boolean }) {
-  const { meta } = useComposer("FocusOnRestore")
-  const editor = meta.editor
-
-  useEffect(() => {
-    if (active) editor?.commands.focus("end")
-  }, [active, editor])
-
-  return null
 }
 
 const STOP_COMMAND = "stop"
