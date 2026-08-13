@@ -1,25 +1,25 @@
-import babel from "@rolldown/plugin-babel"
-import tailwindcss from "@tailwindcss/vite"
-import react, { reactCompilerPreset } from "@vitejs/plugin-react"
-import * as path from "path"
-import dts from "vite-plugin-dts"
-import { defineConfig } from "vitest/config"
+import babel from '@rolldown/plugin-babel';
+import tailwindcss from '@tailwindcss/vite';
+import react, { reactCompilerPreset } from '@vitejs/plugin-react';
+import * as path from 'path';
+import dts from 'vite-plugin-dts';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig(() => ({
   root: __dirname,
-  cacheDir: "../../node_modules/.vite/packages/genui/input",
+  cacheDir: '../../node_modules/.vite/packages/genui/input',
   plugins: [
     react(),
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
     dts({
-      entryRoot: "src",
-      tsconfigPath: path.join(__dirname, "tsconfig.lib.json"),
+      entryRoot: 'src',
+      tsconfigPath: path.join(__dirname, 'tsconfig.lib.json'),
     }),
   ],
-  assetsInclude: ["**/*.css"],
+  assetsInclude: ['**/*.css'],
   build: {
-    outDir: "./dist",
+    outDir: './dist',
     emptyOutDir: true,
     reportCompressedSize: true,
     sourcemap: true,
@@ -28,37 +28,37 @@ export default defineConfig(() => ({
     },
     lib: {
       entry: {
-        index: "src/index.ts",
-        browser: "src/browser.ts",
+        index: 'src/index.ts',
+        browser: 'src/browser.ts',
       },
-      name: "genui-input",
-      formats: ["es" as const],
+      name: 'genui-input',
+      formats: ['es' as const],
     },
     rollupOptions: {
       external: (id) =>
-        id.startsWith("node:") ||
+        id.startsWith('node:') ||
         !(
-          id.startsWith(".") ||
+          id.startsWith('.') ||
           path.isAbsolute(id) ||
-          id.startsWith("\0") ||
-          id.includes(":")
+          id.startsWith('\0') ||
+          id.includes(':')
         ),
       output: {
-        assetFileNames: "assets/[name][extname]",
+        assetFileNames: 'assets/[name][extname]',
       },
     },
   },
   test: {
-    name: "genui-input",
+    name: 'genui-input',
     watch: false,
     globals: true,
-    environment: "happy-dom",
-    pool: "forks",
-    execArgv: ["--no-experimental-webstorage"],
-    include: ["src/**/*.{test,spec}.{ts,tsx}"],
-    setupFiles: ["./src/test-setup.ts"],
+    environment: 'happy-dom',
+    pool: 'forks',
+    execArgv: ['--no-experimental-webstorage'],
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    setupFiles: ['./src/test-setup.ts'],
     passWithNoTests: true,
-    reporters: ["default", "junit"],
-    outputFile: { junit: "./test-results.xml" },
+    reporters: ['default', 'junit'],
+    outputFile: { junit: './test-results.xml' },
   },
-}))
+}));

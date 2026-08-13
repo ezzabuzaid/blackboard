@@ -15,7 +15,10 @@ export function readStoredDraft(key: string): ComposerDraftSource | null {
   }
 }
 
-export function writeStoredDraft(key: string, source: ComposerDraftSource | null) {
+export function writeStoredDraft(
+  key: string,
+  source: ComposerDraftSource | null,
+) {
   const storageKey = `${STORAGE_KEY_PREFIX}${key}`;
   if (!source || isEmptyDraftSource(source)) {
     localStorage.removeItem(storageKey);
