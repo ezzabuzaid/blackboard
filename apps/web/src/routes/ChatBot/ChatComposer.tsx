@@ -16,7 +16,7 @@ import {
 import "@genui/input/styles.css"
 import { VoiceRecordButton } from "@genui/voice"
 import { Field, FieldError, InputGroupButton } from "@stdlib/shadcn"
-import { SendIcon, X } from "lucide-react"
+import { Bot, CircleStop, SendIcon, X } from "lucide-react"
 
 import { api } from "./api"
 import { useGroupChat } from "./GroupChat"
@@ -313,7 +313,8 @@ function chatMentionCandidates(
     trigger: "@",
     value: name,
     label: name,
-    detail: "Agent",
+    detail: "",
+    icon: <Bot aria-hidden="true" />,
     atomic: true,
   }))
 }
@@ -328,6 +329,7 @@ function chatSlashCommands(
       value: STOP_COMMAND,
       label: "stop",
       detail: "Stop the agents' current run",
+      icon: <CircleStop aria-hidden="true" />,
       atomic: false,
       availability: activity.phase === "active" ? "enabled" : "disabled",
     },

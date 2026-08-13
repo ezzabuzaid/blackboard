@@ -1235,7 +1235,10 @@ function ComposerRootInner({
     restoreDraft(draft, historyCursor);
   }
 
-  function restoreDraft(draft: ComposerInitialDraft, historyCursor: number | null) {
+  function restoreDraft(
+    draft: ComposerInitialDraft,
+    historyCursor: number | null,
+  ) {
     const remoteImages = draft.remoteImages ?? [];
     remoteImagesRef.current = remoteImages;
     composerRef.current = {
@@ -1840,49 +1843,42 @@ function ComposerPopup({ className, ...props }: ComposerPopupProps) {
   const {
     activePopup,
     suggestions,
-    commandTriggers,
     actions: { acceptSuggestion },
   } = useComposerContext('Composer.Popup');
   if (!activePopup) {
     return null;
   }
 
+  // A single icon reserves the slot for every row, so tokens keep one left edge
+  // even when a host gives icons to only part of its registry.
+  const withIcons = suggestions.some((suggestion) => suggestion.icon);
+
   return (
     <div
       className={cn(
-        'border-border bg-popover absolute right-3 bottom-[calc(100%-0.5rem)] left-3 z-10 rounded-md border shadow-sm',
+        'border-border bg-popover absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-10 rounded-xl border shadow-lg',
         className,
       )}
       {...props}
     >
       <div
-        className="max-h-[260px] overflow-auto p-1"
+        className="flex max-h-72 flex-col gap-1 overflow-y-auto p-1"
         role="listbox"
         aria-label="Suggestions"
       >
-        {suggestions.map((suggestion, index) =>
-          !suggestion.atomic ? (
-            <PopupRow
-              key={`item:${suggestion.id}`}
-              selected={index === activePopup.selectedIndex}
-              title={`${suggestion.trigger}${suggestion.value}`}
-              meta={suggestion.supportsArgs ? 'args' : 'item'}
-              description={suggestion.detail}
-              onMouseDown={() => acceptSuggestion({ index })}
-            />
-          ) : (
-            <PopupRow
-              key={`item:${suggestion.id}`}
-              selected={index === activePopup.selectedIndex}
-              title={itemToken(suggestion)}
-              meta={suggestion.detail}
-              description={suggestion.label}
-              onMouseDown={() => acceptSuggestion({ index })}
-            />
-          ),
-        )}
+        {suggestions.map((suggestion, index) => (
+          <PopupRow
+            key={`item:${suggestion.id}`}
+            selected={index === activePopup.selectedIndex}
+            icon={withIcons ? suggestion.icon : null}
+            token={itemToken(suggestion)}
+            takesArgs={suggestion.supportsArgs === true}
+            description={suggestion.detail}
+            onMouseDown={() => acceptSuggestion({ index })}
+          />
+        ))}
         {suggestions.length === 0 ? (
-          <div className="text-muted-foreground px-2 py-3 text-xs">
+          <div className="text-muted-foreground px-2 py-1 text-[13px] leading-4">
             no matches
           </div>
         ) : null}
@@ -1893,14 +1889,16 @@ function ComposerPopup({ className, ...props }: ComposerPopupProps) {
 
 function PopupRow({
   selected,
-  title,
-  meta,
+  icon,
+  token,
+  takesArgs,
   description,
   onMouseDown,
 }: {
   selected: boolean;
-  title: string;
-  meta: string;
+  icon: ReactNode;
+  token: string;
+  takesArgs: boolean;
   description: string;
   onMouseDown: () => void;
 }) {
@@ -1919,19 +1917,26 @@ function PopupRow({
       role="option"
       aria-selected={selected}
       className={cn(
-        'grid w-full grid-cols-[minmax(140px,0.42fr)_72px_minmax(0,1fr)] items-center gap-3 rounded-sm px-2 py-2 text-left text-xs',
+        'flex w-full items-center gap-2 rounded-md px-2 py-1 text-start text-[13px] leading-4 [&_svg]:size-4 [&_svg]:shrink-0',
         selected
-          ? 'bg-primary text-primary-foreground'
-          : 'text-foreground hover:bg-muted',
+          ? 'bg-accent text-foreground'
+          : 'text-foreground/80 hover:bg-accent/60',
       )}
       onMouseDown={(event) => {
         event.preventDefault();
         onMouseDown();
       }}
     >
-      <span className="truncate font-medium">{title}</span>
-      <span className="truncate opacity-70">{meta}</span>
-      <span className="truncate opacity-70">{description}</span>
+      {icon === null ? null : (
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          {icon}
+        </span>
+      )}
+      <span className="truncate">{token}</span>
+      {takesArgs ? (
+        <span className="text-muted-foreground shrink-0">args</span>
+      ) : null}
+      <span className="text-muted-foreground truncate">{description}</span>
     </button>
   );
 }

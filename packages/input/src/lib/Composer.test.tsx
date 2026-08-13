@@ -1102,7 +1102,7 @@ describe('Composer slash and mention behavior', () => {
     await user.click(
       within(screen.getByRole('listbox', { name: /suggestions/i })).getByRole(
         'option',
-        { name: /\/diff item/i },
+        { name: /\/diff show the current diff/i },
       ),
     );
 
