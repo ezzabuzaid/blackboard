@@ -84,7 +84,6 @@ import {
 export type ComposerRootProps = {
   initialDraft?: ComposerInitialDraft;
   disabled?: boolean;
-  allowEmptySubmission?: boolean;
   isTaskRunning?: boolean;
   queueSubmissions?: boolean;
   hasInteracted?: boolean;
@@ -237,7 +236,6 @@ export function useComposer(componentName = 'useComposer'): ComposerContextApi {
 function ComposerRoot({
   initialDraft,
   disabled = false,
-  allowEmptySubmission = false,
   isTaskRunning = false,
   queueSubmissions = false,
   hasInteracted = false,
@@ -1044,9 +1042,6 @@ function ComposerRoot({
       slashCommands,
       commandTriggers,
     );
-    if (!preparedPayload && !allowEmptySubmission) {
-      return;
-    }
     const prepared =
       preparedPayload ??
       ({

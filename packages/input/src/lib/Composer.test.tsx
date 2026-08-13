@@ -808,12 +808,12 @@ function OrphanRichConsumer() {
 }
 
 describe('Composer empty prompt', () => {
-  it('submits an empty prompt when the host has external payload', async () => {
+  it('submits an empty prompt for the host to decide', async () => {
     const user = userEvent.setup();
     const submitted = vi.fn();
 
     render(
-      <Composer.Root allowEmptySubmission onSubmit={submitted}>
+      <Composer.Root onSubmit={submitted}>
         <Composer.Editor />
       </Composer.Root>,
     );
@@ -837,14 +837,28 @@ describe('Composer empty prompt', () => {
     });
   });
 
-  it.each([
-    ['Enter', '{Enter}'],
-    ['Tab', '{Tab}'],
-  ])('ignores %s when there is no prompt content', async (_name, key) => {
+  it('emits an empty submission on Enter without recording history', async () => {
     const { user, prompt, submissions } = renderRichInput();
 
     await user.click(prompt);
-    await user.keyboard(key);
+    await user.keyboard('{Enter}');
+
+    expect(submissions()).toHaveTextContent('Mode: submitted');
+    expect(submissions()).toHaveTextContent('Text: empty');
+
+    await user.keyboard('{Control>}p{/Control}');
+    const snapshot = screen.getByRole('region', {
+      name: /rich composer snapshot/i,
+    });
+    expect(snapshot.textContent).toContain('Draft: ');
+    expect(snapshot.textContent).toContain('Prepared: empty');
+  });
+
+  it('ignores Tab when there is no prompt content', async () => {
+    const { user, prompt, submissions } = renderRichInput();
+
+    await user.click(prompt);
+    await user.keyboard('{Tab}');
 
     expect(submissions()).toHaveTextContent('No submissions');
     const snapshot = screen.getByRole('region', {
@@ -3526,7 +3540,9 @@ describe('Composer atomic token deletion', () => {
 
     await user.click(screen.getByRole('button', { name: /submit prompt/i }));
 
-    expect(submissions()).toHaveTextContent('No submissions');
+    expect(submissions()).toHaveTextContent('Text: empty');
+    expect(submissions()).toHaveTextContent('Expanded: empty');
+    expect(submissions()).not.toHaveTextContent('[Image #1]');
   });
 
   it('backspaces from a local image atom edge and prunes the image item', async () => {
@@ -3588,7 +3604,9 @@ describe('Composer atomic token deletion', () => {
 
     await user.click(screen.getByRole('button', { name: /submit prompt/i }));
 
-    expect(submissions()).toHaveTextContent('No submissions');
+    expect(submissions()).toHaveTextContent('Text: empty');
+    expect(submissions()).toHaveTextContent('Expanded: empty');
+    expect(submissions()).not.toHaveTextContent(placeholder);
   });
 
   it('deletes a paste atom from its leading edge and prunes expanded pasted content', async () => {
@@ -3735,7 +3753,9 @@ describe('Composer atomic token deletion', () => {
 
     await user.click(screen.getByRole('button', { name: /submit prompt/i }));
 
-    expect(submissions()).toHaveTextContent('No submissions');
+    expect(submissions()).toHaveTextContent('Text: empty');
+    expect(submissions()).toHaveTextContent('Expanded: empty');
+    expect(submissions()).not.toHaveTextContent('openai/composer');
   });
 
   it('deletes a selection spanning a text link and local image atom and prunes both structured items', async () => {

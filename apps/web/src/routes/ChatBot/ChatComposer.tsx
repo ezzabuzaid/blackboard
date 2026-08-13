@@ -73,7 +73,6 @@ export function ChatComposer() {
             key={draft.composerKey}
             initialDraft={draft.initialDraft}
             disabled={posting || disabled}
-            allowEmptySubmission={annotations.length > 0}
             editorAriaLabel="Message"
             validateSubmission={validateSubmission}
             onStateChange={draft.onStateChange}
