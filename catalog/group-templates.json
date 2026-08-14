@@ -158,5 +158,41 @@
         "responsibility": "Finds liquidity, debt, concentration, currency, and downside risks."
       }
     ]
+  },
+  {
+    "id": "million-committee",
+    "name": "The 1M Committee",
+    "category": "Finance",
+    "outcome": "Turn a cash target into a dated plan that survives hostile review.",
+    "agents": [
+      {
+        "agentId": "cash-goal-keeper",
+        "responsibility": "Holds the cash gap, the commitments, and the decision record."
+      },
+      {
+        "agentId": "eliyahu-goldratt",
+        "responsibility": "Names the one constraint blocking the next milestone."
+      },
+      {
+        "agentId": "naval-ravikant",
+        "responsibility": "Pushes the plan toward owned leverage over traded hours."
+      },
+      {
+        "agentId": "chris-voss",
+        "responsibility": "Prepares the raise, rate, and deal conversations that move cash."
+      },
+      {
+        "agentId": "charlie-munger",
+        "responsibility": "Inverts the plan to find what would guarantee failure."
+      },
+      {
+        "agentId": "thomas-sowell",
+        "responsibility": "Prices the tradeoffs the plan treats as free."
+      },
+      {
+        "agentId": "nassim-taleb",
+        "responsibility": "Attacks paths that risk ruin before they compound."
+      }
+    ]
   }
 ]

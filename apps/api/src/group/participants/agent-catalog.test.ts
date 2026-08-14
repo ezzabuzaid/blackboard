@@ -24,12 +24,12 @@ function writeAgent(root: string, id: string, name: string) {
   }
 }
 
-test("native agent catalog contains 51 complete character definitions", () => {
+test("native agent catalog contains 52 complete character definitions", () => {
   const agents = loadAgentCatalog(
     resolve(import.meta.dirname, "../../../../../catalog/agents")
   )
 
-  assert.equal(agents.length, 51)
+  assert.equal(agents.length, 52)
   assert.equal(new Set(agents.map(({ id }) => id)).size, agents.length)
   assert.deepEqual(
     agents.find(({ id }) => id === "paul-graham"),
@@ -105,6 +105,51 @@ test("Personal Wealth uses complete native agents and valid workspace seeds", ()
     "net-worth-keeper/workspace-template"
   )
   for (const file of ["profile.json", "ledger.json", "cash-flow.json"]) {
+    assert.doesNotThrow(() =>
+      JSON.parse(readFileSync(resolve(workspaceTemplate, file), "utf8"))
+    )
+  }
+})
+
+test("The 1M Committee opens with the keeper and uses complete native agents", () => {
+  const catalogRoot = resolve(
+    import.meta.dirname,
+    "../../../../../catalog/agents"
+  )
+  const agents = loadAgentCatalog(catalogRoot)
+  const template = groupTemplates.find(({ id }) => id === "million-committee")
+
+  assert.ok(template)
+  // The first roster entry becomes the group's default sole responder, so the
+  // keeper has to stay at index 0 or an adversary answers single-answer asks.
+  assert.deepEqual(
+    template.agents.map(({ agentId }) => agentId),
+    [
+      "cash-goal-keeper",
+      "eliyahu-goldratt",
+      "naval-ravikant",
+      "chris-voss",
+      "charlie-munger",
+      "thomas-sowell",
+      "nassim-taleb",
+    ]
+  )
+  assert.ok(
+    template.agents.every(({ agentId }) =>
+      agents.some(({ id }) => id === agentId)
+    )
+  )
+
+  const workspaceTemplate = resolve(
+    catalogRoot,
+    "cash-goal-keeper/workspace-template"
+  )
+  for (const file of [
+    "goal.json",
+    "position.json",
+    "plan.json",
+    "commitments.json",
+  ]) {
     assert.doesNotThrow(() =>
       JSON.parse(readFileSync(resolve(workspaceTemplate, file), "utf8"))
     )
