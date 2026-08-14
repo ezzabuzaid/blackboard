@@ -15,10 +15,20 @@
       }
     }
   ],
+  "sync": {
+    "applyChanges": true
+  },
   "targetDefaults": {
     "build": {
       "dependsOn": ["^build"],
-      "cache": true
+      "cache": true,
+      "syncGenerators": ["@juristr/nx-tailwind-sync:source-directives"]
+    },
+    "dev": {
+      "syncGenerators": ["@juristr/nx-tailwind-sync:source-directives"]
+    },
+    "serve": {
+      "syncGenerators": ["@juristr/nx-tailwind-sync:source-directives"]
     },
     "test": {
       "dependsOn": ["build"],

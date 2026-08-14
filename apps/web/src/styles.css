@@ -1,0 +1,11 @@
+@import "@genui/input/styles.css";
+@import "tailwindcss";
+
+/* nx-tailwind-sources:start */
+@source "../../../packages/annotation";
+@source "../../../packages/input";
+@source "../../../packages/ui";
+@source "../../../packages/voice";
+@source "../../api";
+/* nx-tailwind-sources:end */
+@import "../../../packages/ui/src/styles/globals.css";

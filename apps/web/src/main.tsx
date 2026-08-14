@@ -4,6 +4,8 @@ import { RouterProvider } from "react-router"
 
 import "@genui/annotation/styles.css"
 
+import "./styles.css"
+
 import { router } from "./router"
 
 const root = document.getElementById("root")

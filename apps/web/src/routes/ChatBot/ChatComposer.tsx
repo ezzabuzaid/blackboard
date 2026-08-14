@@ -14,7 +14,6 @@ import {
   type ComposerItemEntry,
   type ComposerSubmission,
 } from "@genui/input/browser";
-import "@genui/input/styles.css";
 import { VoiceRecordButton } from "@genui/voice";
 import { Field, FieldError, InputGroupButton } from "@stdlib/shadcn";
 import { CircleStop, SendIcon, X } from "lucide-react";

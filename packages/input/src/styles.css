@@ -1,5 +1,5 @@
 /* nx-tailwind-sources:start */
-@source "../../ui/src";
+@source "../../ui";
 /* nx-tailwind-sources:end */
 
 [data-slot="composer"] {
