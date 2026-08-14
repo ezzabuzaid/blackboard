@@ -4,24 +4,26 @@ import {
   useState,
   type CSSProperties,
   type ReactNode,
-} from "react"
+} from "react";
 
-import { Annotation } from "@genui/annotation"
+import { Annotation } from "@genui/annotation";
 import {
   Composer,
+  serializeMentionPromptLink,
   useComposer,
   type ComposerItemEntry,
   type ComposerSubmission,
-} from "@genui/input/browser"
-import "@genui/input/styles.css"
-import { VoiceRecordButton } from "@genui/voice"
-import { Field, FieldError, InputGroupButton } from "@stdlib/shadcn"
-import { Bot, CircleStop, SendIcon, X } from "lucide-react"
+} from "@genui/input/browser";
+import "@genui/input/styles.css";
+import { VoiceRecordButton } from "@genui/voice";
+import { Field, FieldError, InputGroupButton } from "@stdlib/shadcn";
+import { CircleStop, SendIcon, X } from "lucide-react";
 
-import { api } from "./api"
-import { useGroupChat } from "./GroupChat"
-import type { GroupActivityState } from "./groupActivity"
-import type { GroupParticipant } from "./groupMessages"
+import { api } from "./api";
+import type { GroupActivityState } from "./groupActivity";
+import { useGroupChat } from "./GroupChat";
+import { messageDisplayText } from "./mentions";
+import type { GroupParticipant } from "./groupMessages";
 
 export function ChatComposer() {
   const {
@@ -113,7 +115,7 @@ function ReferenceChips() {
       {replyingTo && (
         <ReferenceChip
           label={`Replying to ${replyingTo.author === "user" ? "yourself" : replyingTo.author}`}
-          text={replyingTo.content}
+          text={messageDisplayText(replyingTo.content)}
           removeLabel="Cancel reply"
           onRemove={cancelReply}
         />
@@ -127,7 +129,7 @@ function ReferenceChips() {
           <ReferenceChip
             key={`${annotation.messageId}:${annotation.excerpt}`}
             label={label}
-            text={annotation.excerpt}
+            text={messageDisplayText(annotation.excerpt)}
             removeLabel={`Remove annotation ${index + 1}`}
             onRemove={() => removeAnnotation(annotation)}
           >
@@ -314,8 +316,8 @@ function chatMentionCandidates(
     value: name,
     label: name,
     detail: "",
-    icon: <Bot aria-hidden="true" />,
     atomic: true,
+    persistsAs: serializeMentionPromptLink(name),
   }))
 }
 

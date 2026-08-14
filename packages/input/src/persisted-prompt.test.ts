@@ -4,6 +4,7 @@ import { describe, it } from 'vitest';
 
 import {
   serializePersistedPromptLink,
+  serializeMentionPromptLink,
   serializeSkillPromptLink,
   tokenizePersistedPrompt,
 } from './persisted-prompt.ts';
@@ -107,5 +108,21 @@ describe('persisted skill links', () => {
         .map((token) => token.name),
       ['review'],
     );
+  });
+
+  it('tokenizes a serialized mention link back to a mention token', () => {
+    const source = serializeMentionPromptLink('Paul Graham');
+    const tokens = tokenizePersistedPrompt(`ask ${source} today`);
+
+    assert.deepEqual(
+      tokens.map((token) => token.kind),
+      ['text', 'mention', 'text'],
+    );
+    const mention = tokens[1];
+    assert.equal(mention.kind, 'mention');
+    if (mention.kind !== 'mention') return;
+    assert.equal(mention.name, 'Paul Graham');
+    assert.equal(mention.label, '@Paul Graham');
+    assert.equal(mention.source, source);
   });
 });

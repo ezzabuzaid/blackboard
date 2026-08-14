@@ -30,6 +30,9 @@ import {
   responseAnnotationComponents,
   responseAnnotationRemarkPlugins,
 } from "./responseAnnotations"
+import { serializeMentionPromptLink } from "@genui/input"
+
+import { messageDisplayText, messageSegments } from "./mentions"
 import { traceItems } from "./traces/agentTrace"
 import { loader } from "./loader"
 
@@ -705,4 +708,39 @@ test("assistant annotation directives render as numbered inline controls", () =>
   assert.match(html, /<button[^>]+aria-label="Annotation 1: one market"/u)
   assert.match(html, />Annotation 1<\/button>/u)
   assert.doesNotMatch(html, /:codex-annotation/u)
+})
+test("persisted mention links render as tokens carrying their source", () => {
+  const persisted = serializeMentionPromptLink("Paul Graham")
+
+  assert.deepEqual(messageSegments(`hey ${persisted} ship it`), [
+    { text: "hey ", mention: false },
+    { text: "@Paul Graham", source: persisted, mention: true },
+    { text: " ship it", mention: false },
+  ])
+})
+
+test("a bare @name is not a mention", () => {
+  assert.deepEqual(messageSegments("hey @Maya, mail ezz@Maya.com"), [
+    { text: "hey @Maya, mail ezz@Maya.com", mention: false },
+  ])
+})
+
+test("user messages keep rendering markdown literally", () => {
+  const content = "see [docs](https://example.com) and `code`"
+  const segments = messageSegments(content)
+
+  assert.equal(segments.map(({ text }) => text).join(""), content)
+  assert.equal(
+    segments.some(({ mention }) => mention),
+    false
+  )
+})
+
+test("previews and quotes read a persisted mention as its label", () => {
+  const persisted = serializeMentionPromptLink("Maya")
+
+  assert.equal(
+    messageDisplayText(`hey ${persisted}, can you look?`),
+    "hey @Maya, can you look?"
+  )
 })

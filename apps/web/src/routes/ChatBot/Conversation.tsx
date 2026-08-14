@@ -33,6 +33,9 @@ import {
   type GroupMessageAnnotation,
   type GroupMessageCluster,
 } from "./groupMessages"
+import { reconstructPersistedPromptSelection } from "@genui/input/browser"
+
+import { messageDisplayText, messageSegments } from "./mentions"
 import {
   responseAnnotationComponents,
   responseAnnotationRemarkPlugins,
@@ -56,6 +59,10 @@ export function Conversation() {
   const messagesById = useMemo(
     () => new Map(messages.map((message) => [message.id, message])),
     [messages]
+  )
+  const participantNames = useMemo(
+    () => participants.map(({ name }) => name),
+    [participants]
   )
   const activityIndicator = groupActivityIndicator(activity)
   const [selection, setSelection] = useState<{
@@ -89,7 +96,7 @@ export function Conversation() {
                 <MessageScrollerItem>
                   <WelcomeMessage
                     apiStatus={apiStatus}
-                    participants={participants.map(({ name }) => name)}
+                    participants={participantNames}
                   />
                 </MessageScrollerItem>
               )}
@@ -229,7 +236,20 @@ export function UserMessageCluster({
                 ))}
                 <p dir="auto" className="text-start [unicode-bidi:plaintext]">
                   <span data-annotation-message-id={message.id}>
-                    {message.content}
+                    {messageSegments(message.content).map(
+                      (segment, index) =>
+                        segment.mention ? (
+                          <span
+                            key={index}
+                            data-persisted-source={segment.source}
+                            className="rounded-sm bg-foreground/10 px-0.5 font-medium"
+                          >
+                            {segment.text}
+                          </span>
+                        ) : (
+                          segment.text
+                        )
+                    )}
                   </span>
                   <MessageTimestamp sentAt={message.sentAt} />
                 </p>
@@ -364,7 +384,7 @@ function ReplyQuote({
         dir="auto"
         className="line-clamp-2 text-start text-xs text-muted-foreground [unicode-bidi:plaintext]"
       >
-        {excerpt ?? message.content}
+        {messageDisplayText(excerpt ?? message.content)}
       </p>
       {comment && <p className="mt-1 text-xs text-foreground">{comment}</p>}
     </div>
@@ -383,7 +403,12 @@ function selectedMessageText(messagesById: ReadonlyMap<string, GroupMessage>) {
   if (!start || start !== end) return null
 
   const message = messagesById.get(start.dataset.annotationMessageId ?? "")
-  const excerpt = selection.toString().trim()
+  // Mentions display as "@Maya" but persist as a link, and the server checks
+  // the excerpt against the stored content, so reconstruct the source.
+  const excerpt = (
+    reconstructPersistedPromptSelection(start, selection) ??
+    selection.toString()
+  ).trim()
   if (!message || !excerpt) return null
 
   const bounds = range.getBoundingClientRect()

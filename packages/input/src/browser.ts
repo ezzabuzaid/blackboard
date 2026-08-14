@@ -1,7 +1,7 @@
 export * from './index.ts';
 export { Composer, useComposer } from './lib/Composer';
-export { ComposerTokenText } from './lib/ComposerTokenText';
 export { PersistedPromptText } from './lib/PersistedPromptText';
+export { reconstructPersistedPromptSelection } from './lib/persisted-prompt-selection';
 export type {
   ComposerAcceptSuggestionOptions,
   ComposerActions,

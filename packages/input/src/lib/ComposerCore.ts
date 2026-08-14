@@ -882,7 +882,11 @@ function decodePersistedPromptText(
       protectedRanges.push({ start, end: decodedText.length });
       continue;
     }
-    if (token.kind !== 'link' && token.kind !== 'skill-link') {
+    if (
+      token.kind !== 'link' &&
+      token.kind !== 'skill-link' &&
+      token.kind !== 'mention'
+    ) {
       decodedText += token.source;
       continue;
     }

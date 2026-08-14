@@ -16,6 +16,7 @@ import { GroupAvatarStack } from "./GroupAvatar"
 import { GroupChatProvider, useGroupChat } from "./GroupChat"
 import { GroupRowMenu } from "./GroupRowMenu"
 import { loader } from "./loader"
+import { messageDisplayText } from "./mentions"
 import { ShareGroupDialog } from "./ShareGroupDialog"
 import {
   AgentTraceProvider,
@@ -168,7 +169,7 @@ function useData(query: string): readonly GroupPreview[] {
   const { activity, messages, participants } = useGroupChat()
   const latestMessage = messages.at(-1)
   const activePreview = latestMessage
-    ? `${latestMessage.author === "user" ? "You" : latestMessage.author}: ${latestMessage.content}`
+    ? `${latestMessage.author === "user" ? "You" : latestMessage.author}: ${messageDisplayText(latestMessage.content)}`
     : activity.phase === "active"
       ? "Agents are working…"
       : participants.length > 0
@@ -203,7 +204,7 @@ function useData(query: string): readonly GroupPreview[] {
         preview: active
           ? activePreview
           : message
-            ? `${message.author === "user" ? "You" : message.author}: ${message.content}`
+            ? `${message.author === "user" ? "You" : message.author}: ${messageDisplayText(message.content)}`
             : group.agentIds.length > 0
               ? `${group.agentIds.length} agents`
               : "No messages yet",
