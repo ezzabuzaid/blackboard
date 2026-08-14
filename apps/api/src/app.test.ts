@@ -1,4 +1,5 @@
 import assert from "node:assert/strict"
+import { rmSync } from "node:fs"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
@@ -92,6 +93,14 @@ function testGroupDependencies(resources: AsyncDisposableStack) {
   }
 }
 
+// Each PGlite queue is a full Postgres data directory (~39MB), so the root is
+// wiped once per run rather than accumulating across runs.
+const testQueueRoot = join(tmpdir(), "zukhruf-test-queues")
+rmSync(testQueueRoot, { recursive: true, force: true })
+let testQueueSeq = 0
+const testQueueDirectory = () =>
+  join(testQueueRoot, `runtime-${++testQueueSeq}`)
+
 function memoryRuntime(participants: WhatsAppParticipant[]) {
   return new WhatsAppChatRuntime({
     loadParticipants: async () => participants,
@@ -99,6 +108,7 @@ function memoryRuntime(participants: WhatsAppParticipant[]) {
     sandboxForChat: () => testGroupSandbox,
     databasePath: ":memory:",
     mailboxPath: ":memory:",
+    queueDirectory: testQueueDirectory(),
   })
 }
 
@@ -112,6 +122,7 @@ function durableRuntime(
     sandboxForChat: () => testGroupSandbox,
     databasePath: join(directory, "group.sqlite"),
     mailboxPath: join(directory, "mailbox.sqlite"),
+    queueDirectory: join(directory, "queues"),
   })
 }
 
@@ -347,7 +358,7 @@ test("passkey registration requires only a name", async () => {
 test("participant defaults use the configured OpenRouter key", () => {
   const defaults = createParticipantDefaults({ apiKey: "openrouter-key-1" })
   assert.equal(defaults.model.provider, "openrouter")
-  assert.equal(defaults.model.modelId, "~deepseek/deepseek-v4-flash-latest")
+  assert.equal(defaults.model.modelId, "openai/gpt-5.6-luna")
   assert.equal(defaults.tools.web_search?.type, "provider")
 })
 
@@ -1499,6 +1510,7 @@ test("chat runtime reports new messages to the group summary sink", async () => 
     sandboxForChat: () => testGroupSandbox,
     databasePath: ":memory:",
     mailboxPath: ":memory:",
+    queueDirectory: testQueueDirectory(),
   })
 
   const message = await runtime.post(testGroupConversation, {
@@ -1520,6 +1532,7 @@ test("snapshots reuse the active chat roster", async () => {
     sandboxForChat: () => testGroupSandbox,
     databasePath: ":memory:",
     mailboxPath: ":memory:",
+    queueDirectory: testQueueDirectory(),
   })
 
   await runtime.snapshot({ userId: "user-1", chatId: "chat-1" })
@@ -1572,6 +1585,7 @@ test("new participants join an active chat, read its transcript, and greet once"
     sandboxForChat: () => testGroupSandbox,
     databasePath: ":memory:",
     mailboxPath: ":memory:",
+    queueDirectory: testQueueDirectory(),
   })
 
   await runtime.post(conversation, {
@@ -1609,6 +1623,43 @@ test("new participants join an active chat, read its transcript, and greet once"
     snapshot.messages.filter(({ author }) => author === "Researcher").length,
     1
   )
+})
+
+test("a chat stops instead of freezing when the pump throws", async () => {
+  const conversation = { userId: "user-1", chatId: "pump-failure" }
+  const roster: WhatsAppParticipant[] = []
+  let collided = false
+  roster.push({
+    name: "Factory",
+    model: new MockLanguageModelV4({
+      doStream: async () => {
+        if (!collided) {
+          collided = true
+          roster.push({
+            name: "factory",
+            model: new MockLanguageModelV4({
+              doStream: async () => groupTextResponse("Nothing to add."),
+            }),
+          })
+        }
+        return groupTextResponse("Nothing to add.")
+      },
+    }),
+  })
+
+  await using runtime = new WhatsAppChatRuntime({
+    loadParticipants: async () => roster,
+    limits: testGroupLimits,
+    sandboxForChat: () => testGroupSandbox,
+    databasePath: ":memory:",
+    mailboxPath: ":memory:",
+    queueDirectory: testQueueDirectory(),
+  })
+
+  await runtime.post(conversation, { id: "message-1", content: "Hello." })
+  const snapshot = await waitForChat(runtime, conversation, "stopped")
+
+  assert.equal(snapshot.activity.stopReason, "interrupted")
 })
 
 test("agent telemetry is grouped into complete chat-scoped turns", async () => {
@@ -1804,7 +1855,6 @@ test("group chats share writable per-user participants and isolate other users",
     assert.equal(updated.exitCode, 0)
 
     await first.sandbox.writeFiles([
-      { path: "/workspace/business/README.md", content: "shared profile" },
       { path: "/workspace/private.txt", content: "first chat" },
       { path: "/workspace/output/sample.txt", content: "artifact" },
     ])
@@ -1813,10 +1863,6 @@ test("group chats share writable per-user participants and isolate other users",
       chatId: "chat-2:participant:0",
       userId: secondChat.userId,
     })
-    assert.equal(
-      await second.sandbox.readFile("/workspace/business/README.md"),
-      "shared profile"
-    )
     assert.equal(
       await second.sandbox.readFile("/workspace/participants/maya/MEMORY.md"),
       "The user prefers concise answers."
@@ -1835,14 +1881,6 @@ test("group chats share writable per-user participants and isolate other users",
       (
         await otherUser.sandbox.executeCommand(
           "cat /workspace/participants/maya/MEMORY.md"
-        )
-      ).exitCode,
-      1
-    )
-    assert.equal(
-      (
-        await otherUser.sandbox.executeCommand(
-          "cat /workspace/business/README.md"
         )
       ).exitCode,
       1
@@ -2874,9 +2912,20 @@ test("the sole participant treats the first human message as direct", async () =
     })
   )
 
-  const messages = await group.send("Hey brother")
+  const activity: string[] = []
+  const messages = await group.send("Hey brother", undefined, (event) => {
+    if (event.type === "presence") activity.push(event.state)
+  })
 
   assert.equal(inspectedRoster, true)
+  assert.deepEqual(activity, [
+    "reading",
+    "working-with-files",
+    "reading",
+    "typing",
+    "reading",
+    "seen",
+  ])
   assert.deepEqual(
     messages.map(({ author, content }) => ({ author, content })),
     [

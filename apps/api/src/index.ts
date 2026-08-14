@@ -137,6 +137,7 @@ const runtime = resources.use(
     ),
     databasePath: resolve(dataDirectory, "group.sqlite"),
     mailboxPath: resolve(dataDirectory, "mailbox.sqlite"),
+    queueDirectory: resolve(dataDirectory, "queues"),
   })
 )
 

@@ -1,3 +1,5 @@
+import { rm } from "node:fs/promises"
+import { resolve } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 
 import {
@@ -55,6 +57,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   readonly #sandboxForChat: (
     conversation: ConversationId
   ) => AgentDeclaration["sandbox"]
+  readonly #queueDirectory: string
 
   constructor(options: {
     loadParticipants: (
@@ -70,11 +73,14 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     ) => AgentDeclaration["sandbox"]
     databasePath: string
     mailboxPath: string
+    /** Root for the per-group queue databases that carry pending schedules. */
+    queueDirectory: string
   }) {
     this.#loadParticipants = options.loadParticipants
     this.#onMessage = options.onMessage
     this.#limits = options.limits
     this.#sandboxForChat = options.sandboxForChat
+    this.#queueDirectory = options.queueDirectory
 
     const database = new DatabaseSync(options.databasePath)
     this.#resources.defer(() => database.close())
@@ -168,6 +174,8 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     const session = await pending?.catch(() => undefined)
     await session?.resources.disposeAsync()
 
+    await rm(this.#queuePath(conversation), { recursive: true, force: true })
+
     await this.#streamStore.deleteStream(streamId(conversation))
 
     const { userId } = conversation
@@ -259,6 +267,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       conversation,
       participants,
       loadParticipants,
+      queuePath: this.#queuePath(conversation),
       sandbox: this.#sandboxForChat(conversation),
       store: this.#store,
       streams: this.#streams,
@@ -280,6 +289,10 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     resources.use(group)
     await group.recoverInterrupted()
     return { group, participants, resources }
+  }
+
+  #queuePath(conversation: ConversationId) {
+    return resolve(this.#queueDirectory, encodeURIComponent(conversation.chatId))
   }
 
   async #loadChatParticipants(conversation: ConversationId) {

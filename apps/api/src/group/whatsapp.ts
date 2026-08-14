@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
+import { mkdirSync } from "node:fs"
 
 import {
   guardrail,
@@ -17,16 +18,94 @@ import {
   AgentRuntime,
   MessageDeliveryMode,
   PgBossTurnQueue,
+  PgBossWakeScheduler,
   createInterAgentCommunication,
   defineAgent,
   defineTool,
   type AgentDeclaration,
   type ConversationId,
   type MailboxStore,
+  type SchedulingWake,
 } from "@deepagents/experimental/zukhruf"
 import { PGlite } from "@electric-sql/pglite"
 import { jsonSchema, type ToolSet } from "ai"
 import { PgBoss, fromPglite } from "pg-boss"
+
+/** Queue names must be stable per participant identity: with a durable queue database, drifting names would hand one participant another's pending turns and wakes. */
+function queueSlug(name: string) {
+  const base = name
+    .toLocaleLowerCase("en")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  const digest = createHash("sha256").update(name).digest("hex").slice(0, 8)
+  return base ? `${base}-${digest}` : digest
+}
+
+const schedulingDiscipline: readonly ContextFragment[] = [
+  principle({
+    title: "Self-scheduling",
+    description:
+      "CronCreate and ScheduleWakeup let you continue your own work in this conversation later. You schedule only for yourself; no one can schedule for you.",
+    policies: [
+      policy({
+        rule: "Keep at most one schedule per task. Replace or delete it as the task evolves; never stack schedules for the same goal.",
+      }),
+      policy({
+        rule: "Write the prompt to your future self: what to check, what 'done' looks like, and what to do when done.",
+        reason:
+          "The scheduled turn starts from that prompt; a vague prompt produces a vague turn.",
+      }),
+      policy({
+        rule: "Pick the longest delay that serves the goal. A result that takes ~10 minutes deserves one 10-minute wakeup, not ten 1-minute ones.",
+      }),
+      policy({
+        rule: "Never schedule a turn just to check for new group messages or mailbox communications — those arrive on their own.",
+      }),
+      policy({
+        rule: "When the human explicitly asks for ongoing monitoring, acknowledge once briefly that you will watch and report back; otherwise start and run schedules without announcing them.",
+      }),
+    ],
+  }),
+  workflow({
+    task: "Continue work you cannot finish this turn",
+    triggers: [
+      "waiting on an external result",
+      "a task that needs periodic checking",
+      "work to resume at a specific time",
+    ],
+    steps: [
+      "Choose the tool: ScheduleWakeup for one check within the next hour; CronCreate with recurring: false for one check beyond an hour; CronCreate recurring for a fixed cadence.",
+      "Write the continuation prompt with the goal, the completion condition, and the follow-up action.",
+      "On each scheduled turn, decide: finished (post the result if the group needs it, delete the cron), continue (re-arm the wakeup or let the cron recur), or moot (delete the cron, stay silent).",
+    ],
+    notes:
+      "A wakeup holds one slot — scheduling again replaces it. One-shot crons and delivered wakeups clean up after themselves; only recurring crons need explicit deletion.",
+  }),
+  quirk({
+    issue:
+      "Scheduled turns fire only when you are idle; an occurrence due while you are mid-turn arrives after that turn finishes.",
+    workaround:
+      "Treat every schedule as 'no earlier than'. Do not build cadences that assume to-the-minute delivery.",
+  }),
+  quirk({
+    issue: "Recurring crons expire seven days after creation, by design.",
+    workaround:
+      "If a task genuinely outlives a week, re-create the cron when you notice it gone. Expiry is not an error.",
+  }),
+  guardrail({
+    rule: "Never leave a recurring cron running after its task is resolved or moot.",
+    reason: "Orphaned crons burn turns forever.",
+    action:
+      "Delete it with CronDelete in the same turn you conclude the task. Use CronList when unsure what is still running.",
+  }),
+  guardrail({
+    rule: "Never post scheduling mechanics or empty progress to the group.",
+    reason:
+      "Scheduled turns are private; the group only benefits from results.",
+    action:
+      "Work silently. Call reply_to_group only when a scheduled turn produces something the group needs; otherwise end the turn without posting.",
+  }),
+]
 
 export interface WhatsAppParticipant {
   name: string
@@ -54,7 +133,36 @@ export interface WhatsAppMessageAnnotation {
   comment?: string
 }
 
-export type WhatsAppParticipantPresence = "idle" | "reading" | "typing" | "seen"
+type WhatsAppParticipantToolPresence =
+  | "typing"
+  | "searching-web"
+  | "working-with-files"
+  | "scheduling"
+  | "using-tool"
+
+export type WhatsAppParticipantPresence =
+  | "idle"
+  | "reading"
+  | WhatsAppParticipantToolPresence
+  | "seen"
+
+function toolPresence(toolName: string): WhatsAppParticipantToolPresence {
+  switch (toolName) {
+    case "reply_to_group":
+      return "typing"
+    case "web_search":
+      return "searching-web"
+    case "bash":
+      return "working-with-files"
+    case "CronCreate":
+    case "CronList":
+    case "CronDelete":
+    case "ScheduleWakeup":
+      return "scheduling"
+    default:
+      return "using-tool"
+  }
+}
 
 export type WhatsAppGroupActivity =
   | { type: "started"; participants: string[] }
@@ -135,6 +243,8 @@ export interface WhatsAppGroupOptions {
   mailboxStore: MailboxStore
   events: WhatsAppChatEvent[]
   limits: WhatsAppGroupLimits
+  /** Directory for the durable turn/wake queue database. Omitted: in-memory, so pending schedules die with the process. */
+  queuePath?: string
   persist: (event: WhatsAppChatEvent) => void | Promise<void>
   onMessage?: (message: WhatsAppMessage) => void | Promise<void>
   onActivity?: (activity: WhatsAppGroupActivity) => void | Promise<void>
@@ -265,13 +375,13 @@ export class WhatsAppGroup implements AsyncDisposable {
     WhatsAppGroup.#validate(options)
 
     await using resources = new AsyncDisposableStack()
-    const database = new PGlite()
+    if (options.queuePath) mkdirSync(options.queuePath, { recursive: true })
+    const database = new PGlite(options.queuePath)
     resources.defer(() => database.close())
     const boss = new PgBoss({ db: fromPglite(database), backend: "pglite" })
     boss.on("error", (error) => console.error("[queue error]", error))
     resources.defer(() => boss.stop({ close: false, graceful: true }))
     const participants: RunningParticipant[] = []
-    let participantNumber = 0
     let participantResources = resources
     let publishReply: (
       author: string,
@@ -282,12 +392,18 @@ export class WhatsAppGroup implements AsyncDisposable {
 
     await boss.start()
     const startParticipant: StartParticipant = async (participant, joining) => {
+      const participantSlug = queueSlug(participant.name)
       const queue = new PgBossTurnQueue(boss, {
-        queue: `zukhruf-whatsapp-${participantNumber++}`,
+        queue: `zukhruf-whatsapp-${participantSlug}`,
         schema: "pgboss",
         pollingIntervalSeconds: 0.5,
       })
       await queue.initialize()
+      const wakes = new PgBossWakeScheduler<SchedulingWake>(boss, {
+        queue: `zukhruf-whatsapp-wakes-${participantSlug}`,
+        pollingIntervalSeconds: 0.5,
+      })
+      await wakes.initialize()
 
       const runtime = new AgentRuntime(
         defineAgent({
@@ -363,6 +479,7 @@ export class WhatsAppGroup implements AsyncDisposable {
                 "Cite web sources with standard Markdown links containing full URLs.",
               never: "Reply merely to agree, repeat, or announce silence.",
             }),
+            ...schedulingDiscipline,
           ],
           tools: {
             ...participant.tools,
@@ -436,6 +553,10 @@ export class WhatsAppGroup implements AsyncDisposable {
           streams: options.streams,
           queue,
           mailboxStore: options.mailboxStore,
+          scheduling: {
+            scheduler: wakes,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          },
         }
       )
 
@@ -701,13 +822,26 @@ export class WhatsAppGroup implements AsyncDisposable {
     this.#pump = pump
     void pump.then(
       () => this.#finishPump(pump, true),
-      () => this.#finishPump(pump, false)
+      (cause) => this.#abandonPump(pump, cause)
     )
   }
 
   #finishPump(pump: Promise<void>, restart: boolean) {
     if (this.#pump === pump) this.#pump = null
     if (restart && this.#pending.length > 0) this.#ensurePump()
+  }
+
+  async #abandonPump(pump: Promise<void>, cause: unknown) {
+    this.#finishPump(pump, false)
+    this.#pending.length = 0
+    console.error("[group pump failed]", cause)
+    try {
+      // #deliver hands back the uncaught delivery promise, so a subscriber
+      // that throws rejects this too — and nothing above would catch it.
+      await this.#emitStopped(this.#stopRequested ?? "interrupted")
+    } catch (emitCause) {
+      console.error("[group pump stop notice failed]", emitCause)
+    }
   }
 
   async #runPump() {
@@ -852,7 +986,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       participant.pendingReminder = undefined
       participant.turnId = turn.id
       let failure: string | undefined
-      const typingCalls = new Set<string>()
+      const toolCalls = new Map<string, WhatsAppParticipantToolPresence>()
       await turn.stream.pipeTo(
         new WritableStream({
           write: async (part) => {
@@ -860,26 +994,30 @@ export class WhatsAppGroup implements AsyncDisposable {
             if (
               (part.type === "tool-input-start" ||
                 part.type === "tool-input-available") &&
-              part.toolName === "reply_to_group" &&
-              !typingCalls.has(part.toolCallId)
+              !toolCalls.has(part.toolCallId)
             ) {
-              typingCalls.add(part.toolCallId)
+              const state = toolPresence(part.toolName)
+              toolCalls.set(part.toolCallId, state)
               await this.#emitActivity({
                 type: "presence",
                 notification,
                 participant: participant.name,
-                state: "typing",
+                state,
               })
             }
-            if (
-              part.type === "tool-output-available" &&
-              typingCalls.delete(part.toolCallId)
-            ) {
+            const toolFinished =
+              part.type === "tool-input-error" ||
+              part.type === "tool-output-error" ||
+              part.type === "tool-output-denied" ||
+              (part.type === "tool-output-available" &&
+                part.preliminary !== true)
+            if (toolFinished && toolCalls.delete(part.toolCallId)) {
+              const active = [...toolCalls.values()].at(-1)
               await this.#emitActivity({
                 type: "presence",
                 notification,
                 participant: participant.name,
-                state: "reading",
+                state: active === undefined ? "reading" : active,
               })
             }
           },
