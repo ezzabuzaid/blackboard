@@ -18,7 +18,7 @@ export interface AgentTemplate {
 
 export function loadAgentCatalog(directory: string): readonly AgentTemplate[] {
   const root = resolve(directory)
-  return readdirSync(root, { withFileTypes: true })
+  const agents = readdirSync(root, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
     .map(({ name: id }) => readAgent(root, id))
     .toSorted(
@@ -26,6 +26,23 @@ export function loadAgentCatalog(directory: string): readonly AgentTemplate[] {
         left.category.localeCompare(right.category, "en") ||
         left.name.localeCompare(right.name, "en")
     )
+
+  // A group whose roster resolves to colliding names throws inside
+  // WhatsAppGroup on every chat open, and no route can edit a roster
+  // afterwards, so the collision has to be impossible to author.
+  const owners = new Map<string, string>()
+  for (const { id, name } of agents) {
+    const normalized = name.toLowerCase()
+    const owner = owners.get(normalized)
+    if (owner) {
+      throw new Error(
+        `Agent catalog entries "${owner}" and "${id}" share the display name "${name}"`
+      )
+    }
+    owners.set(normalized, id)
+  }
+
+  return agents
 }
 
 function readAgent(root: string, id: string): AgentTemplate {
@@ -52,6 +69,11 @@ function readAgent(root: string, id: string): AgentTemplate {
   }
   if (!isAgentIdentity(identity)) {
     throw new Error(`Agent catalog entry "${id}" has an invalid identity`)
+  }
+  if (identity.name.toLowerCase() === "user") {
+    throw new Error(
+      `Agent catalog entry "${id}" cannot use the reserved display name "user"`
+    )
   }
 
   return { id, ...identity }
