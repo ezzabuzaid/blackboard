@@ -131,6 +131,7 @@ else
     --exclude .git \
     --exclude .nx \
     --exclude .data \
+    --exclude '.env*' \
     --exclude dist \
     --exclude node_modules \
     -cf - . \
