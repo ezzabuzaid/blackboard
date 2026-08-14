@@ -37,9 +37,10 @@ import { reconstructPersistedPromptSelection } from "@genui/input/browser"
 
 import { messageDisplayText, messageSegments } from "./mentions"
 import {
-  responseAnnotationComponents,
-  responseAnnotationRemarkPlugins,
-} from "./responseAnnotations"
+  messageComponents,
+  messageRemarkPlugins,
+  ParticipantMention,
+} from "./messageMarkdown"
 
 const messageTime = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
@@ -119,6 +120,7 @@ export function Conversation() {
                       cluster={cluster}
                       messagesById={messagesById}
                       onReply={replyTo}
+                      participantNames={participantNames}
                     />
                   )}
                 </MessageScrollerItem>
@@ -239,13 +241,12 @@ export function UserMessageCluster({
                     {messageSegments(message.content).map(
                       (segment, index) =>
                         segment.mention ? (
-                          <span
+                          <ParticipantMention
                             key={index}
-                            data-persisted-source={segment.source}
-                            className="rounded-sm bg-foreground/10 px-0.5 font-medium"
+                            persistedSource={segment.source}
                           >
                             {segment.text}
-                          </span>
+                          </ParticipantMention>
                         ) : (
                           segment.text
                         )
@@ -267,8 +268,10 @@ export function GroupReplyCluster({
   cluster,
   messagesById,
   onReply,
+  participantNames,
 }: MessageClusterProps & {
   chatId?: string
+  participantNames: readonly string[]
 }) {
   return (
     <Message
@@ -317,6 +320,7 @@ export function GroupReplyCluster({
                   <AssistantMarkdown
                     active={false}
                     chatId={chatId}
+                    participantNames={participantNames}
                     text={message.content}
                     responseAnnotations={message.responseAnnotations}
                   />
@@ -447,6 +451,7 @@ function MessageTimestamp({ sentAt }: { sentAt: string }) {
 interface AssistantMarkdownProps {
   active: boolean
   chatId?: string
+  participantNames: readonly string[]
   text: string
   responseAnnotations?: readonly GroupMessageAnnotation[]
 }
@@ -454,15 +459,16 @@ interface AssistantMarkdownProps {
 export function AssistantMarkdown({
   active,
   chatId,
+  participantNames,
   text,
   responseAnnotations = [],
 }: AssistantMarkdownProps) {
   const remarkPlugins = useMemo(
-    () => responseAnnotationRemarkPlugins(chatId),
-    [chatId]
+    () => messageRemarkPlugins(chatId, participantNames),
+    [chatId, participantNames]
   )
   const components = useMemo(
-    () => responseAnnotationComponents(responseAnnotations),
+    () => messageComponents(responseAnnotations),
     [responseAnnotations]
   )
   const trustedArtifactBaseUrl = chatId ? artifactBaseUrl(chatId) : null
@@ -479,7 +485,10 @@ export function AssistantMarkdown({
   return (
     <Streamdown
       className="contents space-y-2 [&>p:last-child]:inline"
-      allowedTags={{ "codex-annotation": ["index"] }}
+      allowedTags={{
+        "codex-annotation": ["index"],
+        "participant-mention": [],
+      }}
       components={components}
       linkSafety={linkSafety}
       mode={active ? "streaming" : "static"}

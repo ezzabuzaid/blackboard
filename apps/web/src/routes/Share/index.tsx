@@ -82,6 +82,7 @@ export default function Share() {
                       <GroupReplyCluster
                         cluster={cluster}
                         messagesById={messagesById}
+                        participantNames={participants}
                       />
                     )}
                   </MessageScrollerItem>

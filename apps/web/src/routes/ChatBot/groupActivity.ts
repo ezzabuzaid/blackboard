@@ -35,7 +35,32 @@ export type ParticipantActivityState =
   | "failed"
   | "stopped"
 
-export type ParticipantPresenceState = "idle" | "reading" | "typing" | "seen"
+const toolPresenceStates = [
+  "searching-web",
+  "working-with-files",
+  "scheduling",
+  "using-tool",
+] as const
+
+type ParticipantToolPresenceState = (typeof toolPresenceStates)[number]
+
+const toolPresenceLabels = {
+  "searching-web": "searching the web",
+  "working-with-files": "working with group files",
+  scheduling: "scheduling a follow-up",
+  "using-tool": "using a tool",
+} satisfies Record<ParticipantToolPresenceState, string>
+
+const participantPresenceStates = [
+  "idle",
+  "reading",
+  "typing",
+  ...toolPresenceStates,
+  "seen",
+] as const
+
+export type ParticipantPresenceState =
+  (typeof participantPresenceStates)[number]
 
 export interface GroupActivityState {
   phase: "idle" | "active" | "settled" | "stopped"
@@ -176,7 +201,8 @@ export function isGroupActivityEvent(
     return (
       positiveInteger(value.notification) &&
       typeof value.participant === "string" &&
-      ["reading", "typing", "seen"].includes(String(value.state))
+      isParticipantPresenceState(value.state) &&
+      value.state !== "idle"
     )
   }
   if (value.type === "stopped") {
@@ -229,9 +255,7 @@ export function isGroupActivityState(
       (participant) =>
         isRecord(participant) &&
         typeof participant.name === "string" &&
-        ["idle", "reading", "typing", "seen"].includes(
-          String(participant.state)
-        )
+        isParticipantPresenceState(participant.state)
     )
   )
 }
@@ -249,6 +273,28 @@ export function groupActivityIndicator(state: GroupActivityState) {
         typing.length === 1
           ? `${typing[0]} is typing…`
           : `${typing.length} agents are typing…`,
+    }
+  }
+
+  const tools = state.presence.filter(
+    (
+      participant
+    ): participant is {
+      name: string
+      state: ParticipantToolPresenceState
+    } => isToolPresenceState(participant.state)
+  )
+  if (tools.length > 1) {
+    return {
+      participants: tools.map(({ name }) => name),
+      label: `${tools.length} agents are using tools…`,
+    }
+  }
+  if (tools.length === 1) {
+    const [{ name, state: tool }] = tools
+    return {
+      participants: [name],
+      label: `${name} is ${toolPresenceLabels[tool]}…`,
     }
   }
 
@@ -280,6 +326,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string")
+}
+
+function isParticipantPresenceState(
+  value: unknown
+): value is ParticipantPresenceState {
+  return participantPresenceStates.includes(value as ParticipantPresenceState)
+}
+
+function isToolPresenceState(
+  value: ParticipantPresenceState
+): value is ParticipantToolPresenceState {
+  return toolPresenceStates.includes(value as ParticipantToolPresenceState)
 }
 
 function positiveInteger(value: unknown): value is number {

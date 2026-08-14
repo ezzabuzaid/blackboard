@@ -27,9 +27,9 @@ import {
   type GroupChatState,
 } from "./groupMessages"
 import {
-  responseAnnotationComponents,
-  responseAnnotationRemarkPlugins,
-} from "./responseAnnotations"
+  messageComponents,
+  messageRemarkPlugins,
+} from "./messageMarkdown"
 import { serializeMentionPromptLink } from "@genui/input"
 
 import { messageDisplayText, messageSegments } from "./mentions"
@@ -59,6 +59,23 @@ test("extracts group events from the Zukhruf stream", () => {
       data: event,
     }),
     event
+  )
+  const toolEvent = {
+    cursor: 2,
+    type: "activity" as const,
+    activity: {
+      type: "presence" as const,
+      notification: 1,
+      participant: "Maya",
+      state: "working-with-files" as const,
+    },
+  }
+  assert.deepEqual(
+    groupChatEventFromStreamPart({
+      type: "data-whatsapp-chat-event",
+      data: toolEvent,
+    }),
+    toolEvent
   )
   assert.equal(groupChatEventFromStreamPart({ type: "text-delta" }), null)
 })
@@ -506,7 +523,18 @@ test("group activity stays visible while agents think and type", () => {
     label: "2 agents are thinking…",
   })
 
-  const typing = reduceGroupActivity(reading, {
+  const usingTool = reduceGroupActivity(reading, {
+    type: "presence",
+    notification: 1,
+    participant: "Maya",
+    state: "working-with-files",
+  })
+  assert.deepEqual(groupActivityIndicator(usingTool), {
+    participants: ["Maya"],
+    label: "Maya is working with group files…",
+  })
+
+  const typing = reduceGroupActivity(usingTool, {
     type: "presence",
     notification: 1,
     participant: "Omar",
@@ -692,14 +720,14 @@ test("assistant annotation directives render as numbered inline controls", () =>
       {
         mode: "static",
         allowedTags: { "codex-annotation": ["index"] },
-        components: responseAnnotationComponents([
+        components: messageComponents([
           {
             messageId: "message-1",
             excerpt: "one market",
             comment: "Why only one?",
           },
         ]),
-        remarkPlugins: responseAnnotationRemarkPlugins(),
+        remarkPlugins: messageRemarkPlugins(undefined, []),
       },
       'That scope is deliberate. :codex-annotation{index="1"}'
     )
@@ -709,6 +737,31 @@ test("assistant annotation directives render as numbered inline controls", () =>
   assert.match(html, />Annotation 1<\/button>/u)
   assert.doesNotMatch(html, /:codex-annotation/u)
 })
+
+test("assistant prose renders known participants as mentions", () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      Streamdown,
+      {
+        mode: "static",
+        allowedTags: {
+          "codex-annotation": ["index"],
+          "participant-mention": [],
+        },
+        components: messageComponents([]),
+        remarkPlugins: messageRemarkPlugins(undefined, ["Maya", "Paul Graham"]),
+      },
+      "Ask @Paul Graham and @Maya, not `@Maya`, [@Maya](https://example.com), or ezz@Maya.com."
+    )
+  )
+
+  assert.equal(html.match(/data-token="mention"/gu)?.length, 2)
+  assert.match(html, /<span[^>]+data-token="mention"[^>]*>@Paul Graham<\/span>/u)
+  assert.match(html, /<span[^>]+data-token="mention"[^>]*>@Maya<\/span>/u)
+  assert.match(html, /<code[^>]*>@Maya<\/code>/u)
+  assert.match(html, /ezz@Maya\.com/u)
+})
+
 test("persisted mention links render as tokens carrying their source", () => {
   const persisted = serializeMentionPromptLink("Paul Graham")
 
