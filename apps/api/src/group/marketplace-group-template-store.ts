@@ -146,6 +146,18 @@ export class MarketplaceGroupTemplateStore implements Disposable {
     return rows.map(toMarketplaceGroupTemplate)
   }
 
+  owns(publisherId: string, id: string) {
+    return Boolean(
+      this.#database
+        .prepare(
+          `SELECT 1
+           FROM marketplace_group_templates
+           WHERE publisher_id = ? AND id = ?`
+        )
+        .get(publisherId, id)
+    )
+  }
+
   findPublished(id: string): MarketplaceGroupTemplate | null {
     const row = this.#database
       .prepare(
@@ -178,6 +190,37 @@ export class MarketplaceGroupTemplateStore implements Disposable {
 
   unpublish(publisherId: string, id: string): MarketplaceGroupTemplate | null {
     return this.#setPublished(publisherId, id, false)
+  }
+
+  removeSourceGroup(publisherId: string, sourceGroupId: string) {
+    const row = this.#database
+      .prepare(
+        `SELECT published
+         FROM marketplace_group_templates
+         WHERE publisher_id = ? AND source_group_id = ?`
+      )
+      .get(publisherId, sourceGroupId) as { published: number } | undefined
+    if (!row) return false
+
+    const statement = row.published
+      ? `UPDATE marketplace_group_templates
+         SET source_group_id = NULL
+         WHERE publisher_id = ? AND source_group_id = ?`
+      : `DELETE FROM marketplace_group_templates
+         WHERE publisher_id = ? AND source_group_id = ?`
+    this.#database.prepare(statement).run(publisherId, sourceGroupId)
+    return true
+  }
+
+  delete(publisherId: string, id: string) {
+    return (
+      this.#database
+        .prepare(
+          `DELETE FROM marketplace_group_templates
+           WHERE publisher_id = ? AND id = ? AND source_group_id IS NULL`
+        )
+        .run(publisherId, id).changes > 0
+    )
   }
 
   #setPublished(

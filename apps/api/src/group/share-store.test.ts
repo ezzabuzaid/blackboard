@@ -41,3 +41,21 @@ test("group shares resolve until they are revoked", () => {
     groupId: "group-2",
   })
 })
+
+test("permanent group deletion removes current and historical share tokens", () => {
+  using shares = new GroupShareStore(":memory:")
+  const revoked = shares.create("user-1", "group-1")
+  shares.revoke("user-1", "group-1")
+  const active = shares.create("user-1", "group-1")
+  const otherGroup = shares.create("user-1", "group-2")
+
+  assert.equal(shares.deleteForGroup("user-2", "group-1"), false)
+  assert.equal(shares.deleteForGroup("user-1", "group-1"), true)
+  assert.equal(shares.resolve(revoked.token), null)
+  assert.equal(shares.resolve(active.token), null)
+  assert.deepEqual(shares.resolve(otherGroup.token), {
+    userId: "user-1",
+    groupId: "group-2",
+  })
+  assert.equal(shares.deleteForGroup("user-1", "group-1"), false)
+})

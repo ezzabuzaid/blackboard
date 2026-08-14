@@ -207,6 +207,14 @@ export class GroupStore implements Disposable {
     )
   }
 
+  delete(userId: string, id: string) {
+    return (
+      this.#database
+        .prepare("DELETE FROM groups WHERE user_id = ? AND id = ?")
+        .run(userId, id).changes > 0
+    )
+  }
+
   #setTimestamp(
     column: "pinned_at" | "archived_at",
     userId: string,

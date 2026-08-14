@@ -28,7 +28,10 @@ export default function (router: Hono<AppEnv>) {
   router.get(
     "/group-templates",
     validate(() => ({})),
-    (context) => {
+    async (context) => {
+      const session = await context.var.dependencies.auth.getSession(
+        context.req.raw.headers
+      )
       const agentNames = new Map(
         context.var.dependencies.agents.map(({ id, name }) => [id, name])
       )
@@ -39,15 +42,32 @@ export default function (router: Hono<AppEnv>) {
         })),
         ...context.var.dependencies.marketplaceTemplates
           .published()
-          .map(({ id, publisherName, name, category, outcome, agents }) => ({
-            id,
-            publisherName,
-            name,
-            category,
-            outcome,
-            agents,
-            source: "marketplace" as const,
-          })),
+          .map(
+            ({
+              id,
+              sourceGroupId,
+              publisherName,
+              name,
+              category,
+              outcome,
+              agents,
+            }) => ({
+              id,
+              publisherName,
+              name,
+              category,
+              outcome,
+              agents,
+              owned:
+                session !== null &&
+                context.var.dependencies.marketplaceTemplates.owns(
+                  session.user.id,
+                  id
+                ),
+              detached: sourceGroupId === null,
+              source: "marketplace" as const,
+            })
+          ),
       ]
 
       return context.json({
@@ -280,6 +300,31 @@ export default function (router: Hono<AppEnv>) {
         }
         throw error
       }
+    }
+  )
+
+  /**
+   * @openapi deleteMarketplaceGroupTemplate
+   * @tags group-templates
+   * @description Permanently withdraws a detached marketplace template owned by the publisher.
+   */
+  router.delete(
+    "/group-templates/:templateId",
+    authenticate,
+    validate((payload) => ({
+      templateId: {
+        select: payload.params.templateId,
+        against: z.string(),
+      },
+    })),
+    (context) => {
+      const deleted = context.var.dependencies.marketplaceTemplates.delete(
+        context.get("userId"),
+        context.var.input.templateId
+      )
+      return deleted
+        ? context.json({ deleted: true })
+        : context.json({ error: "Group template not found." }, 404)
     }
   )
 

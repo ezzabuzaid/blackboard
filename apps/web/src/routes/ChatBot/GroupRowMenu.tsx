@@ -21,9 +21,10 @@ import {
   Pin,
   PinOff,
   Store,
+  Trash2,
 } from "lucide-react"
 import { useState } from "react"
-import { useRevalidator } from "react-router"
+import { useNavigate, useRevalidator } from "react-router"
 
 import { api } from "./api"
 import {
@@ -46,7 +47,10 @@ export function GroupRowMenu({
   active: boolean
 }) {
   const { revalidate } = useRevalidator()
+  const navigate = useNavigate()
   const [confirmingClear, setConfirmingClear] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [marketplaceOpen, setMarketplaceOpen] = useState(false)
   const [marketplaceEditor, setMarketplaceEditor] =
     useState<MarketplaceEditor | null>(null)
@@ -153,6 +157,17 @@ export function GroupRowMenu({
             <CircleMinus aria-hidden="true" />
             Clear chat
           </DropdownMenuItem>
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={pending}
+            onSelect={() => {
+              setDeleteError(null)
+              setConfirmingDelete(true)
+            }}
+          >
+            <Trash2 aria-hidden="true" />
+            Delete group
+          </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
@@ -182,6 +197,75 @@ export function GroupRowMenu({
               }}
             >
               {pending ? "Clearing…" : "Clear chat"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={confirmingDelete}
+        onOpenChange={(open) => {
+          if (!open && pending) return
+          setConfirmingDelete(open)
+        }}
+      >
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {name}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="text-left">
+                <p>This cannot be undone.</p>
+                <dl className="mt-5 space-y-4">
+                  <div>
+                    <dt className="text-sm font-medium text-foreground">
+                      Deleted
+                    </dt>
+                    <dd className="mt-1 text-pretty leading-6">
+                      Conversation, agent memory, group files and artifacts,
+                      every share link, and any unpublished marketplace draft.
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-sm font-medium text-foreground">
+                      Kept
+                    </dt>
+                    <dd className="mt-1 text-pretty leading-6">
+                      Published marketplace template, account-level participant
+                      data, agent telemetry, and API request logs.
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError && (
+            <p role="alert" className="text-sm text-destructive">
+              {deleteError}
+            </p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={pending}
+              onClick={(event) => {
+                event.preventDefault()
+                setPending(true)
+                setDeleteError(null)
+                void api
+                  .request("DELETE /groups/{groupId}", { groupId })
+                  .then(async () => {
+                    setConfirmingDelete(false)
+                    if (active) await navigate("/")
+                    else await revalidate()
+                  })
+                  .catch(() => {
+                    setDeleteError("Could not delete this group. Try again.")
+                  })
+                  .finally(() => setPending(false))
+              }}
+            >
+              {pending ? "Deleting…" : "Delete group"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

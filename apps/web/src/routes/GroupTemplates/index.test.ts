@@ -36,6 +36,8 @@ test("anonymous visitors can load the public marketplace catalog", async () => {
             outcome: "Challenge the next company decision.",
             source: "marketplace",
             publisherName: "Publisher One",
+            owned: true,
+            detached: true,
             agents: [],
           },
         ],
@@ -59,6 +61,8 @@ test("anonymous visitors can load the public marketplace catalog", async () => {
     assert.equal(marketplace?.source, "marketplace")
     if (marketplace?.source === "marketplace") {
       assert.equal(marketplace.publisherName, "Publisher One")
+      assert.equal(marketplace.owned, true)
+      assert.equal(marketplace.detached, true)
     }
   } finally {
     globalThis.fetch = originalFetch

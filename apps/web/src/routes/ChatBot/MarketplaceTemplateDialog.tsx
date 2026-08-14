@@ -63,9 +63,10 @@ export function MarketplaceTemplateDialog({
   loading: boolean
   error: string | null
   onOpenChange(open: boolean): void
-  onEditorChange(editor: MarketplaceEditor): void
+  onEditorChange(editor: MarketplaceEditor | null): void
   onRetry(): void
 }) {
+  const [name, setName] = useState("")
   const [category, setCategory] = useState("")
   const [outcome, setOutcome] = useState("")
   const [responsibilities, setResponsibilities] = useState<
@@ -77,6 +78,7 @@ export function MarketplaceTemplateDialog({
 
   useEffect(() => {
     if (!open || !editor) return
+    setName(editor.template?.name ?? editor.group.name)
     setCategory(editor.template?.category ?? "")
     setOutcome(editor.template?.outcome ?? "")
     setResponsibilities(
@@ -93,30 +95,45 @@ export function MarketplaceTemplateDialog({
     setPending(true)
     setSubmitError(null)
     try {
-      const saved = readMarketplaceTemplate(
-        await api.request("PUT /groups/{groupId}/marketplace-template", {
-          groupId: editor.group.id,
-          category,
-          outcome,
-          agents: editor.agents.map(({ id }) => ({
-            agentId: id,
-            responsibility: responsibilities[id] ?? "",
-          })),
-        })
-      )
-      const template = saved.published
-        ? saved
-        : readMarketplaceTemplate(
-            await api.request("POST /group-templates/{templateId}/publish", {
-              templateId: saved.id,
-            })
-          )
+      const agents = editor.agents.map(({ id }) => ({
+        agentId: id,
+        responsibility: responsibilities[id],
+      }))
+      let template: MarketplaceTemplate
+      if (editor.template?.sourceGroupId === null) {
+        template = readMarketplaceTemplate(
+          await api.request("PUT /group-templates/{templateId}", {
+            templateId: editor.template.id,
+            name,
+            category,
+            outcome,
+            agents,
+          })
+        )
+      } else {
+        const saved = readMarketplaceTemplate(
+          await api.request("PUT /groups/{groupId}/marketplace-template", {
+            groupId: editor.group.id,
+            category,
+            outcome,
+            agents,
+          })
+        )
+        template = saved.published
+          ? saved
+          : readMarketplaceTemplate(
+              await api.request("POST /group-templates/{templateId}/publish", {
+                templateId: saved.id,
+              })
+            )
+      }
       onEditorChange({
         ...editor,
+        group: { ...editor.group, name },
         template,
         agents: editor.agents.map((agent) => ({
           ...agent,
-          responsibility: responsibilities[agent.id] ?? "",
+          responsibility: responsibilities[agent.id],
         })),
       })
       onOpenChange(false)
@@ -132,21 +149,33 @@ export function MarketplaceTemplateDialog({
     setPending(true)
     setSubmitError(null)
     try {
-      const template = readMarketplaceTemplate(
-        await api.request("POST /group-templates/{templateId}/unpublish", {
+      if (editor.template.sourceGroupId === null) {
+        await api.request("DELETE /group-templates/{templateId}", {
           templateId: editor.template.id,
         })
-      )
-      onEditorChange({ ...editor, template })
+        onEditorChange(null)
+      } else {
+        const template = readMarketplaceTemplate(
+          await api.request("POST /group-templates/{templateId}/unpublish", {
+            templateId: editor.template.id,
+          })
+        )
+        onEditorChange({ ...editor, template })
+      }
       onOpenChange(false)
     } catch {
-      setSubmitError("Could not withdraw this template. Try again.")
+      setSubmitError(
+        editor.template.sourceGroupId === null
+          ? "Could not delete this template. Try again."
+          : "Could not withdraw this template. Try again."
+      )
     } finally {
       setPending(false)
     }
   }
 
   const published = editor?.template?.published === true
+  const detached = editor?.template?.sourceGroupId === null
 
   return (
     <Dialog
@@ -186,7 +215,7 @@ export function MarketplaceTemplateDialog({
                   {category}
                 </p>
                 <h2 className="mt-1 text-lg font-semibold">
-                  {editor.group.name}
+                  {name}
                 </h2>
                 <p className="mt-2 text-sm text-muted-foreground">{outcome}</p>
               </div>
@@ -240,6 +269,7 @@ export function MarketplaceTemplateDialog({
               event.preventDefault()
               const nextCategory = category.trim()
               const nextOutcome = outcome.trim()
+              const nextName = name.trim()
               const nextResponsibilities = Object.fromEntries(
                 editor.agents.map(({ id }) => [
                   id,
@@ -247,6 +277,7 @@ export function MarketplaceTemplateDialog({
                 ])
               )
               if (
+                !nextName ||
                 !nextCategory ||
                 !nextOutcome ||
                 Object.values(nextResponsibilities).some(
@@ -256,6 +287,7 @@ export function MarketplaceTemplateDialog({
                 setSubmitError("Complete every marketplace field.")
                 return
               }
+              setName(nextName)
               setCategory(nextCategory)
               setOutcome(nextOutcome)
               setResponsibilities(nextResponsibilities)
@@ -282,12 +314,17 @@ export function MarketplaceTemplateDialog({
                 </FieldLabel>
                 <Input
                   id="marketplace-template-name"
-                  value={editor.group.name}
-                  readOnly
+                  value={name}
+                  onChange={(event) => setName(event.currentTarget.value)}
+                  readOnly={!detached}
+                  maxLength={100}
+                  required
                 />
-                <FieldDescription>
-                  Uses the current group name.
-                </FieldDescription>
+                {!detached && (
+                  <FieldDescription>
+                    Uses the current group name.
+                  </FieldDescription>
+                )}
               </Field>
               <Field>
                 <FieldLabel htmlFor="marketplace-template-category">
@@ -358,7 +395,13 @@ export function MarketplaceTemplateDialog({
                   disabled={pending}
                   onClick={() => void withdraw()}
                 >
-                  {pending ? "Withdrawing…" : "Withdraw template"}
+                  {pending
+                    ? detached
+                      ? "Deleting…"
+                      : "Withdrawing…"
+                    : detached
+                      ? "Delete template"
+                      : "Withdraw template"}
                 </Button>
               )}
               <Button

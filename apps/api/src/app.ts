@@ -42,7 +42,12 @@ export interface AppDependencies {
   setGroupPinned(userId: string, groupId: string, pinned: boolean): boolean
   setGroupArchived(userId: string, groupId: string, archived: boolean): boolean
   clearGroupChat(userId: string, groupId: string): Promise<void>
-  shares: Pick<GroupShareStore, "create" | "active" | "revoke" | "resolve">
+  deleteGroup(userId: string, groupId: string): Promise<boolean>
+  groupDeleting(groupId: string): boolean
+  shares: Pick<
+    GroupShareStore,
+    "create" | "active" | "revoke" | "resolve" | "deleteForGroup"
+  >
   marketplaceTemplates: Pick<
     MarketplaceGroupTemplateStore,
     | "create"
@@ -50,8 +55,11 @@ export interface AppDependencies {
     | "publish"
     | "unpublish"
     | "published"
+    | "owns"
     | "findPublished"
     | "findBySourceGroup"
+    | "removeSourceGroup"
+    | "delete"
   >
   auth: {
     handler(request: Request): Promise<Response>
@@ -84,8 +92,10 @@ export type AppEnv = {
 function ownedSessionsOnly({
   runtime,
   groupOwner,
+  groupDeleting,
 }: AppDependencies): Parameters<typeof zukhruf>[0] {
   const reachable = ({ chatId, userId }: ConversationId) => {
+    if (groupDeleting(chatId)) return false
     const owner = groupOwner(chatId)
     return owner === null || owner === userId
   }

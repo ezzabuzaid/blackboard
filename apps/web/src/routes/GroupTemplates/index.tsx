@@ -13,15 +13,20 @@ import {
   SheetTitle,
   cn,
 } from "@stdlib/shadcn"
-import { ArrowLeft, ArrowRight, Check, Plus, Search } from "lucide-react"
+import { ArrowLeft, ArrowRight, Check, Plus, Search, Store } from "lucide-react"
 import { useId, useRef, useState } from "react"
 import {
   Link,
   useLoaderData,
   useNavigate,
+  useRevalidator,
 } from "react-router"
 
 import { api } from "../ChatBot/api"
+import {
+  MarketplaceTemplateDialog,
+  type MarketplaceEditor,
+} from "../ChatBot/MarketplaceTemplateDialog"
 import {
   loader,
   type CatalogAgent,
@@ -46,7 +51,11 @@ export default function GroupTemplates() {
   const [startingId, setStartingId] = useState<string | null>(null)
   const [startError, setStartError] = useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = useState(false)
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false)
+  const [marketplaceEditor, setMarketplaceEditor] =
+    useState<MarketplaceEditor | null>(null)
   const navigate = useNavigate()
+  const { revalidate } = useRevalidator()
   const selectedAgents = selectedAgentIds.flatMap((id) => {
     const agent = catalogAgents.find((candidate) => candidate.id === id)
     return agent
@@ -67,6 +76,10 @@ export default function GroupTemplates() {
     ),
   ]
   const selected = templates.find(({ id }) => id === selectedId) ?? null
+  const canManageSelected =
+    selected?.source === "marketplace" &&
+    selected.owned &&
+    selected.detached
   const visibleTemplates = templates.filter((template) =>
     matchesTemplateFilter(template, activeFilter)
   )
@@ -123,6 +136,39 @@ export default function GroupTemplates() {
       return
     }
     void createGroup({ templateId: "scratch" }, "factory")
+  }
+
+  function manageSelectedTemplate() {
+    if (
+      selected?.source !== "marketplace" ||
+      !selected.owned ||
+      !selected.detached
+    ) {
+      return
+    }
+    setMarketplaceEditor({
+      template: {
+        id: selected.id,
+        sourceGroupId: null,
+        publisherName: selected.publisherName,
+        name: selected.name,
+        category: selected.category,
+        outcome: selected.outcome,
+        agents: selected.agents.map(({ id, responsibility }) => ({
+          agentId: id,
+          responsibility,
+        })),
+        published: true,
+      },
+      group: { id: "", name: selected.name },
+      agents: selected.agents.map(({ id, name, responsibility }) => ({
+        id,
+        name,
+        headline: responsibility,
+        responsibility,
+      })),
+    })
+    setMarketplaceOpen(true)
   }
 
   return (
@@ -203,6 +249,9 @@ export default function GroupTemplates() {
                 onToggleAgent={toggleAgent}
                 onStart={startSelectedGroup}
                 onStartFactory={startFactory}
+                onManage={
+                  canManageSelected ? manageSelectedTemplate : undefined
+                }
               />
             </div>
           </ScrollArea>
@@ -255,9 +304,24 @@ export default function GroupTemplates() {
             onToggleAgent={toggleAgent}
             onStart={startSelectedGroup}
             onStartFactory={startFactory}
+            onManage={canManageSelected ? manageSelectedTemplate : undefined}
           />
         </SheetContent>
       </Sheet>
+
+      <MarketplaceTemplateDialog
+        open={marketplaceOpen}
+        editor={marketplaceEditor}
+        loading={false}
+        error={null}
+        onOpenChange={setMarketplaceOpen}
+        onEditorChange={(editor) => {
+          setMarketplaceEditor(editor)
+          if (!editor) setSelectedId(null)
+          void revalidate()
+        }}
+        onRetry={() => void revalidate()}
+      />
     </main>
   )
 }
@@ -345,6 +409,7 @@ function SelectedGroupPanel({
   onToggleAgent,
   onStart,
   onStartFactory,
+  onManage,
 }: {
   template: GroupTemplate | null
   starting: boolean
@@ -357,6 +422,7 @@ function SelectedGroupPanel({
   onToggleAgent(id: string): void
   onStart(): void
   onStartFactory(): void
+  onManage?(): void
 }) {
   if (template?.source === "custom") {
     return (
@@ -423,10 +489,21 @@ function SelectedGroupPanel({
             ))}
           </div>
 
+          {onManage && (
+            <Button
+              type="button"
+              variant="outline"
+              className="mt-6 w-full"
+              onClick={onManage}
+            >
+              <Store aria-hidden="true" />
+              Manage template
+            </Button>
+          )}
           <Button
             type="button"
             size="lg"
-            className="mt-6 w-full"
+            className={cn(onManage ? "mt-2" : "mt-6", "w-full")}
             onClick={onStart}
             disabled={starting}
           >

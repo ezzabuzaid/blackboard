@@ -28,7 +28,12 @@ interface GroupTemplateBase {
 export type GroupTemplate = GroupTemplateBase &
   (
     | { source: "prebuilt" }
-    | { source: "marketplace"; publisherName: string | null }
+    | {
+        source: "marketplace"
+        publisherName: string | null
+        owned: boolean
+        detached: boolean
+      }
     | { source: "custom" }
   )
 

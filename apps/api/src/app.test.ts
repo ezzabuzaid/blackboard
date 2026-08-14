@@ -169,6 +169,9 @@ const unusedShares: AppDependencies["shares"] = {
   resolve() {
     throw new Error("Unexpected share resolution")
   },
+  deleteForGroup() {
+    throw new Error("Unexpected share deletion")
+  },
 }
 
 const noArtifact: OpenArtifact = async () => null
@@ -188,11 +191,20 @@ const unusedMarketplaceTemplates: AppDependencies["marketplaceTemplates"] = {
   published() {
     return []
   },
+  owns() {
+    return false
+  },
   findPublished() {
     return null
   },
   findBySourceGroup() {
     return null
+  },
+  removeSourceGroup() {
+    throw new Error("Unexpected marketplace source removal")
+  },
+  delete() {
+    throw new Error("Unexpected marketplace template deletion")
   },
 }
 const authenticatedAuth: AppDependencies["auth"] = {
@@ -214,11 +226,15 @@ function testApp({
   listGroups = () => [],
   getGroup = (_userId, groupId) => testGroupRecord(groupId, "Test group", []),
   groupOwner = () => null,
+  groupDeleting = () => false,
   markGroupRead = () => false,
   setGroupPinned = () => true,
   setGroupArchived = () => true,
   clearGroupChat = async () => {
     throw new Error("Unexpected chat clear")
+  },
+  deleteGroup = async () => {
+    throw new Error("Unexpected group deletion")
   },
   marketplaceTemplates = unusedMarketplaceTemplates,
   shares = unusedShares,
@@ -235,10 +251,12 @@ function testApp({
   listGroups?: AppDependencies["listGroups"]
   getGroup?: AppDependencies["getGroup"]
   groupOwner?: AppDependencies["groupOwner"]
+  groupDeleting?: AppDependencies["groupDeleting"]
   markGroupRead?: AppDependencies["markGroupRead"]
   setGroupPinned?: AppDependencies["setGroupPinned"]
   setGroupArchived?: AppDependencies["setGroupArchived"]
   clearGroupChat?: AppDependencies["clearGroupChat"]
+  deleteGroup?: AppDependencies["deleteGroup"]
   marketplaceTemplates?: AppDependencies["marketplaceTemplates"]
   shares?: AppDependencies["shares"]
   runtime?: ChatRuntime
@@ -253,10 +271,12 @@ function testApp({
     listGroups,
     getGroup,
     groupOwner,
+    groupDeleting,
     markGroupRead,
     setGroupPinned,
     setGroupArchived,
     clearGroupChat,
+    deleteGroup,
     marketplaceTemplates,
     shares,
     runtime,
@@ -473,6 +493,14 @@ test("a publisher owns the marketplace template lifecycle", async () => {
     ((await publishResponse.json()) as MarketplaceGroupTemplate).published,
     true
   )
+  let listing = (await (
+    await application.request("/api/group-templates")
+  ).json()) as {
+    templates: Array<{ id: string; owned: boolean; detached: boolean }>
+  }
+  let listed = listing.templates.find(({ id }) => id === created.id)
+  assert.equal(listed?.owned, true)
+  assert.equal(listed?.detached, true)
 
   const updateResponse = await application.request(
     `/api/group-templates/${created.id}`,
@@ -493,21 +521,39 @@ test("a publisher owns the marketplace template lifecycle", async () => {
   })
 
   userId = "publisher-2"
+  listing = (await (
+    await application.request("/api/group-templates")
+  ).json()) as typeof listing
+  listed = listing.templates.find(({ id }) => id === created.id)
+  assert.equal(listed?.owned, false)
   const foreignResponse = await application.request(
     `/api/group-templates/${created.id}/unpublish`,
     { method: "POST" }
   )
   assert.equal(foreignResponse.status, 404)
+  assert.equal(
+    (
+      await application.request(`/api/group-templates/${created.id}`, {
+        method: "DELETE",
+      })
+    ).status,
+    404
+  )
 
   userId = "publisher-1"
-  const unpublishResponse = await application.request(
-    `/api/group-templates/${created.id}/unpublish`,
-    { method: "POST" }
+  const deleteResponse = await application.request(
+    `/api/group-templates/${created.id}`,
+    { method: "DELETE" }
   )
-  assert.equal(unpublishResponse.status, 200)
+  assert.equal(deleteResponse.status, 200)
+  assert.deepEqual(await deleteResponse.json(), { deleted: true })
   assert.equal(
-    ((await unpublishResponse.json()) as MarketplaceGroupTemplate).published,
-    false
+    (
+      await application.request(`/api/group-templates/${created.id}`, {
+        method: "DELETE",
+      })
+    ).status,
+    404
   )
 })
 
@@ -763,6 +809,8 @@ test("published marketplace templates create ordinary groups", async () => {
       category: "Strategy",
       outcome: "Challenge the next company decision.",
       source: "marketplace",
+      owned: false,
+      detached: true,
       agents: [
         {
           id: "paul-graham",
@@ -1171,6 +1219,38 @@ test("clearing a group chat is owner-scoped", async () => {
     assert.equal(denied.status, 404)
     assert.deepEqual(await denied.json(), { error: "Group not found." })
   }
+})
+
+test("permanently deleting a group is owner-scoped", async () => {
+  const deleted: unknown[] = []
+  const application = testApp({
+    deleteGroup: async (userId, groupId) => {
+      deleted.push({ userId, groupId })
+      return true
+    },
+  })
+
+  const response = await application.request("/api/groups/group-1", {
+    method: "DELETE",
+  })
+  assert.equal(response.status, 200)
+  assert.deepEqual(await response.json(), { deleted: true })
+  assert.deepEqual(deleted, [{ userId: "local-user", groupId: "group-1" }])
+
+  const unauthenticated = await testApp({
+    auth: { ...authenticatedAuth, getSession: async () => null },
+    deleteGroup: async () => {
+      throw new Error("Unexpected group deletion")
+    },
+  }).request("/api/groups/group-1", { method: "DELETE" })
+  assert.equal(unauthenticated.status, 401)
+  assert.deepEqual(await unauthenticated.json(), { error: "Unauthorized." })
+
+  const missing = await testApp({
+    deleteGroup: async () => false,
+  }).request("/api/groups/group-1", { method: "DELETE" })
+  assert.equal(missing.status, 404)
+  assert.deepEqual(await missing.json(), { error: "Group not found." })
 })
 
 test("SDK auth routes preserve Better Auth response headers", async () => {

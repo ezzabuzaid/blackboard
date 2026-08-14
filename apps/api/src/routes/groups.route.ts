@@ -141,6 +141,27 @@ export default function (router: Hono<AppEnv>) {
   )
 
   /**
+   * @openapi deleteGroup
+   * @tags groups
+   * @description Permanently deletes a group and its group-owned data.
+   */
+  router.delete(
+    "/groups/:groupId",
+    validate((payload) => ({
+      groupId: { select: payload.params.groupId, against: z.string() },
+    })),
+    async (context) => {
+      const deleted = await context.var.dependencies.deleteGroup(
+        context.get("userId"),
+        context.var.input.groupId
+      )
+      return deleted
+        ? context.json({ deleted: true })
+        : context.json({ error: "Group not found." }, 404)
+    }
+  )
+
+  /**
    * @openapi getGroupShare
    * @tags groups
    * @description Gets the active share link for the authenticated user's group.

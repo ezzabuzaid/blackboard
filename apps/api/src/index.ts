@@ -10,6 +10,7 @@ import { createFsDrain } from "evlog/fs"
 import { createApp } from "./app.js"
 import { createAuthentication } from "./auth.js"
 import { WhatsAppChatRuntime } from "./group/chat-runtime.js"
+import { createGroupDeletion } from "./group/delete-group.js"
 import { GroupStore } from "./group/group-store.js"
 import { MarketplaceGroupTemplateStore } from "./group/marketplace-group-template-store.js"
 import { GroupShareStore } from "./group/share-store.js"
@@ -139,14 +140,38 @@ const runtime = resources.use(
   })
 )
 
+const groupDeletion = createGroupDeletion({
+  exists: (userId, groupId) => groups.get(userId, groupId) !== null,
+  clearRuntime: (userId, groupId) =>
+    runtime.clear({ chatId: groupId, userId }),
+  deleteSandbox: (userId, groupId) =>
+    rm(sandboxRoot(dataDirectory, { chatId: groupId, userId }), {
+      recursive: true,
+      force: true,
+    }),
+  deleteShares: (userId, groupId) => {
+    shares.deleteForGroup(userId, groupId)
+  },
+  removeMarketplaceSource: (userId, groupId) => {
+    marketplaceTemplates.removeSourceGroup(userId, groupId)
+  },
+  deleteRecord: (userId, groupId) => groups.delete(userId, groupId),
+})
+
 const app = createApp({
   structuredLogDrain,
   agents,
   createGroup: (userId, input) => groups.create(userId, input),
-  listGroups: (userId) => groups.list(userId),
-  getGroup: (userId, groupId) => groups.get(userId, groupId),
+  listGroups: (userId) =>
+    groups
+      .list(userId)
+      .filter(({ id }) => !groupDeletion.has(userId, id)),
+  getGroup: (userId, groupId) =>
+    groupDeletion.has(userId, groupId) ? null : groups.get(userId, groupId),
   groupOwner: (groupId) => groups.ownerOf(groupId),
-  markGroupRead: (userId, groupId) => groups.markRead(userId, groupId),
+  groupDeleting: (groupId) => groupDeletion.hasGroup(groupId),
+  markGroupRead: (userId, groupId) =>
+    !groupDeletion.has(userId, groupId) && groups.markRead(userId, groupId),
   setGroupPinned: (userId, groupId, pinned) =>
     groups.setPinned(userId, groupId, pinned),
   setGroupArchived: (userId, groupId, archived) =>
@@ -160,6 +185,7 @@ const app = createApp({
     })
     groups.clearMessages(userId, groupId)
   },
+  deleteGroup: (userId, groupId) => groupDeletion.delete(userId, groupId),
   marketplaceTemplates,
   shares,
   auth: {

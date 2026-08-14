@@ -37,9 +37,9 @@ There is no regional appraisal, comparable-sale, vehicle-condition, lien, or pri
 
 The platform has no maintained country-specific authority for tax, inheritance, marital ownership, pensions, insurance suitability, securities regulation, or estate law. The agents can identify questions and organize facts, but must route conclusions to qualified professionals.
 
-### Permanent group deletion
+### Permanent group deletion (closed)
 
-The product currently supports archiving and clearing a group, not deleting the group record itself. Clearing removes the conversation and shared sandbox files, but the group remains and an existing share link must be revoked separately. A complete delete operation needs one lifecycle boundary that removes the group record, transcript, mailboxes, sandbox, artifacts, and share tokens together.
+The product now provides one owner-scoped permanent-delete lifecycle for the group record, active and queued work, transcript, participant group context and mailboxes, sandbox and artifacts, and every current or historical share token. Published marketplace templates survive detached; unpublished linked drafts are removed. Account-scoped participant data, agent telemetry, and bounded operational request logs are intentionally retained and disclosed in the confirmation.
 
 ### Automatic workspace seeding at group creation
 

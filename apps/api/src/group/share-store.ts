@@ -77,6 +77,14 @@ export class GroupShareStore implements Disposable {
     )
   }
 
+  deleteForGroup(userId: string, groupId: string) {
+    return (
+      this.#database
+        .prepare("DELETE FROM group_shares WHERE user_id = ? AND group_id = ?")
+        .run(userId, groupId).changes > 0
+    )
+  }
+
   resolve(token: string): GroupShareTarget | null {
     const row = this.#database
       .prepare(

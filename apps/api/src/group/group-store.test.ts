@@ -114,3 +114,21 @@ test("groups can be pinned, archived, and cleared per user", () => {
     unreadCount: 0,
   })
 })
+
+test("groups are permanently deleted only by their owner", () => {
+  using groups = new GroupStore(":memory:", ["annie-duke"])
+  const group = groups.create("user-1", {
+    name: "Pricing",
+    agentIds: ["annie-duke"],
+  })
+  groups.setPinned("user-1", group.id, true)
+  groups.setArchived("user-1", group.id, true)
+
+  assert.equal(groups.delete("user-2", group.id), false)
+  assert.notEqual(groups.get("user-1", group.id), null)
+
+  assert.equal(groups.delete("user-1", group.id), true)
+  assert.equal(groups.get("user-1", group.id), null)
+  assert.equal(groups.ownerOf(group.id), null)
+  assert.equal(groups.delete("user-1", group.id), false)
+})
