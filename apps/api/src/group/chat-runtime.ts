@@ -52,7 +52,8 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   ) => Promise<readonly WhatsAppParticipant[]>
   readonly #onMessage?: (
     conversation: ConversationId,
-    message: WhatsAppMessage
+    message: WhatsAppMessage,
+    cursor: number
   ) => void | Promise<void>
   readonly #sandboxForChat: (
     conversation: ConversationId
@@ -65,7 +66,8 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     ) => Promise<readonly WhatsAppParticipant[]>
     onMessage?: (
       conversation: ConversationId,
-      message: WhatsAppMessage
+      message: WhatsAppMessage,
+      cursor: number
     ) => void | Promise<void>
     limits: WhatsAppGroupLimits
     sandboxForChat: (
@@ -122,20 +124,40 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   }
 
   async enqueue(conversation: ConversationId, turn: TurnInput) {
-    await this.post(conversation, { id: turn.id, content: turn.input })
     const id = streamId(conversation)
-    return { id, stream: this.#streams.watch(id) }
+    const { group } = await this.#chat(conversation)
+    const stream = this.#watch(group)
+    try {
+      await group.post(turn.input, turn.id)
+      return { id, stream }
+    } catch (error) {
+      await stream.cancel()
+      throw error
+    }
   }
 
   observe(conversation: ConversationId) {
+    const id = streamId(conversation)
     return {
+      status: async (turnId?: string) => {
+        if (turnId !== undefined && turnId !== id) return undefined
+        const stream = await this.#streamStore.getStream(id)
+        return stream
+          ? {
+              status: stream.status,
+              startedAt: stream.startedAt,
+              finishedAt: stream.finishedAt,
+              error: stream.error,
+            }
+          : undefined
+      },
       cancel: async () => {
         await this.stop(conversation)
       },
       resume: async () => {
         if (!(await this.sessionExists(conversation))) return null
-        await this.#chat(conversation)
-        return this.#streams.watch(streamId(conversation))
+        const { group } = await this.#chat(conversation)
+        return this.#watch(group)
       },
     }
   }
@@ -146,16 +168,21 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   }
 
   async transcript(conversation: ConversationId) {
-    const chunks = await this.#streamStore.getChunks(streamId(conversation))
     const messages: WhatsAppMessage[] = []
-    for (const { seq, data, createdAt } of chunks) {
-      const event = chatEvent(data, seq, createdAt)
+    for (const event of await this.#durableEvents(streamId(conversation))) {
       if (event.type === "message") messages.push(event.message)
     }
     const participants = (await this.#loadChatParticipants(conversation)).map(
       ({ name }) => ({ name })
     )
     return { messages, participants }
+  }
+
+  async replayMessages(conversation: ConversationId) {
+    await this.#projectMessages(
+      conversation,
+      await this.#durableEvents(streamId(conversation))
+    )
   }
 
   async stop(conversation: ConversationId) {
@@ -246,9 +273,8 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       cancelRequestedAt: null,
       error: null,
     })
-    const events = (await this.#streamStore.getChunks(id)).map(
-      ({ seq, data, createdAt }) => chatEvent(data, seq, createdAt)
-    )
+    const events = await this.#durableEvents(id)
+    await this.#projectMessages(conversation, events)
     const participants = [...(await this.#loadChatParticipants(conversation))]
     const loadParticipants = async () => {
       const loaded = await this.#loadChatParticipants(conversation)
@@ -274,7 +300,8 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       mailboxStore: this.#mailboxStore,
       events,
       limits: this.#limits,
-      onMessage: (message) => this.#onMessage?.(conversation, message),
+      onMessage: (message, cursor) =>
+        this.#onMessage?.(conversation, message, cursor),
       persist: (event) =>
         this.#streamStore.appendChunks([
           {
@@ -289,6 +316,47 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     resources.use(group)
     await group.recoverInterrupted()
     return { group, participants, resources }
+  }
+
+  async #durableEvents(id: string) {
+    return (await this.#streamStore.getChunks(id))
+      .map(({ seq, data, createdAt }) => chatEvent(data, seq, createdAt))
+      .filter(
+        (event) =>
+          event.type !== "activity" || event.activity.type !== "presence"
+      )
+  }
+
+  async #projectMessages(
+    conversation: ConversationId,
+    events: readonly WhatsAppChatEvent[]
+  ) {
+    if (!this.#onMessage) return
+    for (const event of events) {
+      if (event.type === "message") {
+        await this.#onMessage(conversation, event.message, event.cursor)
+      }
+    }
+  }
+
+  #watch(group: WhatsAppGroup) {
+    let subscription: Disposable | undefined
+    let closed = false
+    return new ReadableStream<StreamPart>({
+      start(controller) {
+        subscription = group.subscribe({
+          after: 0,
+          onEvent(event) {
+            if (closed) return
+            controller.enqueue({ type: CHAT_EVENT_TYPE, data: event })
+          },
+        })
+      },
+      cancel() {
+        closed = true
+        subscription?.[Symbol.dispose]()
+      },
+    })
   }
 
   #queuePath(conversation: ConversationId) {

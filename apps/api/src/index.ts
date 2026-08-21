@@ -118,8 +118,13 @@ const runtime = resources.use(
         conversation.userId,
         groupAgentIds(conversation)
       ),
-    onMessage: (conversation, message) => {
-      groups.recordMessage(conversation.userId, conversation.chatId, message)
+    onMessage: (conversation, message, cursor) => {
+      groups.projectMessage(
+        conversation.userId,
+        conversation.chatId,
+        cursor,
+        message
+      )
     },
     limits: {
       notifications: 25,
@@ -163,10 +168,17 @@ const app = createApp({
   structuredLogDrain,
   agents,
   createGroup: (userId, input) => groups.create(userId, input),
-  listGroups: (userId) =>
-    groups
+  listGroups: async (userId) => {
+    const visible = groups
       .list(userId)
-      .filter(({ id }) => !groupDeletion.has(userId, id)),
+      .filter(({ id }) => !groupDeletion.has(userId, id))
+    await Promise.all(
+      visible.map(({ id }) => runtime.replayMessages({ chatId: id, userId }))
+    )
+    return groups
+      .list(userId)
+      .filter(({ id }) => !groupDeletion.has(userId, id))
+  },
   getGroup: (userId, groupId) =>
     groupDeletion.has(userId, groupId) ? null : groups.get(userId, groupId),
   groupOwner: (groupId) => groups.ownerOf(groupId),

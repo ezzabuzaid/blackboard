@@ -28,7 +28,7 @@ test("groups persist an explicit validated agent roster", () => {
 
   const sentAt = new Date(Date.parse(newest.createdAt) + 1).toISOString()
   assert.equal(
-    groups.recordMessage("user-1", group.id, {
+    groups.projectMessage("user-1", group.id, 1, {
       author: "Annie Duke",
       content: "Challenge the assumption.",
       sentAt,
@@ -99,7 +99,7 @@ test("groups can be pinned, archived, and cleared per user", () => {
   assert.equal(groups.list("user-1").length, 2)
 
   const sentAt = new Date(Date.parse(first.createdAt) + 1).toISOString()
-  groups.recordMessage("user-1", first.id, {
+  groups.projectMessage("user-1", first.id, 1, {
     author: "Annie Duke",
     content: "Separate the decision from the outcome.",
     sentAt,
@@ -112,6 +112,36 @@ test("groups can be pinned, archived, and cleared per user", () => {
     ...first,
     lastMessage: null,
     unreadCount: 0,
+  })
+})
+
+test("message projection is idempotent by durable event cursor", () => {
+  using groups = new GroupStore(":memory:", ["annie-duke"])
+  const group = groups.create("user-1", {
+    name: "Decisions",
+    agentIds: ["annie-duke"],
+  })
+  const first = {
+    author: "Annie Duke",
+    content: "Separate the decision from the outcome.",
+    sentAt: new Date(Date.parse(group.createdAt) + 1).toISOString(),
+  }
+
+  assert.equal(groups.projectMessage("user-1", group.id, 2, first), true)
+  assert.equal(groups.projectMessage("user-1", group.id, 2, first), false)
+  assert.equal(groups.projectMessage("user-1", group.id, 1, first), false)
+  assert.equal(groups.get("user-1", group.id)?.unreadCount, 1)
+
+  const next = {
+    author: "Paul Graham",
+    content: "Talk to users.",
+    sentAt: new Date(Date.parse(group.createdAt) + 2).toISOString(),
+  }
+  assert.equal(groups.projectMessage("user-1", group.id, 5, next), true)
+  assert.deepEqual(groups.get("user-1", group.id), {
+    ...group,
+    lastMessage: next,
+    unreadCount: 2,
   })
 })
 

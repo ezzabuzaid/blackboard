@@ -30,28 +30,29 @@ export default function (router: Hono<AppEnv>) {
   router.get(
     "/groups",
     validate(() => ({})),
-    (context) => {
-      const groups = context.var.dependencies
-        .listGroups(context.get("userId"))
-        .map(
-          ({
-            id,
-            name,
-            agentIds,
-            createdAt,
-            lastMessage,
-            unreadCount,
-            pinned,
-          }) => ({
-            id,
-            name,
-            agentIds,
-            createdAt,
-            lastMessage,
-            unreadCount,
-            pinned,
-          })
-        )
+    async (context) => {
+      const records = await context.var.dependencies.listGroups(
+        context.get("userId")
+      )
+      const groups = records.map(
+        ({
+          id,
+          name,
+          agentIds,
+          createdAt,
+          lastMessage,
+          unreadCount,
+          pinned,
+        }) => ({
+          id,
+          name,
+          agentIds,
+          createdAt,
+          lastMessage,
+          unreadCount,
+          pinned,
+        })
+      )
       return context.json({ groups })
     }
   )

@@ -40,6 +40,7 @@ import {
   WhatsAppGroup,
   WhatsAppGroupLimitError,
   WhatsAppReplyTargetError,
+  type WhatsAppChatEvent,
   type WhatsAppParticipant,
 } from "./group/whatsapp.js"
 import { readAgentTraces } from "./traces/agent-traces.js"
@@ -139,6 +140,9 @@ const unusedRuntime: ChatRuntime = {
   },
   observe() {
     return {
+      async status() {
+        throw new Error("Unexpected status lookup")
+      },
       async cancel() {
         throw new Error("Unexpected cancellation")
       },
@@ -234,7 +238,7 @@ function testApp({
   createGroup = () => {
     throw new Error("Unexpected group creation")
   },
-  listGroups = () => [],
+  listGroups = async () => [],
   getGroup = (_userId, groupId) => testGroupRecord(groupId, "Test group", []),
   groupOwner = () => null,
   groupDeleting = () => false,
@@ -960,7 +964,7 @@ test("group listing is scoped to the authenticated user", async () => {
   const userIds: string[] = []
   const groups = [testGroupRecord("group-1", "Founder panel", ["paul-graham"])]
   const response = await testApp({
-    listGroups: (userId) => {
+    listGroups: async (userId) => {
       userIds.push(userId)
       return groups
     },
@@ -1144,6 +1148,9 @@ test("chat streams reject sessions owned by another user", async () => {
       observe() {
         resumed.push("observe")
         return {
+          async status() {
+            throw new Error("Unexpected status lookup")
+          },
           async cancel() {},
           async resume() {
             throw new Error("Unexpected resume")
@@ -1503,8 +1510,8 @@ test("chat runtime reports new messages to the group summary sink", async () => 
   const seen: unknown[] = []
   await using runtime = new WhatsAppChatRuntime({
     loadParticipants: async () => [],
-    onMessage: (conversation, message) => {
-      seen.push({ conversation, message })
+    onMessage: (conversation, message, cursor) => {
+      seen.push({ conversation, message, cursor })
     },
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
@@ -1518,7 +1525,46 @@ test("chat runtime reports new messages to the group summary sink", async () => 
     content: "Keep this in the sidebar.",
   })
 
-  assert.deepEqual(seen, [{ conversation: testGroupConversation, message }])
+  assert.deepEqual(seen, [
+    { conversation: testGroupConversation, message, cursor: 1 },
+  ])
+})
+
+test("chat runtime rebuilds message projections from the durable log", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "zukhruf-projection-"))
+  const conversation = { chatId: "projection-chat", userId: "local-user" }
+  const seen: unknown[] = []
+  const runtime = () =>
+    new WhatsAppChatRuntime({
+      loadParticipants: async () => [],
+      onMessage: (projectedConversation, message, cursor) => {
+        seen.push({ conversation: projectedConversation, message, cursor })
+      },
+      limits: testGroupLimits,
+      sandboxForChat: () => testGroupSandbox,
+      databasePath: join(directory, "group.sqlite"),
+      mailboxPath: join(directory, "mailbox.sqlite"),
+      queueDirectory: join(directory, "queues"),
+    })
+
+  try {
+    let message: Awaited<ReturnType<WhatsAppChatRuntime["post"]>>
+    {
+      await using first = runtime()
+      message = await first.post(conversation, {
+        id: "projected-message",
+        content: "Rebuild this sidebar state.",
+      })
+      await waitForChat(first, conversation, "settled")
+    }
+
+    seen.length = 0
+    await using second = runtime()
+    await second.replayMessages(conversation)
+    assert.deepEqual(seen, [{ conversation, message, cursor: 1 }])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 test("snapshots reuse the active chat roster", async () => {
@@ -2728,6 +2774,54 @@ test("coalesces human interventions posted while a batch is running", async () =
   }
 })
 
+test("each logical participant consumes every group message once", async () => {
+  const prompts = new Map<string, unknown[]>()
+  const participant = (name: string) =>
+    new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        prompts.set(name, [...(prompts.get(name) ?? []), prompt])
+        return groupTextResponse("Nothing distinct to add.")
+      },
+    })
+
+  await using resources = new AsyncDisposableStack()
+  const group = resources.use(
+    await WhatsAppGroup.create({
+      ...testGroupDependencies(resources),
+      conversation: testGroupConversation,
+      sandbox: testGroupSandbox,
+      participants: [
+        { name: "Maya", model: participant("Maya") },
+        { name: "Omar", model: participant("Omar") },
+      ],
+    })
+  )
+  const settled = Promise.withResolvers<void>()
+  using subscription = group.subscribe({
+    onActivity(activity) {
+      if (activity.type === "settled") settled.resolve()
+    },
+  })
+
+  await Promise.all([
+    group.post("Review this once.", "logical-message"),
+    group.post("Review this once.", "logical-message"),
+  ])
+  await settled.promise
+
+  assert.deepEqual(
+    [...prompts].map(([name, seen]) => ({
+      name,
+      calls: seen.length,
+      received: JSON.stringify(seen).includes("Review this once."),
+    })).sort((left, right) => left.name.localeCompare(right.name)),
+    [
+      { name: "Maya", calls: 1, received: true },
+      { name: "Omar", calls: 1, received: true },
+    ]
+  )
+})
+
 test("every group member answers a greeting addressed to the whole group", async () => {
   const wholeGroupGreetingRule =
     "When the human greets or addresses the whole group, every participant must reply once with a brief, natural acknowledgment, even if another participant has already acknowledged."
@@ -3056,6 +3150,7 @@ test("the previous responder answers an ambiguous short follow-up", async () => 
 test("a chat survives a runtime restart and replays persisted events", async () => {
   const directory = await mkdtemp(join(tmpdir(), "zukhruf-chat-"))
   const conversation = { chatId: "durable-chat", userId: "local-user" }
+  const liveEvents: WhatsAppChatEvent[] = []
   const participants = [
     {
       name: "Maya",
@@ -3068,12 +3163,37 @@ test("a chat survives a runtime restart and replays persisted events", async () 
   try {
     {
       await using runtime = durableRuntime(participants, directory)
+      await runtime.createSession(conversation)
+      const stream = await runtime.observe(conversation).resume()
+      assert.ok(stream)
+      const reader = stream.getReader()
       await runtime.post(conversation, {
         id: "message-1",
         content: "Keep this after restart.",
       })
       await waitForChat(runtime, conversation, "settled")
+      while (
+        !liveEvents.some(
+          (event) =>
+            event.type === "activity" && event.activity.type === "settled"
+        )
+      ) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value.type === "data-whatsapp-chat-event") {
+          liveEvents.push(value.data as WhatsAppChatEvent)
+        }
+      }
+      await reader.cancel()
     }
+
+    assert.equal(
+      liveEvents.some(
+        (event) =>
+          event.type === "activity" && event.activity.type === "presence"
+      ),
+      true
+    )
 
     await using runtime = durableRuntime(participants, directory)
     const snapshot = await runtime.snapshot(conversation)
@@ -3097,24 +3217,43 @@ test("a chat survives a runtime restart and replays persisted events", async () 
     const stream = await runtime.observe(conversation).resume()
     assert.ok(stream)
     const reader = stream.getReader()
-    const replayed: number[] = []
-    while (replayed.at(-1) !== snapshot.cursor) {
+    const replayed: WhatsAppChatEvent[] = []
+    while (
+      !replayed.some(
+        (event) =>
+          event.type === "activity" && event.activity.type === "settled"
+      )
+    ) {
       const { done, value } = await reader.read()
       if (done) break
-      if (
-        value.type === "data-whatsapp-chat-event" &&
-        typeof value.data === "object" &&
-        value.data !== null &&
-        "cursor" in value.data &&
-        typeof value.data.cursor === "number"
-      ) {
-        replayed.push(value.data.cursor)
+      if (value.type === "data-whatsapp-chat-event") {
+        replayed.push(value.data as WhatsAppChatEvent)
       }
     }
     await reader.cancel()
+    assert.equal(
+      replayed.some(
+        (event) =>
+          event.type === "activity" && event.activity.type === "presence"
+      ),
+      false
+    )
     assert.deepEqual(
-      replayed,
-      Array.from({ length: snapshot.cursor }, (_, index) => index + 1)
+      replayed.map(({ cursor }) => cursor),
+      liveEvents
+        .filter(
+          (event) =>
+            event.type !== "activity" || event.activity.type !== "presence"
+        )
+        .map(({ cursor }) => cursor)
+    )
+    assert.equal(replayed.at(-1)?.cursor, snapshot.cursor)
+    assert.equal(
+      replayed.some(
+        ({ cursor }, index) =>
+          index > 0 && cursor > replayed[index - 1]!.cursor + 1
+      ),
+      true
     )
   } finally {
     await rm(directory, { recursive: true, force: true })

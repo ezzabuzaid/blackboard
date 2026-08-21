@@ -52,6 +52,7 @@ export class GroupStore implements Disposable {
         last_message_content TEXT,
         last_message_at INTEGER,
         unread_count INTEGER NOT NULL DEFAULT 0,
+        projected_message_cursor INTEGER NOT NULL DEFAULT 0,
         pinned_at INTEGER,
         archived_at INTEGER,
         PRIMARY KEY (user_id, id)
@@ -69,6 +70,7 @@ export class GroupStore implements Disposable {
       ["last_message_content", "TEXT"],
       ["last_message_at", "INTEGER"],
       ["unread_count", "INTEGER NOT NULL DEFAULT 0"],
+      ["projected_message_cursor", "INTEGER NOT NULL DEFAULT 0"],
       ["pinned_at", "INTEGER"],
       ["archived_at", "INTEGER"],
     ] as const) {
@@ -156,23 +158,40 @@ export class GroupStore implements Disposable {
     return rows.map(groupRecord)
   }
 
-  recordMessage(
+  projectMessage(
     userId: string,
     id: string,
+    cursor: number,
     message: { author: string; content: string; sentAt: string }
   ) {
     const sentAt = Date.parse(message.sentAt)
-    if (!Number.isFinite(sentAt)) return false
+    if (
+      !Number.isFinite(sentAt) ||
+      !Number.isSafeInteger(cursor) ||
+      cursor <= 0
+    ) {
+      return false
+    }
 
     const result = this.#database
       .prepare(
         `UPDATE groups
          SET last_message_author = ?, last_message_content = ?,
              last_message_at = ?,
-             unread_count = unread_count + CASE WHEN ? = 'user' THEN 0 ELSE 1 END
-         WHERE user_id = ? AND id = ?`
+             unread_count = unread_count + CASE WHEN ? = 'user' THEN 0 ELSE 1 END,
+             projected_message_cursor = ?
+         WHERE user_id = ? AND id = ? AND projected_message_cursor < ?`
       )
-      .run(message.author, message.content, sentAt, message.author, userId, id)
+      .run(
+        message.author,
+        message.content,
+        sentAt,
+        message.author,
+        cursor,
+        userId,
+        id,
+        cursor
+      )
     return result.changes > 0
   }
 
@@ -200,7 +219,8 @@ export class GroupStore implements Disposable {
         .prepare(
           `UPDATE groups
            SET last_message_author = NULL, last_message_content = NULL,
-               last_message_at = NULL, unread_count = 0
+               last_message_at = NULL, unread_count = 0,
+               projected_message_cursor = 0
            WHERE user_id = ? AND id = ?`
         )
         .run(userId, id).changes > 0

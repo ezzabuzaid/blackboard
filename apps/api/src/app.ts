@@ -35,7 +35,7 @@ export interface AppDependencies {
     userId: string,
     input: { name: string; agentIds: readonly string[] }
   ): GroupRecord
-  listGroups(userId: string): GroupRecord[]
+  listGroups(userId: string): Promise<GroupRecord[]>
   getGroup(userId: string, groupId: string): GroupRecord | null
   groupOwner(groupId: string): string | null
   markGroupRead(userId: string, groupId: string): boolean
@@ -109,7 +109,11 @@ function ownedSessionsOnly({
     observe: (conversation) =>
       reachable(conversation)
         ? runtime.observe(conversation)
-        : { cancel: async () => {}, resume: async () => null },
+        : {
+            status: async () => undefined,
+            cancel: async () => {},
+            resume: async () => null,
+          },
   }
 }
 

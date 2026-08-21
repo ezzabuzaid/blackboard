@@ -246,7 +246,7 @@ export interface WhatsAppGroupOptions {
   /** Directory for the durable turn/wake queue database. Omitted: in-memory, so pending schedules die with the process. */
   queuePath?: string
   persist: (event: WhatsAppChatEvent) => void | Promise<void>
-  onMessage?: (message: WhatsAppMessage) => void | Promise<void>
+  onMessage?: (message: WhatsAppMessage, cursor: number) => void | Promise<void>
   onActivity?: (activity: WhatsAppGroupActivity) => void | Promise<void>
   onEvent?: (event: WhatsAppChatEvent) => void | Promise<void>
 }
@@ -344,8 +344,8 @@ export class WhatsAppGroup implements AsyncDisposable {
     this.#limits = options.limits
     this.#persist = options.persist
     for (const event of structuredClone(options.events)) {
-      this.#events.push(event)
       this.#cursor = event.cursor
+      this.#events.push(event)
       if (event.type === "message") {
         const { message } = event
         this.#messages.push(message)
@@ -980,7 +980,11 @@ export class WhatsAppGroup implements AsyncDisposable {
       })
       const repliesBefore = this.#replyCounts.get(participant.name) ?? 0
       const turn = await participant.runtime.enqueue(participant.conversation, {
-        id: randomUUID(),
+        id: JSON.stringify({
+          kind: "whatsapp-notification",
+          messages: notifications.map(({ id }) => id),
+          reminder: participant.pendingReminder,
+        }),
         input: this.#notification(notifications, participant.pendingReminder),
       })
       participant.pendingReminder = undefined
@@ -1073,11 +1077,14 @@ export class WhatsAppGroup implements AsyncDisposable {
       type: "message" as const,
       message,
     }
+    await this.#persist(event)
     this.#events.push(event)
     const deliveries = [...this.#subscribers].map((subscriber) =>
-      this.#deliver(subscriber, event, () => subscriber.onMessage?.(message))
+      this.#deliver(subscriber, event, () =>
+        subscriber.onMessage?.(message, event.cursor)
+      )
     )
-    await Promise.all([...deliveries, this.#persist(event)])
+    await Promise.all(deliveries)
   }
 
   async #emitActivity(activity: WhatsAppGroupActivity) {
@@ -1087,10 +1094,14 @@ export class WhatsAppGroup implements AsyncDisposable {
       type: "activity" as const,
       activity,
     }
-    this.#events.push(event)
     const deliveries = [...this.#subscribers].map((subscriber) =>
       this.#deliver(subscriber, event, () => subscriber.onActivity?.(activity))
     )
+    if (activity.type === "presence") {
+      await Promise.all(deliveries)
+      return
+    }
+    this.#events.push(event)
     await Promise.all([...deliveries, this.#persist(event)])
   }
 
