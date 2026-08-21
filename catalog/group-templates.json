@@ -108,6 +108,34 @@
     ]
   },
   {
+    "id": "game-squad",
+    "name": "Game Squad",
+    "category": "Game Development",
+    "outcome": "Turn a game idea into one coherent, playable experience that survives independent comparison with a real quality bar.",
+    "agents": [
+      {
+        "agentId": "game-director",
+        "responsibility": "Keeps the creative target, vertical slices, integration, and Gauntlet Loop honest."
+      },
+      {
+        "agentId": "story-architect",
+        "responsibility": "Builds the world, characters, conflict, and storyline through playable choices."
+      },
+      {
+        "agentId": "player-arc-designer",
+        "responsibility": "Shapes the core loop, progression, pacing, challenge, and player transformation."
+      },
+      {
+        "agentId": "game-feel-director",
+        "responsibility": "Owns the intended emotions and the controls, feedback, audio, camera, and presentation that create them."
+      },
+      {
+        "agentId": "gameplay-engineer",
+        "responsibility": "Integrates the squad's decisions into a runnable, tested game build."
+      }
+    ]
+  },
+  {
     "id": "capital-strategy",
     "name": "Capital Strategy",
     "category": "Finance",

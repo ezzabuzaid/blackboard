@@ -24,12 +24,12 @@ function writeAgent(root: string, id: string, name: string) {
   }
 }
 
-test("native agent catalog contains 52 complete character definitions", () => {
+test("native agent catalog contains 57 complete character definitions", () => {
   const agents = loadAgentCatalog(
     resolve(import.meta.dirname, "../../../../../catalog/agents")
   )
 
-  assert.equal(agents.length, 52)
+  assert.equal(agents.length, 57)
   assert.equal(new Set(agents.map(({ id }) => id)).size, agents.length)
   assert.deepEqual(
     agents.find(({ id }) => id === "paul-graham"),
@@ -154,4 +154,28 @@ test("The 1M Committee opens with the keeper and uses complete native agents", (
       JSON.parse(readFileSync(resolve(workspaceTemplate, file), "utf8"))
     )
   }
+})
+
+test("Game Squad opens with its director and uses five complete specialists", () => {
+  const agents = loadAgentCatalog(
+    resolve(import.meta.dirname, "../../../../../catalog/agents")
+  )
+  const template = groupTemplates.find(({ id }) => id === "game-squad")
+
+  assert.ok(template)
+  assert.deepEqual(
+    template.agents.map(({ agentId }) => agentId),
+    [
+      "game-director",
+      "story-architect",
+      "player-arc-designer",
+      "game-feel-director",
+      "gameplay-engineer",
+    ]
+  )
+  assert.ok(
+    template.agents.every(({ agentId }) =>
+      agents.some(({ id }) => id === agentId)
+    )
+  )
 })
