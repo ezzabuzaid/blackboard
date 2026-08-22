@@ -18,15 +18,18 @@ import {
   AgentRuntime,
   MessageDeliveryMode,
   PgBossTurnQueue,
-  PgBossWakeScheduler,
   createInterAgentCommunication,
   defineAgent,
   defineTool,
   type AgentDeclaration,
   type ConversationId,
   type MailboxStore,
-  type SchedulingWake,
 } from "@deepagents/experimental/zukhruf"
+import {
+  PgBossWakeScheduler,
+  conversationScheduling,
+  type SchedulingWake,
+} from "@deepagents/experimental/zukhruf/conversation-scheduling"
 import { PGlite } from "@electric-sql/pglite"
 import { jsonSchema, type ToolSet } from "ai"
 import { PgBoss, fromPglite } from "pg-boss"
@@ -553,10 +556,12 @@ export class WhatsAppGroup implements AsyncDisposable {
           streams: options.streams,
           queue,
           mailboxStore: options.mailboxStore,
-          scheduling: {
-            scheduler: wakes,
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          },
+          plugins: [
+            conversationScheduling({
+              scheduler: wakes,
+              timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            }),
+          ],
         }
       )
 

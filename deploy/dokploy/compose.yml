@@ -6,9 +6,9 @@ services:
     environment:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET is required}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:?OPENROUTER_API_KEY is required}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openrouter/auto-beta}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-5.6-luna}
       HOME: /data/home
-      PORT: "3001"
+      PORT: '3001'
       WEB_ORIGIN: ${WEB_ORIGIN:?WEB_ORIGIN is required}
       WEB_ROOT: /app/apps/web/dist
       ZUKHRUF_DATA_DIR: /data/zukhruf
