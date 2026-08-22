@@ -6,7 +6,7 @@ export function createParticipantDefaults(options: {
   modelId?: string;
   appUrl?: string;
 }) {
-  const modelId = options.modelId || 'openai/gpt-5.6-luna';
+  const modelId = options.modelId || 'stealth/ox-alpha';
   const openrouter = createOpenRouter({
     apiKey: options.apiKey,
     compatibility: 'strict',

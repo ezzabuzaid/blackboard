@@ -35,10 +35,6 @@ import {
 } from './group/marketplace-group-template-store.js';
 import { ParticipantDirectory } from './group/participants/index.js';
 import {
-  createWhatsAppSandbox,
-  shareSandboxInstance,
-} from './group/sandbox.js';
-import {
   type WhatsAppChatEvent,
   WhatsAppGroup,
   WhatsAppGroupLimitError,
@@ -47,15 +43,13 @@ import {
 } from './group/whatsapp.js';
 import { createParticipantDefaults } from './participant-defaults.js';
 import type { OpenArtifact } from './routes/chat.route.js';
-import { openArtifact } from './sandbox.js';
-import { readAgentTraces } from './traces/agent-traces.js';
+import { GroupSandboxes } from './sandbox.js';
 import { createOpenRouterTranscriber } from './transcription.js';
 
 type ChatRuntime = AppDependencies['runtime'];
 
-const testGroupSandbox = shareSandboxInstance(
-  defineSandbox(() => createVirtualSandbox({ fs: new InMemoryFs() })),
-);
+const testSandboxBackend = createVirtualSandbox({ fs: new InMemoryFs() });
+const testGroupSandbox = defineSandbox(() => testSandboxBackend);
 const testDataDirectory = '/test/zukhruf';
 const testGroupConversation = { chatId: 'test-chat', userId: 'user-1' };
 const testGroupLimits = {
@@ -366,7 +360,7 @@ test('passkey registration requires only a name', async () => {
 test('participant defaults use the configured OpenRouter key', () => {
   const defaults = createParticipantDefaults({ apiKey: 'openrouter-key-1' });
   assert.equal(defaults.model.provider, 'openrouter');
-  assert.equal(defaults.model.modelId, 'openai/gpt-5.6-luna');
+  assert.equal(defaults.model.modelId, 'stealth/ox-alpha');
   assert.equal(defaults.tools.web_search?.type, 'provider');
 });
 
@@ -1716,268 +1710,162 @@ test('a chat stops instead of freezing when the pump throws', async () => {
   assert.equal(snapshot.activity.stopReason, 'interrupted');
 });
 
-test('agent telemetry is grouped into complete chat-scoped turns', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-traces-'));
-  const path = join(directory, 'maya.jsonl');
-  const functionId = 'chat-1:Maya';
-  const entry = (event: string, timestamp: string, data: object) =>
-    JSON.stringify({ event, timestamp, data: { functionId, ...data } });
-
-  try {
-    await writeFile(
-      path,
-      [
-        'not json',
-        entry('onStart', '2026-07-31T10:00:00.000Z', {
-          callId: 'call-1',
-          modelId: 'gpt-5.6-sol',
-          messages: [{ role: 'user', content: 'New group message' }],
-        }),
-        JSON.stringify({
-          event: 'onEnd',
-          timestamp: '2026-07-31T10:00:01.000Z',
-          data: { functionId: 'other-chat:Maya', callId: 'ignored' },
-        }),
-        entry('onEnd', '2026-07-31T10:00:02.000Z', {
-          callId: 'call-1',
-          model: 'gpt-5.6-sol',
-          finishReason: 'stop',
-          totalUsage: {
-            inputTokens: 100,
-            inputTokenDetails: { cacheReadTokens: 64 },
-            outputTokens: 10,
-            outputTokenDetails: { reasoningTokens: 4 },
-            totalTokens: 110,
-          },
-          steps: [
-            {
-              stepNumber: 0,
-              finishReason: 'stop',
-              performance: { responseTimeMs: 123 },
-              usage: { totalTokens: 110 },
-              content: [{ type: 'reasoning', text: 'Checked context' }],
-            },
-          ],
-        }),
-      ].join('\n'),
-    );
-
-    assert.deepEqual(await readAgentTraces(path, functionId), [
-      {
-        callId: 'call-1',
-        startedAt: '2026-07-31T10:00:00.000Z',
-        endedAt: '2026-07-31T10:00:02.000Z',
-        modelId: 'gpt-5.6-sol',
-        notification: 'New group message',
-        status: 'completed',
-        finishReason: 'stop',
-        usage: {
-          inputTokens: 100,
-          outputTokens: 10,
-          reasoningTokens: 4,
-          cacheReadTokens: 64,
-          totalTokens: 110,
-        },
-        steps: [
-          {
-            stepNumber: 0,
-            finishReason: 'stop',
-            responseTimeMs: 123,
-            usage: {
-              inputTokens: 0,
-              outputTokens: 0,
-              reasoningTokens: 0,
-              cacheReadTokens: 0,
-              totalTokens: 110,
-            },
-            content: [{ type: 'reasoning', text: 'Checked context' }],
-          },
-        ],
-        error: null,
-      },
-    ]);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('group members share one sandbox instance', async () => {
-  const maya = {
-    chatId: 'chat-1:participant:0',
-    userId: 'user-1',
-  };
-  const omar = {
-    chatId: 'chat-1:participant:1',
-    userId: 'user-1',
-  };
-  const lina = {
-    chatId: 'chat-1:participant:2',
-    userId: 'user-1',
-  };
-  const paul = {
-    chatId: 'chat-1:participant:3',
-    userId: 'user-1',
-  };
-  const [mayaSandbox, omarSandbox, linaSandbox, paulSandbox] =
-    await Promise.all([
-      testGroupSandbox(maya),
-      testGroupSandbox(omar),
-      testGroupSandbox(lina),
-      testGroupSandbox(paul),
-    ]);
-
-  assert.equal(mayaSandbox, omarSandbox);
-  assert.equal(mayaSandbox, linaSandbox);
-  assert.equal(mayaSandbox, paulSandbox);
-  assert.equal(mayaSandbox.sandbox, omarSandbox.sandbox);
-  assert.equal(mayaSandbox.sandbox, linaSandbox.sandbox);
-  assert.equal(mayaSandbox.sandbox, paulSandbox.sandbox);
-});
-
-test('group chats share writable per-user participants and isolate other users', async () => {
+test('Microsandbox shares group work and isolates chats and users', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'whatsapp-sandbox-'));
   const firstChat = { chatId: 'chat-1', userId: 'local-user' };
   const secondChat = { chatId: 'chat-2', userId: 'local-user' };
   const otherUserChat = { chatId: 'chat-1', userId: 'other-user' };
-
-  try {
-    const builtins = resolve(directory, 'builtins', 'factory');
-    await mkdir(builtins, { recursive: true });
-    await Promise.all([
-      writeFile(
-        resolve(builtins, 'identity.json'),
-        JSON.stringify({ name: 'Factory' }),
-      ),
-      writeFile(resolve(builtins, 'SOUL.md'), 'Build useful participants.'),
-      writeFile(resolve(builtins, 'AGENTS.md'), 'Create them with bash.'),
-      writeFile(resolve(builtins, 'MEMORY.md'), '# Memory'),
-    ]);
-    await using resources = new AsyncDisposableStack();
-    const participants = new ParticipantDirectory({
-      databasePath: resolve(directory, 'participants.sqlite'),
-      builtinsDirectory: resolve(directory, 'builtins'),
-      telemetryDirectory: resolve(directory, 'group-telemetry'),
-      loadDefaults: async () => ({
-        model: new MockLanguageModelV4({
-          doStream: async () => groupTextResponse('unused'),
-        }),
-        tools: {},
-      }),
-    });
-    const sandboxForChat = createWhatsAppSandbox(
-      resources,
-      directory,
-      (conversation) => participants.filesystem(conversation.userId),
-    );
-    const sandboxForFirstChat = sandboxForChat(firstChat);
-    const first = await sandboxForFirstChat({
-      chatId: 'chat-1:participant:0',
-      userId: firstChat.userId,
-    });
-    const firstPeer = await sandboxForFirstChat({
-      chatId: 'chat-1:participant:1',
-      userId: firstChat.userId,
-    });
-    assert.equal(first.sandbox, firstPeer.sandbox);
-    assert.equal(
-      await first.sandbox.readFile(
-        '/workspace/participants/factory/identity.json',
-      ),
+  const builtins = resolve(directory, 'builtins', 'factory');
+  await mkdir(builtins, { recursive: true });
+  await Promise.all([
+    writeFile(
+      resolve(builtins, 'identity.json'),
       JSON.stringify({ name: 'Factory' }),
-    );
-
-    const created = await first.sandbox.executeCommand(
-      [
-        'mkdir -p /workspace/participants/maya',
-        `printf '%s' '{"name":"Maya"}' > /workspace/participants/maya/identity.json`,
-        `printf '%s' 'Be candid and concise.' > /workspace/participants/maya/SOUL.md`,
-        `printf '%s' 'Own the business profile.' > /workspace/participants/maya/AGENTS.md`,
-        `printf '%s' 'No durable knowledge yet.' > /workspace/participants/maya/MEMORY.md`,
-      ].join(' && '),
-    );
-    assert.equal(created.exitCode, 0);
-    assert.deepEqual(
-      (await participants.participants(firstChat.userId)).map(
-        ({ name }) => name,
+    ),
+    writeFile(resolve(builtins, 'SOUL.md'), 'Build useful participants.'),
+    writeFile(resolve(builtins, 'AGENTS.md'), 'Create them with bash.'),
+    writeFile(resolve(builtins, 'MEMORY.md'), '# Memory'),
+  ]);
+  const participants = new ParticipantDirectory({
+    directory: resolve(directory, 'participants'),
+    builtinsDirectory: resolve(directory, 'builtins'),
+    telemetryDirectory: resolve(directory, 'group-telemetry'),
+    loadDefaults: async () => ({
+      model: new MockLanguageModelV4({
+        doStream: async () => groupTextResponse('unused'),
+      }),
+      tools: {},
+    }),
+  });
+  const sandboxes = new GroupSandboxes({
+    dataDirectory: directory,
+    mountsFor: (conversation) => participants.mounts(conversation.userId),
+  });
+  t.after(async () => {
+    const removals = await Promise.allSettled(
+      [firstChat, secondChat, otherUserChat].map((conversation) =>
+        sandboxes.remove(conversation),
       ),
-      ['Maya', 'Factory'],
     );
-
-    const updated = await firstPeer.sandbox.executeCommand(
-      `printf '%s' 'The user prefers concise answers.' > /workspace/participants/maya/MEMORY.md`,
-    );
-    assert.equal(updated.exitCode, 0);
-
-    await first.sandbox.writeFiles([
-      { path: '/workspace/private.txt', content: 'first chat' },
-      { path: '/workspace/output/sample.txt', content: 'artifact' },
-    ]);
-
-    const second = await sandboxForChat(secondChat)({
-      chatId: 'chat-2:participant:0',
-      userId: secondChat.userId,
-    });
-    assert.equal(
-      await second.sandbox.readFile('/workspace/participants/maya/MEMORY.md'),
-      'The user prefers concise answers.',
-    );
-    assert.equal(
-      (await second.sandbox.executeCommand('cat /workspace/private.txt'))
-        .exitCode,
-      1,
-    );
-
-    const otherUser = await sandboxForChat(otherUserChat)({
-      chatId: 'chat-1:participant:0',
-      userId: otherUserChat.userId,
-    });
-    assert.equal(
-      (
-        await otherUser.sandbox.executeCommand(
-          'cat /workspace/participants/maya/MEMORY.md',
-        )
-      ).exitCode,
-      1,
-    );
-    assert.equal(
-      (await otherUser.sandbox.executeCommand('cat /workspace/private.txt'))
-        .exitCode,
-      1,
-    );
-
-    const sandboxApp = testApp({
-      openArtifact: (conversation, path) =>
-        openArtifact(directory, conversation, path),
-    });
-    const artifact = await sandboxApp.request(
-      '/api/chat/chat-1/artifacts/sample.txt',
-    );
-    assert.equal(artifact.status, 200);
-    assert.equal(
-      artifact.headers.get('content-type'),
-      'text/plain; charset=utf-8',
-    );
-    assert.equal(
-      artifact.headers.get('content-disposition'),
-      "inline; filename*=UTF-8''sample.txt",
-    );
-    assert.equal(await artifact.text(), 'artifact');
-    assert.equal(
-      (await sandboxApp.request('/api/chat/chat-2/artifacts/sample.txt'))
-        .status,
-      404,
-    );
-    assert.equal(
-      (
-        await sandboxApp.request(
-          '/api/chat/chat-1/artifacts/%2E%2E%2Fprivate.txt',
-        )
-      ).status,
-      400,
-    );
-  } finally {
+    await sandboxes[Symbol.asyncDispose]();
     await rm(directory, { recursive: true, force: true });
-  }
+    const failures = removals.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    if (failures.length) {
+      throw new AggregateError(
+        failures.map(({ reason }) => reason),
+        'Microsandbox cleanup failed',
+      );
+    }
+  });
+
+  const sandboxForFirstChat = sandboxes.sandboxFor(firstChat);
+  assert.equal(sandboxForFirstChat, sandboxes.sandboxFor(firstChat));
+  const first = await sandboxForFirstChat({
+    chatId: 'chat-1:participant:0',
+    userId: firstChat.userId,
+  });
+  const firstPeer = await sandboxForFirstChat({
+    chatId: 'chat-1:participant:1',
+    userId: firstChat.userId,
+  });
+  assert.equal(
+    await first.sandbox.readFile(
+      '/workspace/participants/factory/identity.json',
+    ),
+    JSON.stringify({ name: 'Factory' }),
+  );
+
+  const created = await first.sandbox.executeCommand(
+    [
+      'mkdir -p /workspace/participants/maya',
+      `printf '%s' '{"name":"Maya"}' > /workspace/participants/maya/identity.json`,
+      `printf '%s' 'Be candid and concise.' > /workspace/participants/maya/SOUL.md`,
+      `printf '%s' 'Own the business profile.' > /workspace/participants/maya/AGENTS.md`,
+      `printf '%s' 'No durable knowledge yet.' > /workspace/participants/maya/MEMORY.md`,
+    ].join(' && '),
+  );
+  assert.equal(created.exitCode, 0);
+  assert.deepEqual(
+    (await participants.participants(firstChat.userId)).map(({ name }) => name),
+    ['Maya', 'Factory'],
+  );
+
+  assert.equal(
+    (
+      await firstPeer.sandbox.executeCommand(
+        `printf '%s' 'The user prefers concise answers.' > /workspace/participants/maya/MEMORY.md`,
+      )
+    ).exitCode,
+    0,
+  );
+  await first.sandbox.writeFiles([
+    { path: '/workspace/private.txt', content: 'first chat' },
+    { path: '/workspace/output/sample.txt', content: 'artifact' },
+  ]);
+
+  const sandboxApp = testApp({
+    openArtifact: (conversation, path) =>
+      sandboxes.openArtifact(conversation, path),
+  });
+  const artifact = await sandboxApp.request(
+    '/api/chat/chat-1/artifacts/sample.txt',
+  );
+  assert.equal(artifact.status, 200);
+  assert.equal(
+    artifact.headers.get('content-type'),
+    'text/plain; charset=utf-8',
+  );
+  assert.equal(
+    artifact.headers.get('content-disposition'),
+    "inline; filename*=UTF-8''sample.txt",
+  );
+  assert.equal(await artifact.text(), 'artifact');
+  assert.equal(await sandboxes.openArtifact(firstChat, '../private.txt'), null);
+  assert.equal(
+    (
+      await sandboxApp.request(
+        '/api/chat/chat-1/artifacts/%2E%2E%2Fprivate.txt',
+      )
+    ).status,
+    400,
+  );
+  await sandboxes.remove(firstChat);
+
+  const second = await sandboxes.sandboxFor(secondChat)({
+    chatId: 'chat-2:participant:0',
+    userId: secondChat.userId,
+  });
+  assert.equal(
+    await second.sandbox.readFile('/workspace/participants/maya/MEMORY.md'),
+    'The user prefers concise answers.',
+  );
+  assert.equal(
+    (await second.sandbox.executeCommand('cat /workspace/private.txt'))
+      .exitCode,
+    1,
+  );
+  await sandboxes.remove(secondChat);
+
+  const otherUser = await sandboxes.sandboxFor(otherUserChat)({
+    chatId: 'chat-1:participant:0',
+    userId: otherUserChat.userId,
+  });
+  assert.equal(
+    (
+      await otherUser.sandbox.executeCommand(
+        'cat /workspace/participants/maya/MEMORY.md',
+      )
+    ).exitCode,
+    1,
+  );
+  assert.equal(
+    (await otherUser.sandbox.executeCommand('cat /workspace/private.txt'))
+      .exitCode,
+    1,
+  );
+  await sandboxes.remove(otherUserChat);
 });
 
 test('chat message POST returns before active participants settle', async () => {
@@ -3573,6 +3461,77 @@ test('shared transcripts are read from storage without starting the group', asyn
       participants: [{ name: 'Annie Duke' }],
     });
     assert.equal(await reader.sessionExists(untouched), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('agent inspector reads durable chat executions without telemetry', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-executions-'));
+  try {
+    const conversation = { chatId: 'execution-chat', userId: 'owner-user' };
+    let modelCalls = 0;
+    const participant = {
+      name: 'Maya',
+      model: new MockLanguageModelV4({
+        modelId: 'model-v1',
+        doStream: async () =>
+          modelCalls++ === 0
+            ? groupToolResponse('bash', 'inspect-plan', {
+                command: 'printf inspected',
+              })
+            : groupTextResponse('Nothing useful to add.'),
+      }),
+    };
+
+    await using runtime = durableRuntime([participant], directory);
+    await runtime.post(conversation, {
+      id: 'message-1',
+      content: 'Review this plan.',
+    });
+    await waitForChat(runtime, conversation, 'settled');
+
+    const inspector = await runtime.traces(conversation, participant.name);
+    assert.equal(inspector?.agent, participant.name);
+    assert.equal(inspector?.turns.length, 1);
+    assert.equal(inspector?.turns[0]?.modelId, participant.model.modelId);
+    assert.equal(inspector?.turns[0]?.status, 'completed');
+    assert.equal(inspector?.turns[0]?.finishReason, 'stop');
+    assert.equal(inspector?.turns[0]?.usage.totalTokens, 4);
+    assert.match(
+      inspector?.turns[0]?.notification ?? '',
+      /Review this plan\./u,
+    );
+    const content = inspector?.turns[0]?.steps.flatMap((step) => step.content);
+    assert.match(JSON.stringify(content), /"type":"tool-call"/u);
+    assert.match(JSON.stringify(content), /"toolName":"bash"/u);
+    assert.match(JSON.stringify(content), /"type":"tool-result"/u);
+    assert.deepEqual(content?.at(-1), {
+      type: 'text',
+      text: 'Nothing useful to add.',
+    });
+
+    {
+      await using reader = durableRuntime(
+        [
+          {
+            ...participant,
+            model: new MockLanguageModelV4({ modelId: 'model-v2' }),
+          },
+        ],
+        directory,
+      );
+      assert.deepEqual(
+        await reader.traces(conversation, participant.name),
+        inspector,
+      );
+    }
+
+    await runtime.clear(conversation);
+    assert.deepEqual(
+      (await runtime.traces(conversation, participant.name))?.turns,
+      [],
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }

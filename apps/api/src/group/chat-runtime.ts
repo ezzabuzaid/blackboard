@@ -10,22 +10,22 @@ import {
   type StreamPart,
 } from "@deepagents/context"
 import {
-  SqliteMailboxStore,
   type AgentDeclaration,
   type AgentRuntimeInfo,
   type ConversationId,
+  SqliteMailboxStore,
   type TurnInput,
 } from "@deepagents/experimental/zukhruf"
 
+import { readAgentExecutions } from "./agent-executions.js"
 import {
-  WhatsAppGroup,
   type WhatsAppChatEvent,
+  WhatsAppGroup,
   type WhatsAppGroupLimits,
   type WhatsAppMessage,
   type WhatsAppMessageAnnotation,
   type WhatsAppParticipant,
 } from "./whatsapp.js"
-import { readAgentTraces } from "../traces/agent-traces.js"
 
 const CHAT_EVENT_TYPE = "data-whatsapp-chat-event"
 
@@ -48,30 +48,30 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   readonly #mailboxStore: SqliteMailboxStore
   readonly #limits: WhatsAppGroupLimits
   readonly #loadParticipants: (
-    conversation: ConversationId
+    conversation: ConversationId,
   ) => Promise<readonly WhatsAppParticipant[]>
   readonly #onMessage?: (
     conversation: ConversationId,
     message: WhatsAppMessage,
-    cursor: number
+    cursor: number,
   ) => void | Promise<void>
   readonly #sandboxForChat: (
-    conversation: ConversationId
+    conversation: ConversationId,
   ) => AgentDeclaration["sandbox"]
   readonly #queueDirectory: string
 
   constructor(options: {
     loadParticipants: (
-      conversation: ConversationId
+      conversation: ConversationId,
     ) => Promise<readonly WhatsAppParticipant[]>
     onMessage?: (
       conversation: ConversationId,
       message: WhatsAppMessage,
-      cursor: number
+      cursor: number,
     ) => void | Promise<void>
     limits: WhatsAppGroupLimits
     sandboxForChat: (
-      conversation: ConversationId
+      conversation: ConversationId,
     ) => AgentDeclaration["sandbox"]
     databasePath: string
     mailboxPath: string
@@ -93,7 +93,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       changeSource: new PollingChangeSource({ reads: this.#streamStore }),
     })
     this.#mailboxStore = this.#resources.use(
-      new SqliteMailboxStore(options.mailboxPath)
+      new SqliteMailboxStore(options.mailboxPath),
     )
   }
 
@@ -104,14 +104,14 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       content: string
       replyToMessageId?: string
       annotations?: WhatsAppMessageAnnotation[]
-    }
+    },
   ) {
     const { group } = await this.#chat(conversation)
     return group.post(
       message.content,
       message.id,
       message.replyToMessageId,
-      message.annotations
+      message.annotations,
     )
   }
 
@@ -173,7 +173,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       if (event.type === "message") messages.push(event.message)
     }
     const participants = (await this.#loadChatParticipants(conversation)).map(
-      ({ name }) => ({ name })
+      ({ name }) => ({ name }),
     )
     return { messages, participants }
   }
@@ -181,7 +181,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   async replayMessages(conversation: ConversationId) {
     await this.#projectMessages(
       conversation,
-      await this.#durableEvents(streamId(conversation))
+      await this.#durableEvents(streamId(conversation)),
     )
   }
 
@@ -208,7 +208,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     const { userId } = conversation
     const prefix = `${key}:participant:`
     const roots = (await this.#store.listChats({ userId })).filter(({ id }) =>
-      id.startsWith(prefix)
+      id.startsWith(prefix),
     )
     for (const root of roots) {
       const tree = await this.#store.listChats({
@@ -224,14 +224,16 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   async traces(conversation: ConversationId, participantName: string) {
     const { participants } = await this.#chat(conversation)
     const participant = participants.find(
-      ({ name }) => name === participantName
+      ({ name }) => name === participantName,
     )
-    if (!participant?.tracePath) return null
+    if (!participant) return null
     return {
       agent: participant.name,
-      turns: await readAgentTraces(
-        participant.tracePath,
-        `${conversation.chatId}:${participant.name}`
+      turns: await readAgentExecutions(
+        this.#store,
+        this.#streamStore,
+        participantConversation(conversation, participant.name),
+        participant.model.modelId,
       ),
     }
   }
@@ -242,8 +244,8 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       sessions.map((session) =>
         session.status === "fulfilled"
           ? session.value.resources.disposeAsync()
-          : undefined
-      )
+          : undefined,
+      ),
     )
     await this.#resources.disposeAsync()
   }
@@ -279,7 +281,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     const loadParticipants = async () => {
       const loaded = await this.#loadChatParticipants(conversation)
       const names = new Set(
-        participants.map(({ name }) => name.toLocaleLowerCase("en"))
+        participants.map(({ name }) => name.toLocaleLowerCase("en")),
       )
       for (const participant of loaded) {
         const name = participant.name.toLocaleLowerCase("en")
@@ -323,13 +325,13 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       .map(({ seq, data, createdAt }) => chatEvent(data, seq, createdAt))
       .filter(
         (event) =>
-          event.type !== "activity" || event.activity.type !== "presence"
+          event.type !== "activity" || event.activity.type !== "presence",
       )
   }
 
   async #projectMessages(
     conversation: ConversationId,
-    events: readonly WhatsAppChatEvent[]
+    events: readonly WhatsAppChatEvent[],
   ) {
     if (!this.#onMessage) return
     for (const event of events) {
@@ -360,7 +362,10 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   }
 
   #queuePath(conversation: ConversationId) {
-    return resolve(this.#queueDirectory, encodeURIComponent(conversation.chatId))
+    return resolve(
+      this.#queueDirectory,
+      encodeURIComponent(conversation.chatId),
+    )
   }
 
   async #loadChatParticipants(conversation: ConversationId) {
@@ -373,13 +378,23 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
               functionId: `${conversation.chatId}:${participant.name}`,
             },
           }
-        : participant
+        : participant,
     )
   }
 }
 
 function streamId(conversation: ConversationId) {
   return JSON.stringify(["whatsapp-chat", conversation.chatId])
+}
+
+function participantConversation(
+  conversation: ConversationId,
+  participantName: string,
+): ConversationId {
+  return {
+    chatId: `${conversation.chatId}:participant:${encodeURIComponent(participantName)}`,
+    userId: conversation.userId,
+  }
 }
 
 function chatEvent(part: StreamPart, sequence: number, createdAt: number) {

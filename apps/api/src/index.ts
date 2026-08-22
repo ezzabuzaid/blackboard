@@ -1,5 +1,4 @@
 import { mkdirSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { createTerminus } from '@godaddy/terminus';
@@ -15,10 +14,9 @@ import { GroupStore } from './group/group-store.js';
 import { MarketplaceGroupTemplateStore } from './group/marketplace-group-template-store.js';
 import { loadAgentCatalog } from './group/participants/agent-catalog.js';
 import { ParticipantDirectory } from './group/participants/index.js';
-import { createWhatsAppSandbox } from './group/sandbox.js';
 import { GroupShareStore } from './group/share-store.js';
 import { createParticipantDefaults } from './participant-defaults.js';
-import { openArtifact, sandboxRoot } from './sandbox.js';
+import { GroupSandboxes } from './sandbox.js';
 import { createOpenRouterTranscriber } from './transcription.js';
 
 const dataDirectory = process.env.ZUKHRUF_DATA_DIR;
@@ -81,7 +79,6 @@ const authentication = resources.use(
     trustedOrigins,
   }),
 );
-const sandboxResources = resources.use(new AsyncDisposableStack());
 const agents = loadAgentCatalog(
   resolve(import.meta.dirname, '../../../catalog/agents'),
 );
@@ -98,7 +95,7 @@ resources.defer(() => marketplaceTemplates[Symbol.dispose]());
 const shares = new GroupShareStore(resolve(dataDirectory, 'shares.sqlite'));
 resources.defer(() => shares[Symbol.dispose]());
 const participants = new ParticipantDirectory({
-  databasePath: resolve(dataDirectory, 'participants.sqlite'),
+  directory: resolve(dataDirectory, 'participants'),
   builtinsDirectory: resolve(import.meta.dirname, '../../../participants'),
   catalogDirectory: resolve(import.meta.dirname, '../../../catalog/agents'),
   telemetryDirectory: resolve(dataDirectory, 'group-telemetry'),
@@ -111,6 +108,13 @@ const groupAgentIds = (conversation: { userId: string; chatId: string }) => {
   )?.agentIds;
   return agentIds?.length ? agentIds : undefined;
 };
+const sandboxes = resources.use(
+  new GroupSandboxes({
+    dataDirectory,
+    mountsFor: (conversation) =>
+      participants.mounts(conversation.userId, groupAgentIds(conversation)),
+  }),
+);
 const runtime = resources.use(
   new WhatsAppChatRuntime({
     loadParticipants: (conversation) =>
@@ -131,15 +135,7 @@ const runtime = resources.use(
       agentMessages: 100,
       transcriptMessages: 500,
     },
-    sandboxForChat: createWhatsAppSandbox(
-      sandboxResources,
-      dataDirectory,
-      (conversation) =>
-        participants.filesystem(
-          conversation.userId,
-          groupAgentIds(conversation),
-        ),
-    ),
+    sandboxForChat: (conversation) => sandboxes.sandboxFor(conversation),
     databasePath: resolve(dataDirectory, 'group.sqlite'),
     mailboxPath: resolve(dataDirectory, 'mailbox.sqlite'),
     queueDirectory: resolve(dataDirectory, 'queues'),
@@ -150,10 +146,7 @@ const groupDeletion = createGroupDeletion({
   exists: (userId, groupId) => groups.get(userId, groupId) !== null,
   clearRuntime: (userId, groupId) => runtime.clear({ chatId: groupId, userId }),
   deleteSandbox: (userId, groupId) =>
-    rm(sandboxRoot(dataDirectory, { chatId: groupId, userId }), {
-      recursive: true,
-      force: true,
-    }),
+    sandboxes.remove({ chatId: groupId, userId }),
   deleteShares: (userId, groupId) => {
     shares.deleteForGroup(userId, groupId);
   },
@@ -191,10 +184,7 @@ const app = createApp({
   clearGroupChat: async (userId, groupId) => {
     const conversation = { chatId: groupId, userId };
     await runtime.clear(conversation);
-    await rm(sandboxRoot(dataDirectory, conversation), {
-      recursive: true,
-      force: true,
-    });
+    await sandboxes.remove(conversation);
     groups.clearMessages(userId, groupId);
   },
   deleteGroup: (userId, groupId) => groupDeletion.delete(userId, groupId),
@@ -212,7 +202,7 @@ const app = createApp({
   runtime,
   transcribeAudio,
   openArtifact: (conversation, path) =>
-    openArtifact(dataDirectory, conversation, path),
+    sandboxes.openArtifact(conversation, path),
 });
 
 const webRoute = await import('./routes/web.route.js');

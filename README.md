@@ -16,13 +16,17 @@ nx run-many -t portless -p web api
 Open `https://frontend.baseera.localhost`. Run `portless trust` once first if
 the local HTTPS certificate is not installed yet.
 
-Agents use an in-process virtual Bash sandbox with persistent workspaces under
-`ZUKHRUF_DATA_DIR`; it does not require KVM or a container runtime. Open the web
+Agents execute commands in persistent
+[Microsandbox](https://docs.microsandbox.dev/) microVMs. Run `npx msb doctor` before
+starting the app; the host must be Apple silicon or Linux with KVM. Each group
+gets one hardware-isolated VM and a host-backed workspace under
+`$ZUKHRUF_DATA_DIR/sandboxes/<group-hash>/workspace`. Files placed in
+`/workspace/output` are available through the chat artifact route. Open the web
 app and create a passkey with only your name. Returning users sign in with their
 device passkey and no form fields. Better Auth stores users, passkeys, and
 sessions in `auth.sqlite` under `ZUKHRUF_DATA_DIR`. Agent requests use the
 server's `OPENROUTER_API_KEY` and `OPENROUTER_MODEL`
-(`openai/gpt-5.6-luna` by default). Voice input uses the same key and
+(`stealth/ox-alpha` by default). Voice input uses the same key and
 `OPENROUTER_TRANSCRIPTION_MODEL` (`openai/gpt-4o-mini-transcribe` by default).
 
 ## Agents
@@ -35,11 +39,11 @@ to Factory continue that request. For example:
 Factory, create a customer researcher named Maya.
 ```
 
-Factory creates and updates the same file-based agent definitions that can be
-edited directly:
+Factory creates and updates file-based participant definitions. Custom
+definitions are isolated by user and can also be edited directly:
 
 ```text
-$ZUKHRUF_DATA_DIR/agents/<agent>/
+$ZUKHRUF_DATA_DIR/participants/<user-hash>/<agent>/
 ├── identity.json
 ├── SOUL.md
 ├── AGENTS.md
@@ -57,13 +61,11 @@ $ZUKHRUF_DATA_DIR/agents/<agent>/
 Agent identities are loaded when a new chat is created. At the start of each
 turn, an agent discovers and reads its own `SOUL.md` for persona and voice,
 `AGENTS.md` for operating instructions, and `MEMORY.md` for durable knowledge.
-The shared agent directory is read-only inside chat sandboxes. Ordinary agents
-can update only their own `MEMORY.md` through a scoped tool; Factory alone can
-create or replace `identity.json`, `SOUL.md`, and `AGENTS.md`. Factory preserves
-an existing `MEMORY.md` unless the human asks to replace it. Updates are visible
-on the agent's next turn, while newly created agents join new chats. The host
-does not read or inject the Markdown workspace files, and a missing or invalid
-`identity.json` is rejected as invalid configuration.
+Custom participant files are writable through `/workspace/participants` and
+shared across that user's groups. Bundled and catalog definitions are mounted
+read-only. Updates are visible on the next turn, while newly created agents join
+new chats. The host reads only `identity.json`; missing, malformed, or unnamed
+identities are rejected.
 
 ## Checks
 

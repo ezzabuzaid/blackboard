@@ -2,6 +2,10 @@ import { createHash, randomUUID } from "node:crypto"
 import { mkdirSync } from "node:fs"
 
 import {
+  type AgentModel,
+  type ContextFragment,
+  type ContextStore,
+  type StreamManager,
   guardrail,
   persona,
   policy,
@@ -9,30 +13,28 @@ import {
   quirk,
   styleGuide,
   workflow,
-  type AgentModel,
-  type ContextFragment,
-  type ContextStore,
-  type StreamManager,
 } from "@deepagents/context"
 import {
+  type AgentDeclaration,
   AgentRuntime,
+  type ConversationId,
+  type MailboxStore,
   MessageDeliveryMode,
   PgBossTurnQueue,
   createInterAgentCommunication,
   defineAgent,
   defineTool,
-  type AgentDeclaration,
-  type ConversationId,
-  type MailboxStore,
 } from "@deepagents/experimental/zukhruf"
 import {
   PgBossWakeScheduler,
-  conversationScheduling,
   type SchedulingWake,
+  conversationScheduling,
 } from "@deepagents/experimental/zukhruf/conversation-scheduling"
 import { PGlite } from "@electric-sql/pglite"
-import { jsonSchema, type ToolSet } from "ai"
+import { type ToolSet, jsonSchema } from "ai"
 import { PgBoss, fromPglite } from "pg-boss"
+
+import { recordAgentExecutionModel } from "./agent-executions.js"
 
 /** Queue names must be stable per participant identity: with a durable queue database, drifting names would hand one participant another's pending turns and wakes. */
 function queueSlug(name: string) {
@@ -144,10 +146,7 @@ type WhatsAppParticipantToolPresence =
   | "using-tool"
 
 export type WhatsAppParticipantPresence =
-  | "idle"
-  | "reading"
-  | WhatsAppParticipantToolPresence
-  | "seen"
+  "idle" | "reading" | WhatsAppParticipantToolPresence | "seen"
 
 function toolPresence(toolName: string): WhatsAppParticipantToolPresence {
   switch (toolName) {
@@ -270,6 +269,7 @@ export class WhatsAppReplyTargetError extends Error {
 
 interface RunningParticipant {
   name: string
+  modelId: string
   conversation: ConversationId
   runtime: AgentRuntime
   active: boolean
@@ -281,7 +281,7 @@ interface RunningParticipant {
 
 type StartParticipant = (
   participant: WhatsAppParticipant,
-  joining: boolean
+  joining: boolean,
 ) => Promise<RunningParticipant>
 
 type WhatsAppReplyResult =
@@ -316,6 +316,7 @@ export class WhatsAppGroup implements AsyncDisposable {
   readonly #replyCounts = new Map<string, number>()
   readonly #limits: WhatsAppGroupLimits
   readonly #persist: WhatsAppGroupOptions["persist"]
+  readonly #store: ContextStore
   #activity: WhatsAppGroupActivityState = {
     phase: "idle",
     notification: 0,
@@ -336,7 +337,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       disposables: AsyncDisposableStack
       participants: RunningParticipant[]
       startParticipant: StartParticipant
-    }
+    },
   ) {
     this.#resources = resources.disposables
     this.#participants = resources.participants
@@ -346,6 +347,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     this.#profiles = options.participants.map(({ name }) => ({ name }))
     this.#limits = options.limits
     this.#persist = options.persist
+    this.#store = options.store
     for (const event of structuredClone(options.events)) {
       this.#cursor = event.cursor
       this.#events.push(event)
@@ -357,7 +359,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         if (message.author !== "user") {
           this.#replyCounts.set(
             message.author,
-            (this.#replyCounts.get(message.author) ?? 0) + 1
+            (this.#replyCounts.get(message.author) ?? 0) + 1,
           )
         }
       } else {
@@ -390,7 +392,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       author: string,
       content: string,
       replyToMessageId?: string,
-      annotations?: readonly WhatsAppMessageAnnotation[]
+      annotations?: readonly WhatsAppMessageAnnotation[],
     ) => Promise<WhatsAppReplyResult>
 
     await boss.start()
@@ -546,7 +548,7 @@ export class WhatsAppGroup implements AsyncDisposable {
                   participant.name,
                   message.trim(),
                   replyToMessageId,
-                  annotations
+                  annotations,
                 ),
             }),
           },
@@ -562,11 +564,12 @@ export class WhatsAppGroup implements AsyncDisposable {
               timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
             }),
           ],
-        }
+        },
       )
 
       const running = {
         name: participant.name,
+        modelId: participant.model.modelId,
         conversation: {
           chatId: `${options.conversation.chatId}:participant:${encodeURIComponent(participant.name)}`,
           userId: options.conversation.userId,
@@ -604,7 +607,7 @@ export class WhatsAppGroup implements AsyncDisposable {
   async send(
     content: string,
     onMessage?: WhatsAppGroupOptions["onMessage"],
-    onActivity?: WhatsAppGroupOptions["onActivity"]
+    onActivity?: WhatsAppGroupOptions["onActivity"],
   ): Promise<readonly WhatsAppMessage[]> {
     using subscription = this.subscribe({ onMessage, onActivity })
     await this.post(content)
@@ -616,7 +619,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     content: string,
     id: string = randomUUID(),
     replyToMessageId?: string,
-    annotations?: readonly WhatsAppMessageAnnotation[]
+    annotations?: readonly WhatsAppMessageAnnotation[],
   ) {
     if (this.#closed) throw new Error("WhatsAppGroup is closed")
     const message = content.trim()
@@ -653,8 +656,8 @@ export class WhatsAppGroup implements AsyncDisposable {
         .map((participant) =>
           participant.runtime
             .observe(participant.conversation)
-            .cancel(participant.turnId)
-        )
+            .cancel(participant.turnId),
+        ),
     )
     await this.#pump?.catch(() => undefined)
     await this.#emitStopped(reason)
@@ -706,13 +709,13 @@ export class WhatsAppGroup implements AsyncDisposable {
     id: string = randomUUID(),
     replyToMessageId?: string,
     annotations: readonly WhatsAppMessageAnnotation[] = [],
-    responseAnnotations: readonly WhatsAppMessageAnnotation[] = []
+    responseAnnotations: readonly WhatsAppMessageAnnotation[] = [],
   ) {
     const existing = this.#messagesById.get(id)
     if (existing) return existing
     if (this.#messages.length >= this.#limits.transcriptMessages) {
       throw new WhatsAppGroupLimitError(
-        "WhatsApp chat transcript limit reached"
+        "WhatsApp chat transcript limit reached",
       )
     }
     if (replyToMessageId && !this.#messagesById.has(replyToMessageId)) {
@@ -723,7 +726,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         messageId: messageId.trim(),
         excerpt: excerpt.trim(),
         ...(comment?.trim() ? { comment: comment.trim() } : {}),
-      })
+      }),
     )
     for (const annotation of normalizedAnnotations) {
       const target = this.#messagesById.get(annotation.messageId)
@@ -731,11 +734,11 @@ export class WhatsAppGroup implements AsyncDisposable {
         !target ||
         !annotation.excerpt ||
         !normalizedText(target.content).includes(
-          normalizedText(annotation.excerpt)
+          normalizedText(annotation.excerpt),
         )
       ) {
         throw new WhatsAppReplyTargetError(
-          "Annotation excerpt was not found in its target"
+          "Annotation excerpt was not found in its target",
         )
       }
     }
@@ -772,7 +775,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     author: string,
     content: string,
     replyToMessageId?: string,
-    annotations?: readonly WhatsAppMessageAnnotation[]
+    annotations?: readonly WhatsAppMessageAnnotation[],
   ): Promise<WhatsAppReplyResult> {
     if (this.#stopRequested) return { posted: false, reason: "stopped" }
     if (
@@ -786,7 +789,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     const participant = this.#participants.find(({ name }) => name === author)!
     const newerMessages = this.#messages.filter(
       ({ author: messageAuthor, sequence }) =>
-        messageAuthor !== author && sequence > participant.seenThroughSequence
+        messageAuthor !== author && sequence > participant.seenThroughSequence,
     )
     if (newerMessages.length > 0) {
       participant.seenThroughSequence = newerMessages.at(-1)!.sequence
@@ -816,7 +819,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       randomUUID(),
       targetId,
       targetAnnotations,
-      participant.responseAnnotations
+      participant.responseAnnotations,
     )
     return { posted: true }
   }
@@ -827,7 +830,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     this.#pump = pump
     void pump.then(
       () => this.#finishPump(pump, true),
-      (cause) => this.#abandonPump(pump, cause)
+      (cause) => this.#abandonPump(pump, cause),
     )
   }
 
@@ -874,7 +877,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         notifications: pending.filter(
           (message) =>
             message.author !== participant.name &&
-            !this.#mailboxRecipients.get(message.id)?.has(participant.name)
+            !this.#mailboxRecipients.get(message.id)?.has(participant.name),
         ),
       }))
       const recipients = batches
@@ -892,8 +895,8 @@ export class WhatsAppGroup implements AsyncDisposable {
           batches.map(({ participant, notifications }) =>
             notifications.length > 0
               ? this.#runParticipant(participant, notifications, notification)
-              : undefined
-          )
+              : undefined,
+          ),
         )
       }
       for (const { id } of pending) this.#mailboxRecipients.delete(id)
@@ -926,8 +929,8 @@ export class WhatsAppGroup implements AsyncDisposable {
         })
         await Promise.all(
           joined.map((participant) =>
-            this.#runParticipant(participant, transcript, notification)
-          )
+            this.#runParticipant(participant, transcript, notification),
+          ),
         )
         joined = await this.#joinParticipants()
       }
@@ -941,7 +944,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     const definitions = await this.#loadParticipants()
     WhatsAppGroup.#validateParticipants(definitions)
     const names = new Set(
-      this.#participants.map(({ name }) => name.toLocaleLowerCase("en"))
+      this.#participants.map(({ name }) => name.toLocaleLowerCase("en")),
     )
     const joined: RunningParticipant[] = []
     for (const definition of definitions) {
@@ -960,15 +963,15 @@ export class WhatsAppGroup implements AsyncDisposable {
   async #runParticipant(
     participant: RunningParticipant,
     notifications: WhatsAppMessage[],
-    notification: number
+    notification: number,
   ) {
     participant.seenThroughSequence = Math.max(
       participant.seenThroughSequence,
-      notifications.at(-1)?.sequence ?? 0
+      notifications.at(-1)?.sequence ?? 0,
     )
     participant.active = true
     participant.responseAnnotations = notifications.flatMap(
-      ({ annotations }) => annotations
+      ({ annotations }) => annotations,
     )
     try {
       await this.#emitActivity({
@@ -996,42 +999,55 @@ export class WhatsAppGroup implements AsyncDisposable {
       participant.turnId = turn.id
       let failure: string | undefined
       const toolCalls = new Map<string, WhatsAppParticipantToolPresence>()
-      await turn.stream.pipeTo(
-        new WritableStream({
-          write: async (part) => {
-            if (part.type === "error") failure = part.errorText
-            if (
-              (part.type === "tool-input-start" ||
-                part.type === "tool-input-available") &&
-              !toolCalls.has(part.toolCallId)
-            ) {
-              const state = toolPresence(part.toolName)
-              toolCalls.set(part.toolCallId, state)
-              await this.#emitActivity({
-                type: "presence",
-                notification,
-                participant: participant.name,
-                state,
-              })
-            }
-            const toolFinished =
-              part.type === "tool-input-error" ||
-              part.type === "tool-output-error" ||
-              part.type === "tool-output-denied" ||
-              (part.type === "tool-output-available" &&
-                part.preliminary !== true)
-            if (toolFinished && toolCalls.delete(part.toolCallId)) {
-              const active = [...toolCalls.values()].at(-1)
-              await this.#emitActivity({
-                type: "presence",
-                notification,
-                participant: participant.name,
-                state: active === undefined ? "reading" : active,
-              })
-            }
-          },
-        })
-      )
+      try {
+        await turn.stream.pipeTo(
+          new WritableStream({
+            write: async (part) => {
+              if (part.type === "error") failure = part.errorText
+              if (
+                (part.type === "tool-input-start" ||
+                  part.type === "tool-input-available") &&
+                !toolCalls.has(part.toolCallId)
+              ) {
+                const state = toolPresence(part.toolName)
+                toolCalls.set(part.toolCallId, state)
+                await this.#emitActivity({
+                  type: "presence",
+                  notification,
+                  participant: participant.name,
+                  state,
+                })
+              }
+              const toolFinished =
+                part.type === "tool-input-error" ||
+                part.type === "tool-output-error" ||
+                part.type === "tool-output-denied" ||
+                (part.type === "tool-output-available" &&
+                  part.preliminary !== true)
+              if (toolFinished && toolCalls.delete(part.toolCallId)) {
+                const active = [...toolCalls.values()].at(-1)
+                await this.#emitActivity({
+                  type: "presence",
+                  notification,
+                  participant: participant.name,
+                  state: active === undefined ? "reading" : active,
+                })
+              }
+            },
+          }),
+        )
+      } finally {
+        await recordAgentExecutionModel(
+          this.#store,
+          participant.conversation,
+          turn.id,
+          participant.modelId,
+        ).catch(() =>
+          console.error(
+            `[agent execution metadata failed] ${participant.name}`,
+          ),
+        )
+      }
       if (failure) throw new Error(failure)
       if (this.#stopRequested) return
       const replies =
@@ -1086,8 +1102,8 @@ export class WhatsAppGroup implements AsyncDisposable {
     this.#events.push(event)
     const deliveries = [...this.#subscribers].map((subscriber) =>
       this.#deliver(subscriber, event, () =>
-        subscriber.onMessage?.(message, event.cursor)
-      )
+        subscriber.onMessage?.(message, event.cursor),
+      ),
     )
     await Promise.all(deliveries)
   }
@@ -1100,7 +1116,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       activity,
     }
     const deliveries = [...this.#subscribers].map((subscriber) =>
-      this.#deliver(subscriber, event, () => subscriber.onActivity?.(activity))
+      this.#deliver(subscriber, event, () => subscriber.onActivity?.(activity)),
     )
     if (activity.type === "presence") {
       await Promise.all(deliveries)
@@ -1127,7 +1143,7 @@ export class WhatsAppGroup implements AsyncDisposable {
   #deliver(
     subscriber: GroupSubscriber,
     event: WhatsAppChatEvent,
-    legacyCallback?: () => void | Promise<void>
+    legacyCallback?: () => void | Promise<void>,
   ) {
     const delivery = subscriber.delivery.then(async () => {
       await subscriber.onEvent?.(event)
@@ -1139,7 +1155,7 @@ export class WhatsAppGroup implements AsyncDisposable {
 
   #notification(messages: WhatsAppMessage[], reminder?: string) {
     const responseAnnotations = messages.flatMap(
-      ({ annotations }) => annotations
+      ({ annotations }) => annotations,
     )
     return [
       "New WhatsApp group messages:",
@@ -1173,12 +1189,13 @@ export class WhatsAppGroup implements AsyncDisposable {
 
   async #deliverToActiveParticipants(message: WhatsAppMessage) {
     const recipients = this.#participants.filter(
-      (participant) => participant.active && participant.name !== message.author
+      (participant) =>
+        participant.active && participant.name !== message.author,
     )
     if (recipients.length === 0) return
 
     const eligibleRecipients = this.#participants.filter(
-      ({ name }) => name !== message.author
+      ({ name }) => name !== message.author,
     )
     const author =
       this.#participants.find(({ name }) => name === message.author)
@@ -1221,10 +1238,10 @@ export class WhatsAppGroup implements AsyncDisposable {
                 .map(({ name }) => name),
             },
           }),
-          MessageDeliveryMode.QueueOnly
+          MessageDeliveryMode.QueueOnly,
         )
         delivered.add(participant.name)
-      })
+      }),
     )
   }
 
@@ -1253,18 +1270,18 @@ export class WhatsAppGroup implements AsyncDisposable {
         /[\u0000-\u001f\u007f]/u.test(participant.name)
       ) {
         throw new Error(
-          "WhatsAppGroup participant names must be valid, unpadded text"
+          "WhatsAppGroup participant names must be valid, unpadded text",
         )
       }
       if (participant.name.toLowerCase() === "user") {
         throw new Error(
-          'WhatsAppGroup participant name "user" is reserved for the human author'
+          'WhatsAppGroup participant name "user" is reserved for the human author',
         )
       }
       const normalizedName = participant.name.toLowerCase()
       if (names.has(normalizedName)) {
         throw new Error(
-          `WhatsAppGroup participant name "${participant.name}" is duplicated`
+          `WhatsAppGroup participant name "${participant.name}" is duplicated`,
         )
       }
       names.add(normalizedName)
@@ -1273,7 +1290,7 @@ export class WhatsAppGroup implements AsyncDisposable {
 }
 
 function responseAnnotationsPrompt(
-  annotations: readonly WhatsAppMessageAnnotation[]
+  annotations: readonly WhatsAppMessageAnnotation[],
 ) {
   return [
     "# Response annotations:",
@@ -1283,7 +1300,7 @@ function responseAnnotationsPrompt(
       annotations.map(({ excerpt, comment }) => ({
         text: excerpt,
         annotation: comment ?? "",
-      }))
+      })),
     ),
     "</response-annotations>",
   ].join("\n")
@@ -1295,7 +1312,7 @@ function normalizedText(value: string) {
 
 function reduceActivity(
   state: WhatsAppGroupActivityState,
-  event: WhatsAppGroupActivity
+  event: WhatsAppGroupActivity,
 ): WhatsAppGroupActivityState {
   if (event.type === "started") {
     return {
@@ -1327,7 +1344,7 @@ function reduceActivity(
       ].map((participant) =>
         recipients.has(participant.name)
           ? { ...participant, state: "notified" }
-          : participant
+          : participant,
       ),
       presence: [
         ...state.presence,
@@ -1337,7 +1354,7 @@ function reduceActivity(
       ].map((participant) =>
         recipients.has(participant.name)
           ? { ...participant, state: "idle" }
-          : participant
+          : participant,
       ),
     }
   }
@@ -1379,7 +1396,7 @@ function reduceActivity(
       presence: state.presence.map((participant) =>
         participant.name === event.participant
           ? { ...participant, state: event.state }
-          : participant
+          : participant,
       ),
     }
   }
@@ -1392,7 +1409,7 @@ function reduceActivity(
             state: event.state,
             replies: participant.replies + (event.replies ?? 0),
           }
-        : participant
+        : participant,
     ),
   }
 }

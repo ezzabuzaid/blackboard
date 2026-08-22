@@ -1,1 +1,1 @@
-export { ParticipantDirectory } from "./participant-directory.js"
+export * from './participant-directory.js';
