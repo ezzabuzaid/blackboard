@@ -70,9 +70,18 @@ export interface AppDependencies {
   }
   runtime: Pick<
     WhatsAppChatRuntime,
-    "post" | "snapshot" | "stop" | "traces" | "transcript" | "clear"
-  > &
-    Parameters<typeof zukhruf>[0]
+    | "clear"
+    | "createSession"
+    | "enqueue"
+    | "info"
+    | "observe"
+    | "post"
+    | "sessionExists"
+    | "snapshot"
+    | "stop"
+    | "traces"
+    | "transcript"
+  >
   openArtifact: OpenArtifact
   transcribeAudio(audio: TranscriptionAudio): Promise<string>
 }
@@ -93,6 +102,7 @@ function ownedSessionsOnly({
   runtime,
   groupOwner,
   groupDeleting,
+  listGroups,
 }: AppDependencies): Parameters<typeof zukhruf>[0] {
   const reachable = ({ chatId, userId }: ConversationId) => {
     if (groupDeleting(chatId)) return false
@@ -104,6 +114,29 @@ function ownedSessionsOnly({
     info: runtime.info,
     createSession: (conversation) => runtime.createSession(conversation),
     enqueue: (conversation, turn) => runtime.enqueue(conversation, turn),
+    listHistory: async (userId) => {
+      if (userId === undefined) {
+        throw new Error("Authenticated user required for session history")
+      }
+      return Promise.all(
+        (await listGroups(userId)).map(async (group) => {
+          const conversation = { chatId: group.id, userId }
+          const [status, transcript] = await Promise.all([
+            runtime.observe(conversation).status(),
+            runtime.transcript(conversation),
+          ])
+          return {
+            chatId: group.id,
+            userId,
+            title: group.name,
+            createdAt: Date.parse(group.createdAt),
+            updatedAt: Date.parse(group.lastMessage?.sentAt ?? group.createdAt),
+            messageCount: transcript.messages.length,
+            status: status?.status ?? "idle",
+          }
+        }),
+      )
+    },
     sessionExists: async (conversation) =>
       reachable(conversation) && (await runtime.sessionExists(conversation)),
     observe: (conversation) =>

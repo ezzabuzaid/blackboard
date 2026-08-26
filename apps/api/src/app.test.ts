@@ -307,6 +307,65 @@ function responseCookies(response: Response) {
 
 const app = testApp();
 
+test('session history is derived from the authenticated user groups', async () => {
+  const group = {
+    ...testGroupRecord('group-1', 'Research group', ['maya']),
+    lastMessage: {
+      author: 'Maya',
+      content: 'Ready.',
+      sentAt: '2026-08-04T00:01:00.000Z',
+    },
+  };
+  const historyApp = testApp({
+    listGroups: async (userId) => {
+      assert.equal(userId, 'local-user');
+      return [group];
+    },
+    runtime: {
+      ...unusedRuntime,
+      observe: () => ({
+        status: async () => ({
+          status: 'completed',
+          startedAt: Date.parse(group.createdAt),
+          finishedAt: Date.parse(group.lastMessage.sentAt),
+          error: null,
+        }),
+        cancel: async () => {},
+        resume: async () => null,
+      }),
+      transcript: async () => ({
+        messages: [
+          {
+            id: 'message-1',
+            sequence: 1,
+            author: group.lastMessage.author,
+            content: group.lastMessage.content,
+            sentAt: group.lastMessage.sentAt,
+            replyToMessageId: null,
+            annotations: [],
+          },
+        ],
+        participants: [{ name: 'Maya' }],
+      }),
+    },
+  });
+
+  const response = await historyApp.request('/api/zukhruf/v1/history');
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), [
+    {
+      chatId: group.id,
+      userId: 'local-user',
+      title: group.name,
+      createdAt: Date.parse(group.createdAt),
+      updatedAt: Date.parse(group.lastMessage.sentAt),
+      messageCount: 1,
+      status: 'completed',
+    },
+  ]);
+});
+
 test('passkey registration requires only a name', async () => {
   await using authentication = await createAuthentication({
     databasePath: ':memory:',

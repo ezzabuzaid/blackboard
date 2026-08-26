@@ -1,7 +1,7 @@
 {
   "name": "genui-input",
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
-  "sourceRoot": "packages/genui/input/src",
+  "sourceRoot": "packages/input/src",
   "projectType": "library",
   "tags": ["scope:app"],
   "// targets": "to see all targets run: nx show project genui-input --web",
