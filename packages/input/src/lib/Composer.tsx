@@ -1,6 +1,6 @@
+import { Button } from '@base-ui/react/button';
 import type { JSONContent } from '@tiptap/core';
 import { type Editor, EditorContent, useEditor } from '@tiptap/react';
-import { Slot } from 'radix-ui';
 import {
   type ComponentPropsWithoutRef,
   type MouseEvent,
@@ -118,9 +118,7 @@ export type ComposerShortcutsProps = ComponentPropsWithoutRef<'div'>;
 
 export type ComposerFooterProps = ComponentPropsWithoutRef<'div'>;
 
-type ComposerActionTriggerProps = ComponentPropsWithoutRef<'button'> & {
-  asChild?: boolean;
-};
+type ComposerActionTriggerProps = Button.Props;
 
 export type ComposerAttachLocalImageProps = ComposerActionTriggerProps & {
   path?: string;
@@ -2106,16 +2104,12 @@ function ComposerFooter({ className, ...props }: ComposerFooterProps) {
 }
 
 function ComposerAttachLocalImage({
-  asChild = false,
   path,
-  onClick,
   ...props
 }: ComposerAttachLocalImageProps) {
   const { actions } = useComposerContext('Composer.AttachLocalImage');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
-      onClick={onClick}
       action={() => actions.attachLocalImage(path)}
       {...props}
     />
@@ -2123,33 +2117,22 @@ function ComposerAttachLocalImage({
 }
 
 function ComposerAddRemoteImage({
-  asChild = false,
   url,
-  onClick,
   ...props
 }: ComposerAddRemoteImageProps) {
   const { actions } = useComposerContext('Composer.AddRemoteImage');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
-      onClick={onClick}
       action={() => actions.addRemoteImage(url)}
       {...props}
     />
   );
 }
 
-function ComposerInsertPaste({
-  asChild = false,
-  content,
-  onClick,
-  ...props
-}: ComposerInsertPasteProps) {
+function ComposerInsertPaste({ content, ...props }: ComposerInsertPasteProps) {
   const { actions } = useComposerContext('Composer.InsertPaste');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
-      onClick={onClick}
       action={() => actions.insertPaste(content)}
       {...props}
     />
@@ -2157,81 +2140,44 @@ function ComposerInsertPaste({
 }
 
 function ComposerInsertRichLink({
-  asChild = false,
   href,
   label,
   metadata,
-  onClick,
   ...props
 }: ComposerInsertRichLinkProps) {
   const { actions } = useComposerContext('Composer.InsertRichLink');
   return (
     <ComposerTiptapActionTrigger
-      asChild={asChild}
-      onClick={onClick}
       action={() => actions.insertRichLink(href, label, metadata)}
       {...props}
     />
   );
 }
 
-function ComposerSubmit({
-  asChild = false,
-  onClick,
-  ...props
-}: ComposerSubmitProps) {
+function ComposerSubmit(props: ComposerSubmitProps) {
   const { actions } = useComposerContext('Composer.Submit');
-  return (
-    <ComposerTiptapActionTrigger
-      asChild={asChild}
-      onClick={onClick}
-      action={actions.submit}
-      {...props}
-    />
-  );
+  return <ComposerTiptapActionTrigger action={actions.submit} {...props} />;
 }
 
-function ComposerReset({
-  asChild = false,
-  onClick,
-  ...props
-}: ComposerResetProps) {
+function ComposerReset(props: ComposerResetProps) {
   const { actions } = useComposerContext('Composer.Reset');
-  return (
-    <ComposerTiptapActionTrigger
-      asChild={asChild}
-      onClick={onClick}
-      action={actions.reset}
-      {...props}
-    />
-  );
+  return <ComposerTiptapActionTrigger action={actions.reset} {...props} />;
 }
 
 function ComposerTiptapActionTrigger({
-  asChild,
   action,
   onClick,
   disabled,
-  type = 'button',
   ...props
 }: ComposerActionTriggerProps & { action: () => void }) {
   const { disabled: rootDisabled } = useComposerContext(
     'Composer.ActionTrigger',
   );
-  const Comp = asChild ? Slot.Root : 'button';
-  const actionDisabled = rootDisabled || Boolean(disabled);
   return (
-    <Comp
+    <Button
       {...props}
-      aria-disabled={asChild && actionDisabled ? true : props['aria-disabled']}
-      data-disabled={actionDisabled ? '' : undefined}
-      disabled={asChild ? undefined : actionDisabled}
-      type={asChild ? undefined : type}
-      onClick={(event: MouseEvent<HTMLButtonElement>) => {
-        if (actionDisabled) {
-          event.preventDefault();
-          return;
-        }
+      disabled={rootDisabled || disabled}
+      onClick={(event) => {
         onClick?.(event);
         if (!event.defaultPrevented) {
           action();

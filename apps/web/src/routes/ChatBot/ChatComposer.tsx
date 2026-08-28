@@ -280,17 +280,18 @@ function SendButton() {
   const sendDisabled = meta.disabled || (empty && annotations.length === 0)
 
   return (
-    <Composer.Submit asChild disabled={sendDisabled}>
-      <InputGroupButton
-        type="button"
-        variant="default"
-        size="icon-sm"
-        disabled={sendDisabled}
-        aria-label={posting ? "Sending" : "Send"}
-        className="size-10 rounded-full"
-      >
-        <SendIcon aria-hidden="true" />
-      </InputGroupButton>
+    <Composer.Submit
+      disabled={sendDisabled}
+      render={
+        <InputGroupButton
+          variant="default"
+          size="icon-sm"
+          aria-label={posting ? "Sending" : "Send"}
+          className="size-10 rounded-full"
+        />
+      }
+    >
+      <SendIcon aria-hidden="true" />
     </Composer.Submit>
   )
 }

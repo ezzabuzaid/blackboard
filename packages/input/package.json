@@ -28,6 +28,7 @@
   },
   "devDependencies": {},
   "dependencies": {
+    "@base-ui/react": "^1.6.0",
     "@stdlib/shadcn": "*",
     "@tiptap/core": "^3.27.1",
     "@tiptap/extension-link": "^3.27.1",
@@ -36,7 +37,6 @@
     "@tiptap/starter-kit": "^3.27.1",
     "lodash-es": "^4.17.21",
     "lucide-react": "^1.31.0",
-    "radix-ui": "^1.4.3",
     "react": "^19.2.8"
   }
 }

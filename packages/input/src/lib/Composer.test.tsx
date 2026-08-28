@@ -364,16 +364,19 @@ function RichCompoundActionScenario() {
           <Composer.Editor />
         </Composer.Content>
         <Composer.Submit
-          asChild
           onClick={(event) => {
             event.preventDefault();
             setLastClick('blocked');
           }}
+          render={<button type="button" />}
         >
-          <button type="button">Blocked rich child submit</button>
+          Blocked rich child submit
         </Composer.Submit>
-        <Composer.Submit asChild onClick={() => setLastClick('allowed')}>
-          <button type="button">Allowed rich child submit</button>
+        <Composer.Submit
+          onClick={() => setLastClick('allowed')}
+          render={<button type="button" />}
+        >
+          Allowed rich child submit
         </Composer.Submit>
       </Composer.Root>
       <p>Last rich child click: {lastClick}</p>
@@ -406,8 +409,8 @@ function RichDisabledAnchorActionScenario() {
         <Composer.Content>
           <Composer.Editor />
         </Composer.Content>
-        <Composer.Submit asChild>
-          <a href="/submit">Disabled rich anchor submit</a>
+        <Composer.Submit nativeButton={false} render={<a href="/submit" />}>
+          Disabled rich anchor submit
         </Composer.Submit>
       </Composer.Root>
       <SubmissionLog submissions={submissions} />
@@ -606,7 +609,7 @@ describe('Composer compound API', () => {
     ).toBeInTheDocument();
   });
 
-  it('supports asChild action triggers while honoring prevented child clicks', async () => {
+  it('supports render action triggers while honoring prevented clicks', async () => {
     const user = userEvent.setup();
     render(<RichCompoundActionScenario />);
 
@@ -633,11 +636,11 @@ describe('Composer compound API', () => {
     ).toHaveTextContent('Text: compound prompt');
   });
 
-  it('marks disabled asChild actions without leaking native disabled onto non-buttons', async () => {
+  it('marks disabled non-native render actions without leaking native disabled', async () => {
     const user = userEvent.setup();
     render(<RichDisabledAnchorActionScenario />);
 
-    const submit = screen.getByRole('link', {
+    const submit = screen.getByRole('button', {
       name: /disabled rich anchor submit/i,
     });
 
