@@ -1,5 +1,4 @@
-import { createHash, randomUUID } from "node:crypto"
-import { mkdirSync } from "node:fs"
+import { randomUUID } from "node:crypto"
 
 import {
   type AgentModel,
@@ -9,22 +8,15 @@ import {
 } from "@deepagents/context"
 import {
   type AgentDeclaration,
+  type AgentHost,
   AgentRuntime,
   type ConversationId,
   type MailboxStore,
   MessageDeliveryMode,
-  PgBossTurnQueue,
   createInterAgentCommunication,
   defineAgent,
 } from "@deepagents/experimental/zukhruf"
-import {
-  PgBossWakeScheduler,
-  type SchedulingWake,
-  conversationSchedulingCapabilities,
-} from "@deepagents/experimental/zukhruf/conversation-scheduling"
-import { PGlite } from "@electric-sql/pglite"
 import type { ToolSet } from "ai"
-import { PgBoss, fromPglite } from "pg-boss"
 
 import { baseeraGroupChatAgent } from "../agent/group-chat-agent.js"
 import {
@@ -33,16 +25,7 @@ import {
   groupChatCapabilities,
 } from "../agent/plugins/group-chat.js"
 import { recordAgentExecutionModel } from "./agent-executions.js"
-
-/** Queue names must be stable per participant identity: with a durable queue database, drifting names would hand one participant another's pending turns and wakes. */
-function queueSlug(name: string) {
-  const base = name
-    .toLocaleLowerCase("en")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-  const digest = createHash("sha256").update(name).digest("hex").slice(0, 8)
-  return base ? `${base}-${digest}` : digest
-}
+import { createGroupQueue, createStack } from "./stack.js"
 
 export interface WhatsAppParticipant {
   name: string
@@ -199,7 +182,7 @@ interface RunningParticipant {
   name: string
   modelId: string
   conversation: ConversationId
-  runtime: AgentRuntime
+  runtime: AgentHost
   active: boolean
   seenThroughSequence: number
   pendingReminder?: string
@@ -301,35 +284,30 @@ export class WhatsAppGroup implements AsyncDisposable {
     WhatsAppGroup.#validate(options)
 
     await using resources = new AsyncDisposableStack()
-    if (options.queuePath) mkdirSync(options.queuePath, { recursive: true })
-    const database = new PGlite(options.queuePath)
-    resources.defer(() => database.close())
-    const boss = new PgBoss({ db: fromPglite(database), backend: "pglite" })
-    boss.on("error", (error) => console.error("[queue error]", error))
-    resources.defer(() => boss.stop({ close: false, graceful: true }))
+    const boss = await createGroupQueue(resources, options.queuePath)
     const participants: RunningParticipant[] = []
 
-    await boss.start()
     const disposables = resources.move()
     try {
       const startParticipant: StartParticipant = async (
         participant,
         joining,
       ) => {
-        const participantSlug = queueSlug(participant.name)
-        const queue = new PgBossTurnQueue(boss, {
-          queue: `zukhruf-whatsapp-${participantSlug}`,
-          schema: "pgboss",
-          pollingIntervalSeconds: 0.5,
+        const stack = createStack(boss, participant.name, {
+          store: options.store,
+          streams: options.streams,
+          mailboxStore: options.mailboxStore,
+          bindings: [
+            groupChatCapabilities.primaryParticipantName.bind(
+              options.participants[0]!.name,
+            ),
+            groupChatCapabilities.publishReply.bind((...reply) =>
+              group.#postParticipant(...reply),
+            ),
+          ],
         })
-        await queue.initialize()
-        const wakes = new PgBossWakeScheduler<SchedulingWake>(boss, {
-          queue: `zukhruf-whatsapp-wakes-${participantSlug}`,
-          pollingIntervalSeconds: 0.5,
-        })
-        await wakes.initialize()
 
-        const runtime = new AgentRuntime(
+        const participantRuntime = new AgentRuntime(
           defineAgent({
             name: participant.name,
             model: participant.model,
@@ -339,24 +317,9 @@ export class WhatsAppGroup implements AsyncDisposable {
             tools: participant.tools,
             ...baseeraGroupChatAgent,
           }),
-          {
-            store: options.store,
-            streams: options.streams,
-            queue,
-            mailboxStore: options.mailboxStore,
-            bindings: [
-              groupChatCapabilities.primaryParticipantName.bind(
-                options.participants[0]!.name,
-              ),
-              groupChatCapabilities.publishReply.bind((...reply) =>
-                group.#postParticipant(...reply),
-              ),
-              conversationSchedulingCapabilities.scheduler.bind(wakes),
-              conversationSchedulingCapabilities.timezone.bind(
-                Intl.DateTimeFormat().resolvedOptions().timeZone,
-              ),
-            ],
-          },
+        )
+        const runtime = disposables.use(
+          await participantRuntime.initialize(stack),
         )
 
         const running = {
@@ -376,7 +339,7 @@ export class WhatsAppGroup implements AsyncDisposable {
               ? "Before deciding whether to reply to the first human message, use bash to list all participant directories under /workspace/participants. If your own directory is the only participant directory, the human is speaking directly to you even when they do not name you."
               : undefined,
         }
-        disposables.use(await runtime.work())
+        await runtime.work()
         return running
       }
 
