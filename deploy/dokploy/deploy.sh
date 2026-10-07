@@ -149,6 +149,8 @@ else
     --exclude .git \
     --exclude .nx \
     --exclude .data \
+    --exclude .evlog \
+    --exclude .sdk-it \
     --exclude '.env*' \
     --exclude dist \
     --exclude node_modules \
@@ -166,6 +168,8 @@ else
     --exclude .git \
     --exclude .nx \
     --exclude .data \
+    --exclude .evlog \
+    --exclude .sdk-it \
     --exclude '.env*' \
     --exclude dist \
     --exclude node_modules \

@@ -6,3 +6,7 @@ node_modules
 **/dist
 **/node_modules
 *.log
+
+.sdk-it
+**/.evlog
+**/*.tsbuildinfo
