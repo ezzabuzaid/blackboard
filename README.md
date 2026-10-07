@@ -174,7 +174,8 @@ in on the server once before running `deploy/dokploy/deploy.sh`:
 ```bash
 docker volume create baseera-codex
 docker run --rm -it --volume baseera-codex:/root/.codex \
-  node:24-bookworm-slim npx --yes @openai/codex login --device-auth
+  node:24-bookworm-slim sh -c \
+  'apt-get update -qq && apt-get install -y -qq ca-certificates && npx --yes @openai/codex login --device-auth'
 ```
 
 The app mounts that volume at its Codex login directory with write access for

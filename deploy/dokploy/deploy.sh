@@ -208,6 +208,18 @@ ssh "$ssh_host" "docker exec '$smoke_container' node --input-type=module --eval 
   || fail "remote app smoke test failed"
 ssh "$ssh_host" "docker exec '$smoke_container' node --input-type=module --eval 'const { GroupSandboxes } = await import(\"./apps/api/dist/sandbox.js\"); await using sandboxes = new GroupSandboxes({ dataDirectory: \"/data/smoke\", mountsFor: () => [] }); const conversation = { chatId: \"smoke\", userId: \"deploy\" }; const active = await sandboxes.sandboxFor(conversation)(conversation); const result = await active.sandbox.executeCommand(\"printf ok > /workspace/output/probe.txt\"); const artifact = await sandboxes.openArtifact(conversation, \"probe.txt\"); await sandboxes.remove(conversation); if (result.exitCode !== 0 || artifact?.body.toString() !== \"ok\") process.exit(1)'" >/dev/null \
   || fail "remote sandbox smoke test failed"
+ssh "$ssh_host" "docker exec -i '$smoke_container' node --input-type=module" <<'JS'
+import { generateText } from 'ai';
+import { createParticipantDefaults } from './apps/api/dist/participant-defaults.js';
+const { model } = createParticipantDefaults({ modelId: process.env.CODEX_MODEL });
+const result = await generateText({
+  model,
+  prompt: 'Reply with exactly BASEERA_OK.',
+  abortSignal: AbortSignal.timeout(120_000),
+});
+if (result.text.trim() !== 'BASEERA_OK') throw new Error('Codex model smoke test failed');
+console.log('✓ server Codex subscription model smoke test');
+JS
 ssh "$ssh_host" docker rm -f "$smoke_container" >/dev/null
 smoke_container=
 ssh "$ssh_host" docker rm -f "$smoke_runner" >/dev/null
