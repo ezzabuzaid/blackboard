@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
-import { rmSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -127,6 +127,20 @@ function durableRuntime(
 
 const unusedRuntime: ChatRuntime = {
   info: { root: 'test', agents: [] },
+  plugin() {
+    throw new Error('Unexpected plugin');
+  },
+  async subscribeConversationStatus() {
+    return {
+      async *[Symbol.asyncIterator]() {},
+    };
+  },
+  async conversationStatus() {
+    throw new Error('Unexpected conversation status lookup');
+  },
+  async messageCount() {
+    throw new Error('Unexpected message count lookup');
+  },
   async createSession() {
     throw new Error('Unexpected session creation');
   },
@@ -323,30 +337,8 @@ test('session history is derived from the authenticated user groups', async () =
     },
     runtime: {
       ...unusedRuntime,
-      observe: () => ({
-        status: async () => ({
-          status: 'completed',
-          startedAt: Date.parse(group.createdAt),
-          finishedAt: Date.parse(group.lastMessage.sentAt),
-          error: null,
-        }),
-        cancel: async () => {},
-        resume: async () => null,
-      }),
-      transcript: async () => ({
-        messages: [
-          {
-            id: 'message-1',
-            sequence: 1,
-            author: group.lastMessage.author,
-            content: group.lastMessage.content,
-            sentAt: group.lastMessage.sentAt,
-            replyToMessageId: null,
-            annotations: [],
-          },
-        ],
-        participants: [{ name: 'Maya' }],
-      }),
+      conversationStatus: async () => ({ type: 'idle' }),
+      messageCount: async () => 1,
     },
   });
 
@@ -361,9 +353,112 @@ test('session history is derived from the authenticated user groups', async () =
       createdAt: Date.parse(group.createdAt),
       updatedAt: Date.parse(group.lastMessage.sentAt),
       messageCount: 1,
-      status: 'completed',
+      status: { type: 'idle' },
     },
   ]);
+});
+
+test('history does not initialize an unopened group runtime', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-history-'));
+  const queueDirectory = join(directory, 'queues');
+  let participantLoads = 0;
+  await using runtime = new WhatsAppChatRuntime({
+    loadParticipants: async () => {
+      participantLoads++;
+      return [];
+    },
+    limits: testGroupLimits,
+    sandboxForChat: () => testGroupSandbox,
+    databasePath: join(directory, 'group.sqlite'),
+    mailboxPath: join(directory, 'mailbox.sqlite'),
+    queueDirectory,
+  });
+  const group = testGroupRecord('unopened-group', 'Unopened group', []);
+  const app = testApp({ listGroups: async () => [group], runtime });
+
+  const response = await app.request('/api/zukhruf/v1/history');
+
+  assert.equal(response.status, 200);
+  assert.equal(participantLoads, 0);
+  assert.equal(
+    existsSync(join(queueDirectory, encodeURIComponent(group.id))),
+    false,
+  );
+  assert.deepEqual(await response.json(), [
+    {
+      chatId: group.id,
+      userId: 'local-user',
+      title: group.name,
+      createdAt: Date.parse(group.createdAt),
+      updatedAt: Date.parse(group.createdAt),
+      messageCount: 0,
+      status: { type: 'idle' },
+    },
+  ]);
+});
+
+test('Zukhruf events do not expose another owner conversation status', async () => {
+  const app = testApp({
+    runtime: {
+      ...unusedRuntime,
+      async subscribeConversationStatus() {
+        return {
+          async *[Symbol.asyncIterator]() {
+            yield {
+              type: 'change' as const,
+              conversation: { chatId: 'other-chat', userId: 'other-user' },
+              status: { type: 'active' as const, activeFlags: [] },
+            };
+            yield {
+              type: 'change' as const,
+              conversation: { chatId: 'local-chat', userId: 'local-user' },
+              status: { type: 'idle' as const },
+            };
+          },
+        };
+      },
+    },
+  });
+
+  const response = await app.request('/api/zukhruf/v1/events');
+  assert.equal(response.status, 200);
+  const events = await response.text();
+  assert.match(events, /\"type\":\"ready\"/);
+  assert.match(events, /\"id\":\"local-chat\"/);
+  assert.doesNotMatch(events, /other-chat|other-user/);
+});
+
+test('Zukhruf session reads project the group transcript', async () => {
+  const sessionId = '00000000-0000-4000-8000-000000000001';
+  const message = {
+    id: 'message-1',
+    sequence: 1,
+    author: 'user',
+    content: 'Hello',
+    sentAt: '2026-08-28T00:00:00.000Z',
+    replyToMessageId: null,
+    annotations: [],
+  };
+  const response = await testApp({
+    runtime: {
+      ...unusedRuntime,
+      sessionExists: async () => true,
+      transcript: async () => ({ messages: [message], participants: [] }),
+    },
+  }).request(`/api/zukhruf/v1/session/${sessionId}`);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {
+    sessionId,
+    messages: [
+      {
+        id: message.id,
+        role: 'user',
+        parts: [{ type: 'text', text: message.content }],
+        metadata: { whatsapp: message },
+      },
+    ],
+  });
 });
 
 test('passkey registration requires only a name', async () => {
@@ -419,7 +514,7 @@ test('passkey registration requires only a name', async () => {
 test('participant defaults use the configured OpenRouter key', () => {
   const defaults = createParticipantDefaults({ apiKey: 'openrouter-key-1' });
   assert.equal(defaults.model.provider, 'openrouter');
-  assert.equal(defaults.model.modelId, 'stealth/ox-alpha');
+  assert.equal(defaults.model.modelId, 'openai/gpt-5.6-luna');
   assert.equal(defaults.tools.web_search?.type, 'provider');
 });
 
@@ -1591,6 +1686,72 @@ test('chat runtime reports new messages to the group summary sink', async () => 
   ]);
 });
 
+test('chat runtime publishes owner-scoped status changes and closes aborted subscriptions', async () => {
+  await using runtime = memoryRuntime([
+    {
+      name: 'Maya',
+      model: new MockLanguageModelV4({
+        doStream: groupTextResponse('Nothing to add.'),
+      }),
+    },
+  ]);
+  const abort = new AbortController();
+  const events = await runtime.subscribeConversationStatus(abort.signal);
+  const iterator = events[Symbol.asyncIterator]();
+  const changed = iterator.next();
+
+  await runtime.post(testGroupConversation, { id: 'status-1', content: 'Hello' });
+
+  assert.deepEqual(await changed, {
+    done: false,
+    value: {
+      type: 'change',
+      conversation: testGroupConversation,
+      status: { type: 'active', activeFlags: [] },
+    },
+  });
+  abort.abort();
+  assert.equal((await iterator.next()).done, true);
+
+  const stopAbort = new AbortController();
+  const stoppedEvents = await runtime.subscribeConversationStatus(stopAbort.signal);
+  const stoppedIterator = stoppedEvents[Symbol.asyncIterator]();
+  await runtime.stop(testGroupConversation);
+  let stopped: IteratorResult<unknown>;
+  do {
+    stopped = await stoppedIterator.next();
+  } while (
+    !stopped.done &&
+    (stopped.value as { status: { type: string } }).status.type !== 'idle'
+  );
+  assert.deepEqual(stopped, {
+    done: false,
+    value: {
+      type: 'change',
+      conversation: testGroupConversation,
+      status: { type: 'idle' },
+    },
+  });
+  assert.deepEqual(await runtime.conversationStatus(testGroupConversation), {
+    type: 'idle',
+  });
+  stopAbort.abort();
+
+  const alreadyAborted = new AbortController();
+  alreadyAborted.abort();
+  const closed = await runtime.subscribeConversationStatus(alreadyAborted.signal);
+  assert.equal((await closed[Symbol.asyncIterator]().next()).done, true);
+
+  const disposable = memoryRuntime([]);
+  const disposing = await disposable.subscribeConversationStatus(
+    new AbortController().signal,
+  );
+  const disposalIterator = disposing[Symbol.asyncIterator]();
+  const pending = disposalIterator.next();
+  await disposable[Symbol.asyncDispose]();
+  assert.equal((await pending).done, true);
+});
+
 test('chat runtime rebuilds message projections from the durable log', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'zukhruf-projection-'));
   const conversation = { chatId: 'projection-chat', userId: 'local-user' };
@@ -1769,7 +1930,7 @@ test('a chat stops instead of freezing when the pump throws', async () => {
   assert.equal(snapshot.activity.stopReason, 'interrupted');
 });
 
-test('Microsandbox shares group work and isolates chats and users', async (t) => {
+test('Docker shares group work and isolates chats and users', async (t) => {
   const directory = await mkdtemp(join(tmpdir(), 'whatsapp-sandbox-'));
   const firstChat = { chatId: 'chat-1', userId: 'local-user' };
   const secondChat = { chatId: 'chat-2', userId: 'local-user' };
@@ -1814,7 +1975,7 @@ test('Microsandbox shares group work and isolates chats and users', async (t) =>
     if (failures.length) {
       throw new AggregateError(
         failures.map(({ reason }) => reason),
-        'Microsandbox cleanup failed',
+        'Docker cleanup failed',
       );
     }
   });
@@ -2621,12 +2782,21 @@ test('each group member uses its own telemetry', async () => {
           }),
           telemetry: {
             functionId: 'parent-chat:first',
-            integrations: {
-              onStart(event) {
-                firstStarts.push(event);
+          },
+          plugins: [
+            {
+              name: 'first-telemetry',
+              create() {
+                return {
+                  telemetry: () => ({
+                    onStart(event) {
+                      firstStarts.push(event);
+                    },
+                  }),
+                };
               },
             },
-          },
+          ],
         },
         {
           name: 'second',
@@ -2635,12 +2805,21 @@ test('each group member uses its own telemetry', async () => {
           }),
           telemetry: {
             functionId: 'parent-chat:second',
-            integrations: {
-              onStart(event) {
-                secondStarts.push(event);
+          },
+          plugins: [
+            {
+              name: 'second-telemetry',
+              create() {
+                return {
+                  telemetry: () => ({
+                    onStart(event) {
+                      secondStarts.push(event);
+                    },
+                  }),
+                };
               },
             },
-          },
+          ],
         },
       ],
     }),

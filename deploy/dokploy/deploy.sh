@@ -7,21 +7,33 @@ volume_name=baseera-data
 dokploy_url=${DOKPLOY_URL:-https://dokploy.limerence.sh}
 ssh_host=${DOKPLOY_SSH_HOST:-root@167.233.88.12}
 openrouter_api_key=${OPENROUTER_API_KEY:-}
-openrouter_model=${OPENROUTER_MODEL:-stealth/ox-alpha}
+openrouter_model=${OPENROUTER_MODEL:-openai/gpt-5.6-luna}
 BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
 deploy_domain=${DEPLOY_DOMAIN:-}
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 compose_file=$root/deploy/dokploy/compose.yml
 temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/baseera-deploy.XXXXXX")
 smoke_container=
+smoke_runner=
+smoke_network=
 smoke_volume=
+smoke_runner_volume=
 
 cleanup() {
   if [[ -n $smoke_container ]]; then
     ssh "$ssh_host" docker rm -f "$smoke_container" >/dev/null 2>&1 || true
   fi
+  if [[ -n $smoke_runner ]]; then
+    ssh "$ssh_host" docker rm -f "$smoke_runner" >/dev/null 2>&1 || true
+  fi
+  if [[ -n $smoke_network ]]; then
+    ssh "$ssh_host" docker network rm "$smoke_network" >/dev/null 2>&1 || true
+  fi
   if [[ -n $smoke_volume ]]; then
     ssh "$ssh_host" docker volume rm "$smoke_volume" >/dev/null 2>&1 || true
+  fi
+  if [[ -n $smoke_runner_volume ]]; then
+    ssh "$ssh_host" docker volume rm "$smoke_runner_volume" >/dev/null 2>&1 || true
   fi
   rm -rf "$temp_dir"
 }
@@ -114,6 +126,9 @@ if [[ -n ${BASEERA_IMAGE:-} ]]; then
   deployment_id=${image#baseera:}
   ssh "$ssh_host" docker image inspect "$image" >/dev/null \
     || fail "$image does not exist on $ssh_host"
+  sandbox_image=$image-sandbox
+  ssh "$ssh_host" docker image inspect "$sandbox_image" >/dev/null \
+    || fail "$sandbox_image does not exist on $ssh_host"
   printf '✓ using remote image %s\n' "$image"
 else
   run_logged "api typecheck" npx nx run api:typecheck
@@ -124,9 +139,10 @@ else
   deployment_id=$(printf '%s-%s' \
     "$(git rev-parse --short=12 HEAD)" "$(date -u +%Y%m%d%H%M%S)")
   image=baseera:$deployment_id
+  sandbox_image=$image-sandbox
 
-  printf '→ build container on Dokploy host\n'
-  build_log=$temp_dir/remote_container_build.log
+  printf '→ build app container on Dokploy host\n'
+  build_log=$temp_dir/remote_app_build.log
   if ! tar \
     --exclude .git \
     --exclude .nx \
@@ -135,20 +151,51 @@ else
     --exclude dist \
     --exclude node_modules \
     -cf - . \
-    | ssh "$ssh_host" "docker build --file deploy/dokploy/Dockerfile --tag '$image' -" \
+    | ssh "$ssh_host" "docker build --file deploy/dokploy/Dockerfile --target app --tag '$image' -" \
       >"$build_log" 2>&1; then
     tail -n 100 "$build_log" >&2
-    fail "remote container build failed"
+    fail "remote app build failed"
   fi
-  printf '✓ build container on Dokploy host\n'
+  printf '✓ build app container on Dokploy host\n'
+
+  printf '→ build sandbox runner on Dokploy host\n'
+  build_log=$temp_dir/remote_sandbox_build.log
+  if ! tar \
+    --exclude .git \
+    --exclude .nx \
+    --exclude .data \
+    --exclude '.env*' \
+    --exclude dist \
+    --exclude node_modules \
+    -cf - . \
+    | ssh "$ssh_host" "docker build --file deploy/dokploy/Dockerfile --target sandbox-runner --tag '$sandbox_image' -" \
+      >"$build_log" 2>&1; then
+    tail -n 100 "$build_log" >&2
+    fail "remote sandbox runner build failed"
+  fi
+  printf '✓ build sandbox runner on Dokploy host\n'
 fi
 
 smoke_container=baseera-smoke-$deployment_id
+smoke_runner=$smoke_container-runner
+smoke_network=$smoke_container
 smoke_volume=baseera-smoke-$deployment_id
+smoke_runner_volume=$smoke_volume-runner
 ssh "$ssh_host" "docker volume create '$smoke_volume'" >/dev/null
+ssh "$ssh_host" "docker volume create '$smoke_runner_volume'" >/dev/null
+ssh "$ssh_host" "docker network create '$smoke_network'" >/dev/null
+ssh "$ssh_host" "docker run --detach --rm --privileged --name '$smoke_runner' --network '$smoke_network' --network-alias sandbox-runner --env DOCKER_TLS_CERTDIR= --volume '$smoke_volume:/data' --volume '$smoke_runner_volume:/var/lib/docker' '$sandbox_image' --tls=false" >/dev/null
+for _ in {1..30}; do
+  if ssh "$ssh_host" "docker exec '$smoke_runner' docker info" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+ssh "$ssh_host" "docker exec '$smoke_runner' docker info" >/dev/null \
+  || fail "sandbox runner smoke test failed"
 printf 'BETTER_AUTH_SECRET=%s\nOPENROUTER_API_KEY=%s\nOPENROUTER_MODEL=%s\n' \
   "$BETTER_AUTH_SECRET" "$openrouter_api_key" "$openrouter_model" \
-  | ssh "$ssh_host" "docker run --detach --rm --name '$smoke_container' --env-file /dev/stdin --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' '$image'" >/dev/null
+  | ssh "$ssh_host" "docker run --detach --rm --name '$smoke_container' --network '$smoke_network' --env-file /dev/stdin --env DOCKER_HOST=tcp://sandbox-runner:2375 --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' '$image'" >/dev/null
 for _ in {1..30}; do
   if ssh "$ssh_host" "docker exec '$smoke_container' node --input-type=module --eval 'const [health, html] = await Promise.all([fetch(\"http://127.0.0.1:3001/api/health\"), fetch(\"http://127.0.0.1:3001/\")]); if (!health.ok || !(await html.text()).includes(\"<div id=\\\"root\\\"></div>\")) process.exit(1)'" >/dev/null 2>&1; then
     break
@@ -157,11 +204,19 @@ for _ in {1..30}; do
 done
 ssh "$ssh_host" "docker exec '$smoke_container' node --input-type=module --eval 'const [health, html] = await Promise.all([fetch(\"http://127.0.0.1:3001/api/health\"), fetch(\"http://127.0.0.1:3001/\")]); if (!health.ok || !(await html.text()).includes(\"<div id=\\\"root\\\"></div>\")) process.exit(1)'" >/dev/null \
   || fail "remote app smoke test failed"
+ssh "$ssh_host" "docker exec '$smoke_container' node --input-type=module --eval 'const { GroupSandboxes } = await import(\"./apps/api/dist/sandbox.js\"); await using sandboxes = new GroupSandboxes({ dataDirectory: \"/data/smoke\", mountsFor: () => [] }); const conversation = { chatId: \"smoke\", userId: \"deploy\" }; const active = await sandboxes.sandboxFor(conversation)(conversation); const result = await active.sandbox.executeCommand(\"printf ok > /workspace/output/probe.txt\"); const artifact = await sandboxes.openArtifact(conversation, \"probe.txt\"); await sandboxes.remove(conversation); if (result.exitCode !== 0 || artifact?.body.toString() !== \"ok\") process.exit(1)'" >/dev/null \
+  || fail "remote sandbox smoke test failed"
 ssh "$ssh_host" docker rm -f "$smoke_container" >/dev/null
 smoke_container=
+ssh "$ssh_host" docker rm -f "$smoke_runner" >/dev/null
+smoke_runner=
+ssh "$ssh_host" docker network rm "$smoke_network" >/dev/null
+smoke_network=
 ssh "$ssh_host" docker volume rm "$smoke_volume" >/dev/null
 smoke_volume=
-printf '✓ remote app smoke test\n'
+ssh "$ssh_host" docker volume rm "$smoke_runner_volume" >/dev/null
+smoke_runner_volume=
+printf '✓ remote app and sandbox smoke test\n'
 
 ssh "$ssh_host" "docker volume create '$volume_name'" >/dev/null
 
@@ -213,8 +268,8 @@ if [[ -z $deploy_domain ]]; then
   fi
 fi
 web_origin=https://$deploy_domain
-compose_env=$(printf 'DEPLOY_IMAGE=%s\nWEB_ORIGIN=%s\nOPENROUTER_API_KEY=%s\nOPENROUTER_MODEL=%s\nBETTER_AUTH_SECRET=%s\n' \
-  "$image" "$web_origin" "$openrouter_api_key" "$openrouter_model" "$BETTER_AUTH_SECRET")
+compose_env=$(printf 'DEPLOY_IMAGE=%s\nSANDBOX_IMAGE=%s\nWEB_ORIGIN=%s\nOPENROUTER_API_KEY=%s\nOPENROUTER_MODEL=%s\nBETTER_AUTH_SECRET=%s\n' \
+  "$image" "$sandbox_image" "$web_origin" "$openrouter_api_key" "$openrouter_model" "$BETTER_AUTH_SECRET")
 dokploy_post compose.saveEnvironment "$(jq -cn \
   --arg composeId "$compose_id" \
   --arg env "$compose_env" \

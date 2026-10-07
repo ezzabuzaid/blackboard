@@ -1,10 +1,10 @@
 import type { DrainContext } from "evlog"
 import { evlog, useLogger } from "evlog/hono"
+import { type ConversationId } from "@deepagents/experimental/zukhruf"
 import {
-  ZUKHRUF_ROUTE_PREFIX,
-  zukhruf,
-  type ConversationId,
-} from "@deepagents/experimental/zukhruf"
+  type HttpRuntime,
+  http,
+} from "@deepagents/experimental/zukhruf/http"
 import type { User } from "better-auth"
 import { Hono } from "hono"
 import { cors } from "hono/cors"
@@ -16,6 +16,7 @@ import type { GroupShareStore } from "./group/share-store.js"
 import type { AgentTemplate } from "./group/participants/agent-catalog.js"
 import type { OpenArtifact } from "./routes/chat.route.js"
 import type { TranscriptionAudio } from "./transcription.js"
+import { ZUKHRUF_HTTP_PATH } from "./zukhruf-http.js"
 
 const configuredOrigin = process.env.WEB_ORIGIN
 const routes = await Promise.all([
@@ -71,12 +72,16 @@ export interface AppDependencies {
   runtime: Pick<
     WhatsAppChatRuntime,
     | "clear"
+    | "conversationStatus"
     | "createSession"
     | "enqueue"
     | "info"
+    | "messageCount"
     | "observe"
+    | "plugin"
     | "post"
     | "sessionExists"
+    | "subscribeConversationStatus"
     | "snapshot"
     | "stop"
     | "traces"
@@ -103,7 +108,7 @@ function ownedSessionsOnly({
   groupOwner,
   groupDeleting,
   listGroups,
-}: AppDependencies): Parameters<typeof zukhruf>[0] {
+}: AppDependencies): HttpRuntime {
   const reachable = ({ chatId, userId }: ConversationId) => {
     if (groupDeleting(chatId)) return false
     const owner = groupOwner(chatId)
@@ -114,16 +119,15 @@ function ownedSessionsOnly({
     info: runtime.info,
     createSession: (conversation) => runtime.createSession(conversation),
     enqueue: (conversation, turn) => runtime.enqueue(conversation, turn),
+    plugin: (definition) => runtime.plugin(definition),
     listHistory: async (userId) => {
-      if (userId === undefined) {
-        throw new Error("Authenticated user required for session history")
-      }
+      if (!userId) return []
       return Promise.all(
         (await listGroups(userId)).map(async (group) => {
           const conversation = { chatId: group.id, userId }
-          const [status, transcript] = await Promise.all([
-            runtime.observe(conversation).status(),
-            runtime.transcript(conversation),
+          const [status, messageCount] = await Promise.all([
+            runtime.conversationStatus(conversation),
+            runtime.messageCount(conversation),
           ])
           return {
             chatId: group.id,
@@ -131,22 +135,40 @@ function ownedSessionsOnly({
             title: group.name,
             createdAt: Date.parse(group.createdAt),
             updatedAt: Date.parse(group.lastMessage?.sentAt ?? group.createdAt),
-            messageCount: transcript.messages.length,
-            status: status?.status ?? "idle",
+            messageCount,
+            status,
           }
         }),
       )
     },
     sessionExists: async (conversation) =>
       reachable(conversation) && (await runtime.sessionExists(conversation)),
-    observe: (conversation) =>
-      reachable(conversation)
+    subscribeConversationStatus: (signal) =>
+      runtime.subscribeConversationStatus(signal),
+    observe: (conversation) => {
+      const observation = reachable(conversation)
         ? runtime.observe(conversation)
         : {
             status: async () => undefined,
             cancel: async () => {},
             resume: async () => null,
+          }
+      return {
+        ...observation,
+        engine: {
+          getMessages: async () => {
+            if (!reachable(conversation)) return []
+            const { messages } = await runtime.transcript(conversation)
+            return messages.map((message) => ({
+              id: message.id,
+              role: message.author === "user" ? "user" : "assistant",
+              parts: [{ type: "text", text: message.content }],
+              metadata: { whatsapp: message },
+            }))
           },
+        },
+      }
+    },
   }
 }
 
@@ -196,13 +218,13 @@ export function createApp(dependencies: AppDependencies) {
     await next()
   })
 
-  const zukhrufPath = `/api${ZUKHRUF_ROUTE_PREFIX}` as const
+  const zukhrufPath = `/api${ZUKHRUF_HTTP_PATH}` as const
   app.use(`${zukhrufPath}/*`, async (context, next) => {
     const session = await dependencies.auth.getSession(context.req.raw.headers)
     if (session) context.set("userId", session.user.id)
     await next()
   })
-  app.route(zukhrufPath, zukhruf(ownedSessionsOnly(dependencies)))
+  app.route(zukhrufPath, http(ownedSessionsOnly(dependencies)))
 
   for (const route of routes) {
     route.default(app.basePath("/api"))

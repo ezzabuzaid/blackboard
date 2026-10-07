@@ -1,7 +1,4 @@
-import {
-  type ConversationId,
-  ZUKHRUF_SESSION_STREAM_ROUTE_PATH,
-} from '@deepagents/experimental/zukhruf';
+import { type ConversationId } from '@deepagents/experimental/zukhruf';
 import { validate } from '@sdk-it/hono/runtime';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -16,6 +13,7 @@ import {
   WhatsAppReplyTargetError,
 } from '../group/whatsapp.js';
 import type { TranscriptionAudio } from '../transcription.js';
+import { zukhrufSessionStreamPath } from '../zukhruf-http.js';
 
 export type OpenArtifact = (
   conversation: ConversationId,
@@ -76,10 +74,7 @@ export default function (router: Hono<AppEnv>) {
 
       return context.json({
         ...(await context.var.dependencies.runtime.snapshot(conversation)),
-        streamPath: ZUKHRUF_SESSION_STREAM_ROUTE_PATH.replace(
-          ':sessionId',
-          encodeURIComponent(conversation.chatId),
-        ),
+        streamPath: zukhrufSessionStreamPath(conversation.chatId),
       });
     },
   );

@@ -4,16 +4,18 @@ import { isAbsolute, relative, resolve } from 'node:path';
 
 import {
   type DisposableSandbox,
-  createMicrosandboxSandbox,
+  createDockerSandbox,
 } from '@deepagents/context';
 import {
   type AgentDeclaration,
   type ConversationId,
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
-import { NetworkPolicy, Sandbox, SandboxNotFoundError } from 'microsandbox';
 
 import type { ParticipantMount } from './group/participants/index.js';
+
+const COMMAND_TIMEOUT_MS = 300_000;
+const SANDBOX_IMAGE = 'node:24-bookworm-slim';
 
 interface GroupSandboxesOptions {
   dataDirectory: string;
@@ -65,14 +67,27 @@ export class GroupSandboxes implements AsyncDisposable {
 
   async remove(conversation: ConversationId): Promise<void> {
     const name = sandboxName(conversation);
+    const root = this.#root(conversation);
     const entry = this.#sandboxes.get(name);
     this.#sandboxes.delete(name);
-    await entry?.backend?.then(
-      (backend) => backend.dispose(),
-      () => undefined,
-    );
-    await removePersistedSandbox(name);
-    await rm(this.#root(conversation), { recursive: true, force: true });
+    const backend = await entry?.backend?.catch(() => undefined);
+    if (!backend) {
+      try {
+        await stat(root);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        throw error;
+      }
+    }
+    await (
+      backend ??
+      (await createDockerSandbox({
+        name,
+        image: SANDBOX_IMAGE,
+        network: { mode: 'none' },
+      }))
+    ).dispose();
+    await rm(root, { recursive: true, force: true });
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
@@ -137,24 +152,29 @@ export class GroupSandboxes implements AsyncDisposable {
       ),
     ]);
 
-    return createMicrosandboxSandbox({
+    return createDockerSandbox({
       name,
-      image: 'node:24-bookworm-slim',
-      commandTimeout: 300_000,
-      configure: (builder) => {
-        let configured = builder
-          .volume('/workspace', (mount) =>
-            mount.bind(canonicalWorkspace).nosuid().nodev(),
-          )
-          .network((network) => network.policy(NetworkPolicy.none()));
-        for (const mount of canonicalMounts) {
-          configured = configured.volume(mount.guestPath, (volume) => {
-            const bound = volume.bind(mount.hostPath).noexec().nosuid().nodev();
-            return mount.readOnly ? bound.readonly() : bound;
-          });
-        }
-        return configured;
-      },
+      image: SANDBOX_IMAGE,
+      commandTimeout: COMMAND_TIMEOUT_MS,
+      network: { mode: 'none' },
+      security:
+        process.getuid && process.getgid
+          ? { user: `${process.getuid()}:${process.getgid()}` }
+          : undefined,
+      volumes: [
+        {
+          type: 'bind',
+          hostPath: canonicalWorkspace,
+          containerPath: '/workspace',
+          readOnly: false,
+        },
+        ...canonicalMounts.map((mount) => ({
+          type: 'bind' as const,
+          hostPath: mount.hostPath,
+          containerPath: mount.guestPath,
+          readOnly: mount.readOnly,
+        })),
+      ],
     });
   }
 
@@ -168,17 +188,6 @@ export class GroupSandboxes implements AsyncDisposable {
 
   #artifactDirectory(conversation: ConversationId) {
     return resolve(this.#workspaceDirectory(conversation), 'output');
-  }
-}
-
-async function removePersistedSandbox(name: string) {
-  try {
-    const sandbox = await Sandbox.get(name);
-    if (sandbox.status === 'running') await sandbox.stop();
-    else if (sandbox.status === 'draining') await sandbox.waitUntilStopped();
-    await sandbox.remove();
-  } catch (error) {
-    if (!(error instanceof SandboxNotFoundError)) throw error;
   }
 }
 

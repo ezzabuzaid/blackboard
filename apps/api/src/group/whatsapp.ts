@@ -10,6 +10,7 @@ import {
   type AgentDeclaration,
   type AgentHost,
   AgentRuntime,
+  type AgentPluginDefinition,
   type ConversationId,
   type MailboxStore,
   MessageDeliveryMode,
@@ -33,6 +34,7 @@ export interface WhatsAppParticipant {
   model: AgentModel
   tools?: ToolSet
   telemetry?: AgentDeclaration["telemetry"]
+  plugins?: readonly AgentPluginDefinition[]
   tracePath?: string
 }
 
@@ -316,6 +318,10 @@ export class WhatsAppGroup implements AsyncDisposable {
             instructions: [...(participant.instructions ?? [])],
             tools: participant.tools,
             ...baseeraGroupChatAgent,
+            plugins: [
+              ...baseeraGroupChatAgent.plugins,
+              ...(participant.plugins ?? []),
+            ],
           }),
         )
         const runtime = disposables.use(
@@ -742,12 +748,22 @@ export class WhatsAppGroup implements AsyncDisposable {
       })
       const repliesBefore = this.#replyCounts.get(participant.name) ?? 0
       const turn = await participant.runtime.enqueue(participant.conversation, {
-        id: JSON.stringify({
-          kind: "whatsapp-notification",
-          messages: notifications.map(({ id }) => id),
-          reminder: participant.pendingReminder,
-        }),
-        input: this.#notification(notifications, participant.pendingReminder),
+        message: {
+          id: JSON.stringify({
+            kind: "whatsapp-notification",
+            participant: participant.conversation.chatId,
+            messages: notifications.map(({ id }) => id),
+            reminder: participant.pendingReminder,
+          }),
+          role: "user",
+          parts: [
+            {
+              type: "text",
+              text: this.#notification(notifications, participant.pendingReminder),
+            },
+          ],
+        },
+        trigger: "submit-message",
       })
       participant.pendingReminder = undefined
       participant.turnId = turn.id

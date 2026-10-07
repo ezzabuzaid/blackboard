@@ -203,10 +203,17 @@ export class ParticipantDirectory {
       ],
       model: defaults.model,
       tools: defaults.tools,
+      telemetry: {},
       tracePath,
-      telemetry: {
-        integrations: createFileTelemetry({ path: tracePath }),
-      },
+      plugins: [
+        {
+          name: "baseera-file-telemetry",
+          create() {
+            const telemetry = createFileTelemetry({ path: tracePath })
+            return { telemetry: () => telemetry }
+          },
+        },
+      ],
     };
   }
 

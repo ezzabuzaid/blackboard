@@ -16,7 +16,9 @@ RUN npx nx run api:build \
   && VITE_API_URL= npx nx run web:build \
   && npm prune --omit=dev
 
-FROM node:24-bookworm-slim
+FROM docker:29.7.2-cli AS docker-cli
+
+FROM node:24-bookworm-slim AS app
 
 ENV NODE_ENV=production \
   PORT=3001 \
@@ -28,9 +30,17 @@ WORKDIR /app
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/web/dist apps/web/dist
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
 COPY catalog catalog
 COPY participants participants
 
 EXPOSE 3001
 
 CMD ["node", "apps/api/dist/index.js"]
+
+FROM docker:29.7.2-dind AS sandbox-runner
+
+WORKDIR /app
+
+COPY catalog catalog
+COPY participants participants

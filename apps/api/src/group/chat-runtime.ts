@@ -1,3 +1,4 @@
+import { EventEmitter, on } from "node:events"
 import { rm } from "node:fs/promises"
 import { resolve } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -11,15 +12,20 @@ import {
 } from "@deepagents/context"
 import {
   type AgentDeclaration,
+  type AgentPluginDefinition,
   type AgentRuntimeInfo,
+  type ConversationStatus,
+  type ConversationStatusEvent,
   type ConversationId,
   SqliteMailboxStore,
-  type TurnInput,
+  type TurnRequest,
 } from "@deepagents/experimental/zukhruf"
 
 import { readAgentExecutions } from "./agent-executions.js"
 import {
   type WhatsAppChatEvent,
+  type WhatsAppGroupActivity,
+  type WhatsAppGroupActivityState,
   WhatsAppGroup,
   type WhatsAppGroupLimits,
   type WhatsAppMessage,
@@ -41,6 +47,8 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     agents: [],
   }
   readonly #chats = new Map<string, Promise<ChatSession>>()
+  readonly #statusAbort = new AbortController()
+  readonly #statusEvents = new EventEmitter()
   readonly #resources = new AsyncDisposableStack()
   readonly #store: SqliteContextStore
   readonly #streamStore: SqliteStreamStore
@@ -84,8 +92,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     this.#sandboxForChat = options.sandboxForChat
     this.#queueDirectory = options.queueDirectory
 
-    const database = new DatabaseSync(options.databasePath)
-    this.#resources.defer(() => database.close())
+    const database = this.#resources.use(new DatabaseSync(options.databasePath))
     this.#store = new SqliteContextStore(database)
     this.#streamStore = new SqliteStreamStore(database)
     this.#streams = new StreamManager({
@@ -123,17 +130,75 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     return Boolean(await this.#streamStore.getStream(streamId(conversation)))
   }
 
-  async enqueue(conversation: ConversationId, turn: TurnInput) {
+  async enqueue(conversation: ConversationId, turn: TurnRequest) {
     const id = streamId(conversation)
     const { group } = await this.#chat(conversation)
     const stream = this.#watch(group)
     try {
-      await group.post(turn.input, turn.id)
+      await group.post(
+        turn.message.parts
+          .filter((part) => part.type === "text")
+          .map((part) => part.text)
+          .join(""),
+        turn.message.id,
+      )
       return { id, stream }
     } catch (error) {
       await stream.cancel()
       throw error
     }
+  }
+
+  plugin(definition: AgentPluginDefinition): never {
+    throw new Error(
+      `WhatsAppChatRuntime has no root plugin "${definition.name}"`,
+    )
+  }
+
+  async subscribeConversationStatus(signal: AbortSignal) {
+    const subscriptionAbort = AbortSignal.any([
+      signal,
+      this.#statusAbort.signal,
+    ])
+    if (subscriptionAbort.aborted) {
+      return {
+        async *[Symbol.asyncIterator](): AsyncGenerator<ConversationStatusEvent> {
+          return
+        },
+      }
+    }
+    const events = on(this.#statusEvents, "event", {
+      signal: subscriptionAbort,
+    })
+    return {
+      async *[Symbol.asyncIterator](): AsyncGenerator<ConversationStatusEvent> {
+        try {
+          for await (const [event] of events) {
+            yield event as ConversationStatusEvent
+          }
+        } catch (error) {
+          if (!subscriptionAbort.aborted) throw error
+        }
+      },
+    }
+  }
+
+  #publishStatus(conversation: ConversationId, event: WhatsAppChatEvent) {
+    if (event.type !== "activity") return
+    this.#statusEvents.emit("event", {
+      type: "change",
+      conversation,
+      status: statusForActivity(event.activity),
+    })
+  }
+
+  async conversationStatus(conversation: ConversationId): Promise<ConversationStatus> {
+    const active = this.#chats.get(conversation.chatId)
+    if (active) return statusForActivity((await active).group.snapshot().activity)
+    const activity = (await this.#durableEvents(streamId(conversation))).findLast(
+      (event) => event.type === "activity",
+    )
+    return activity ? statusForActivity(activity.activity) : { type: "idle" }
   }
 
   observe(conversation: ConversationId) {
@@ -176,6 +241,12 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       ({ name }) => ({ name }),
     )
     return { messages, participants }
+  }
+
+  async messageCount(conversation: ConversationId) {
+    return (await this.#durableEvents(streamId(conversation))).filter(
+      (event) => event.type === "message",
+    ).length
   }
 
   async replayMessages(conversation: ConversationId) {
@@ -239,6 +310,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   }
 
   async [Symbol.asyncDispose]() {
+    this.#statusAbort.abort()
     const sessions = await Promise.allSettled(this.#chats.values())
     await Promise.allSettled(
       sessions.map((session) =>
@@ -304,6 +376,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       limits: this.#limits,
       onMessage: (message, cursor) =>
         this.#onMessage?.(conversation, message, cursor),
+      onEvent: (event) => this.#publishStatus(conversation, event),
       persist: (event) =>
         this.#streamStore.appendChunks([
           {
@@ -381,6 +454,20 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
         : participant,
     )
   }
+}
+
+function statusForActivity(
+  activity: WhatsAppGroupActivity | WhatsAppGroupActivityState,
+): ConversationStatus {
+  const phase =
+    "phase" in activity
+      ? activity.phase
+      : activity.type === "settled" || activity.type === "stopped"
+        ? "settled"
+        : "active"
+  return phase === "active"
+    ? { type: "active", activeFlags: [] }
+    : { type: "idle" }
 }
 
 function streamId(conversation: ConversationId) {

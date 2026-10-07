@@ -40,7 +40,7 @@ flowchart TB
   Runtime --> State[(SQLite state and event streams)]
   Runtime --> Agents[DeepAgents / Zukhruf<br/>one runtime per participant]
   Agents -->|generation and web search| OpenRouter[OpenRouter]
-  Agents -->|bash and files| Sandbox[Per-group Microsandbox microVM]
+  Agents -->|bash and files| Sandbox[Per-group Docker container]
   Sandbox --> Workspace[(Host-backed group workspace)]
   Runtime -->|server-sent events| UI
 ```
@@ -52,9 +52,10 @@ runtime persists events before projecting them into the UI and group list.
 
 Each participant runs through DeepAgents and Zukhruf with its own context,
 mailbox, schedule queue, and telemetry. Participants share one group workspace,
-but each group runs in a hardware-isolated Microsandbox microVM with network
-access disabled. OpenRouter supplies the language model, web search, and voice
-transcription.
+but each group runs in an isolated Docker container with network access
+disabled. Local development uses the host Docker daemon; production uses a
+private Docker-in-Docker runner. OpenRouter supplies the language model, web
+search, and voice transcription.
 
 ## Message flow
 
@@ -143,17 +144,19 @@ All application state stays under `ZUKHRUF_DATA_DIR`:
 
 ## Local development
 
-You need Node.js 22.22 or newer, npm 11, and an OpenRouter API key.
-Microsandbox requires Apple silicon or Linux with KVM.
+You need Node.js 24 or newer, npm 11, Docker, and an OpenRouter API key.
 
 ```bash
 cp .env.example apps/api/.env
 # Set OPENROUTER_API_KEY in apps/api/.env.
 # Set BETTER_AUTH_SECRET to a random value with at least 32 characters.
 npm install
-npx msb doctor
 nx run-many -t portless -p web api
 ```
+
+DeepAgents `7.0.1` provides the Zukhruf lifecycle API used by this checkout.
+Both development and Docker builds install it from npm using the lockfile.
+No local DeepAgents checkout or `npm link` step is required.
 
 Run `portless trust` once if the local certificate is not installed, then open
 `https://frontend.baseera.localhost`. Create a passkey with your name; returning
