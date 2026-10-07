@@ -18,6 +18,7 @@
     "@electric-sql/pglite": "0.5.4",
     "@godaddy/terminus": "^4.12.1",
     "@hono/node-server": "2.0.12",
+    "@opentelemetry/api": "1.9.1",
     "@sdk-it/hono": "0.46.1",
     "ai": "7.0.130",
     "better-auth": "1.6.25",

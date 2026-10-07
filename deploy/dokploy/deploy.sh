@@ -201,10 +201,14 @@ ssh "$ssh_host" "docker exec '$smoke_runner' docker info" >/dev/null \
   || fail "sandbox runner smoke test failed"
 printf 'BETTER_AUTH_SECRET=%s\nOPENROUTER_API_KEY=%s\nCODEX_MODEL=%s\n' \
   "$BETTER_AUTH_SECRET" "$openrouter_api_key" "$codex_model" \
-  | ssh "$ssh_host" "docker run --detach --rm --name '$smoke_container' --network '$smoke_network' --env-file /dev/stdin --env DOCKER_HOST=tcp://sandbox-runner:2375 --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' --volume baseera-codex:/root/.codex '$image'" >/dev/null
+  | ssh "$ssh_host" "docker run --detach --name '$smoke_container' --network '$smoke_network' --env-file /dev/stdin --env DOCKER_HOST=tcp://sandbox-runner:2375 --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' --volume baseera-codex:/root/.codex '$image'" >/dev/null
 for _ in {1..30}; do
   if ssh "$ssh_host" "docker exec '$smoke_container' node --input-type=module --eval 'const [health, html] = await Promise.all([fetch(\"http://127.0.0.1:3001/api/health\"), fetch(\"http://127.0.0.1:3001/\")]); if (!health.ok || !(await html.text()).includes(\"<div id=\\\"root\\\"></div>\")) process.exit(1)'" >/dev/null 2>&1; then
     break
+  fi
+  if [[ $(ssh "$ssh_host" "docker inspect --format '{{.State.Running}}' '$smoke_container'") != true ]]; then
+    ssh "$ssh_host" docker logs --tail 100 "$smoke_container" >&2
+    fail "remote app exited during smoke test"
   fi
   sleep 1
 done
