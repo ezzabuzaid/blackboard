@@ -1,24 +1,23 @@
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
-import type { ToolSet } from 'ai';
+import { openai } from '@ai-sdk/openai';
+import { codex } from '@deepagents/experimental/providers/codex';
+import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai';
 
-export function createParticipantDefaults(options: {
-  apiKey: string;
-  modelId?: string;
-  appUrl?: string;
-}) {
-  const modelId = options.modelId || 'openai/gpt-5.6-luna';
-  const openrouter = createOpenRouter({
-    apiKey: options.apiKey,
-    compatibility: 'strict',
-    appName: 'Baseera',
-    appUrl: options.appUrl,
-  });
+export function createParticipantDefaults(
+  options: {
+    modelId?: string;
+  } = {},
+) {
+  const modelId = options.modelId || 'gpt-6.1-sol';
 
-  console.log(`Using OpenRouter model ${modelId}`);
   return {
-    model: openrouter(modelId),
+    model: wrapLanguageModel({
+      model: codex.languageModel(modelId),
+      middleware: defaultSettingsMiddleware({
+        settings: { providerOptions: { openai: { reasoningEffort: 'high' } } },
+      }),
+    }),
     tools: {
-      web_search: openrouter.tools.webSearch({}) as unknown as ToolSet[string],
+      web_search: openai.tools.webSearch(),
     },
   };
 }

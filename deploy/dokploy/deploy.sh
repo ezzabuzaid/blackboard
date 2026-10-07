@@ -7,7 +7,7 @@ volume_name=baseera-data
 dokploy_url=${DOKPLOY_URL:-https://dokploy.limerence.sh}
 ssh_host=${DOKPLOY_SSH_HOST:-root@167.233.88.12}
 openrouter_api_key=${OPENROUTER_API_KEY:-}
-openrouter_model=${OPENROUTER_MODEL:-openai/gpt-5.6-luna}
+codex_model=${CODEX_MODEL:-gpt-6.1-sol}
 BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
 deploy_domain=${DEPLOY_DOMAIN:-}
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
@@ -65,7 +65,9 @@ fi
 [[ -n ${DOKPLOY_API_KEY:-} ]] || fail "DOKPLOY_API_KEY is required"
 [[ ${#BETTER_AUTH_SECRET} -ge 32 ]] \
   || fail "BETTER_AUTH_SECRET must contain at least 32 characters"
-[[ -n $openrouter_api_key ]] || fail "OPENROUTER_API_KEY is required"
+[[ -n $openrouter_api_key ]] || fail "OPENROUTER_API_KEY is required for voice transcription"
+ssh "$ssh_host" docker volume inspect baseera-codex >/dev/null \
+  || fail "Initialize the baseera-codex volume and sign in with ChatGPT first (see README.md)"
 
 dokploy_url=${dokploy_url%/}
 dokploy_url=${dokploy_url%/api}
@@ -193,9 +195,9 @@ for _ in {1..30}; do
 done
 ssh "$ssh_host" "docker exec '$smoke_runner' docker info" >/dev/null \
   || fail "sandbox runner smoke test failed"
-printf 'BETTER_AUTH_SECRET=%s\nOPENROUTER_API_KEY=%s\nOPENROUTER_MODEL=%s\n' \
-  "$BETTER_AUTH_SECRET" "$openrouter_api_key" "$openrouter_model" \
-  | ssh "$ssh_host" "docker run --detach --rm --name '$smoke_container' --network '$smoke_network' --env-file /dev/stdin --env DOCKER_HOST=tcp://sandbox-runner:2375 --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' '$image'" >/dev/null
+printf 'BETTER_AUTH_SECRET=%s\nOPENROUTER_API_KEY=%s\nCODEX_MODEL=%s\n' \
+  "$BETTER_AUTH_SECRET" "$openrouter_api_key" "$codex_model" \
+  | ssh "$ssh_host" "docker run --detach --rm --name '$smoke_container' --network '$smoke_network' --env-file /dev/stdin --env DOCKER_HOST=tcp://sandbox-runner:2375 --env WEB_ORIGIN=http://127.0.0.1 --volume '$smoke_volume:/data' --volume baseera-codex:/root/.codex '$image'" >/dev/null
 for _ in {1..30}; do
   if ssh "$ssh_host" "docker exec '$smoke_container' node --input-type=module --eval 'const [health, html] = await Promise.all([fetch(\"http://127.0.0.1:3001/api/health\"), fetch(\"http://127.0.0.1:3001/\")]); if (!health.ok || !(await html.text()).includes(\"<div id=\\\"root\\\"></div>\")) process.exit(1)'" >/dev/null 2>&1; then
     break
@@ -268,8 +270,8 @@ if [[ -z $deploy_domain ]]; then
   fi
 fi
 web_origin=https://$deploy_domain
-compose_env=$(printf 'DEPLOY_IMAGE=%s\nSANDBOX_IMAGE=%s\nWEB_ORIGIN=%s\nOPENROUTER_API_KEY=%s\nOPENROUTER_MODEL=%s\nBETTER_AUTH_SECRET=%s\n' \
-  "$image" "$sandbox_image" "$web_origin" "$openrouter_api_key" "$openrouter_model" "$BETTER_AUTH_SECRET")
+compose_env=$(printf 'DEPLOY_IMAGE=%s\nSANDBOX_IMAGE=%s\nWEB_ORIGIN=%s\nOPENROUTER_API_KEY=%s\nCODEX_MODEL=%s\nBETTER_AUTH_SECRET=%s\n' \
+  "$image" "$sandbox_image" "$web_origin" "$openrouter_api_key" "$codex_model" "$BETTER_AUTH_SECRET")
 dokploy_post compose.saveEnvironment "$(jq -cn \
   --arg composeId "$compose_id" \
   --arg env "$compose_env" \

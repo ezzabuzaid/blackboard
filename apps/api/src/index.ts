@@ -47,11 +47,11 @@ if (!authSecret || authSecret.length < 32) {
 }
 
 const openRouterAPIKey = process.env.OPENROUTER_API_KEY?.trim();
-if (!openRouterAPIKey) throw new Error('OPENROUTER_API_KEY is required');
+if (!openRouterAPIKey) {
+  throw new Error('OPENROUTER_API_KEY is required for voice transcription');
+}
 const participantDefaults = createParticipantDefaults({
-  apiKey: openRouterAPIKey,
-  modelId: process.env.OPENROUTER_MODEL?.trim() || undefined,
-  appUrl: process.env.WEB_ORIGIN,
+  modelId: process.env.CODEX_MODEL?.trim() || undefined,
 });
 const transcribeAudio = createOpenRouterTranscriber({
   apiKey: openRouterAPIKey,

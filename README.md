@@ -39,7 +39,8 @@ flowchart TB
   API --> Runtime[WhatsAppChatRuntime]
   Runtime --> State[(SQLite state and event streams)]
   Runtime --> Agents[DeepAgents / Zukhruf<br/>one runtime per participant]
-  Agents -->|generation and web search| OpenRouter[OpenRouter]
+  Agents -->|generation and web search| Codex[Codex / ChatGPT subscription]
+  API -->|voice transcription| OpenRouter[OpenRouter]
   Agents -->|bash and files| Sandbox[Per-group Docker container]
   Sandbox --> Workspace[(Host-backed group workspace)]
   Runtime -->|server-sent events| UI
@@ -54,8 +55,9 @@ Each participant runs through DeepAgents and Zukhruf with its own context,
 mailbox, schedule queue, and telemetry. Participants share one group workspace,
 but each group runs in an isolated Docker container with network access
 disabled. Local development uses the host Docker daemon; production uses a
-private Docker-in-Docker runner. OpenRouter supplies the language model, web
-search, and voice transcription.
+private Docker-in-Docker runner. The Codex provider uses the server owner's
+ChatGPT subscription for language generation and web search, with GPT-6.1 Sol
+and high reasoning effort. OpenRouter handles voice transcription.
 
 ## Message flow
 
@@ -144,19 +146,41 @@ All application state stays under `ZUKHRUF_DATA_DIR`:
 
 ## Local development
 
-You need Node.js 24 or newer, npm 11, Docker, and an OpenRouter API key.
+You need Node.js 24 or newer, npm 11, Docker, a ChatGPT subscription signed in
+through Codex, and an OpenRouter API key for voice transcription.
 
 ```bash
 cp .env.example apps/api/.env
-# Set OPENROUTER_API_KEY in apps/api/.env.
+# Set OPENROUTER_API_KEY in apps/api/.env for voice transcription.
 # Set BETTER_AUTH_SECRET to a random value with at least 32 characters.
+codex login
 npm install
 nx run-many -t portless -p web api
 ```
 
-DeepAgents `7.0.1` provides the Zukhruf lifecycle API used by this checkout.
+DeepAgents `7.0.2` provides the Zukhruf lifecycle API and native Codex provider.
 Both development and Docker builds install it from npm using the lockfile.
 No local DeepAgents checkout or `npm link` step is required.
+
+`CODEX_MODEL` defaults to `gpt-6.1-sol`; high reasoning effort is applied to every
+participant model. DeepAgents reads and refreshes the existing Codex login for
+the same OS user. It preserves Baseera's tools, scheduling, and conversation
+history. Importing the provider does not start a Codex agent. ChatGPT access is
+shared by all participants and users of this deployment.
+
+For a Dokploy deployment, initialize its dedicated credential volume and sign
+in on the server once before running `deploy/dokploy/deploy.sh`:
+
+```bash
+docker volume create baseera-codex
+docker run --rm -it --volume baseera-codex:/root/.codex \
+  node:24-bookworm-slim npx --yes @openai/codex login --device-auth
+```
+
+The app mounts that volume at its Codex login directory with write access for
+token refresh. It is separate from group workspaces and is not mounted into the
+sandbox runner. Reuse the volume across deployments; never bake credentials
+into an image or commit them. Repeat the login command if the session is revoked.
 
 Run `portless trust` once if the local certificate is not installed, then open
 `https://frontend.baseera.localhost`. Create a passkey with your name; returning

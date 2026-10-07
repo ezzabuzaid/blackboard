@@ -15,6 +15,7 @@ import {
   StreamManager,
   createVirtualSandbox,
 } from '@deepagents/context';
+import { codex } from '@deepagents/experimental/providers/codex';
 import {
   SqliteMailboxStore,
   defineSandbox,
@@ -511,11 +512,46 @@ test('passkey registration requires only a name', async () => {
   assert.equal(missingName.status, 400);
 });
 
-test('participant defaults use the configured OpenRouter key', () => {
-  const defaults = createParticipantDefaults({ apiKey: 'openrouter-key-1' });
-  assert.equal(defaults.model.provider, 'openrouter');
-  assert.equal(defaults.model.modelId, 'openai/gpt-5.6-luna');
+test('participant defaults use the Codex subscription with native web search', () => {
+  const defaults = createParticipantDefaults();
+  assert.equal(defaults.model.provider, 'codex.responses');
+  assert.equal(defaults.model.modelId, 'gpt-6.1-sol');
   assert.equal(defaults.tools.web_search?.type, 'provider');
+  assert.equal(defaults.tools.web_search.id, 'openai.web_search');
+  assert.equal(
+    createParticipantDefaults({ modelId: 'another-account-model' }).model
+      .modelId,
+    'another-account-model',
+  );
+});
+
+test('participant model sends high reasoning effort and retains application tools', async (t) => {
+  let calls = 0;
+  const model = new MockLanguageModelV4({
+    doStream: async () =>
+      calls++ === 0
+        ? groupToolResponse('reply_to_group', 'codex-reply', {
+            message: 'Ready for the group.',
+          })
+        : groupTextResponse('Reply posted.'),
+  });
+  t.mock.method(codex, 'languageModel', () => model);
+  await using runtime = memoryRuntime([
+    { name: 'Maya', ...createParticipantDefaults() },
+  ]);
+  await runtime.post(testGroupConversation, {
+    id: 'codex-reasoning',
+    content: 'Reply to the group.',
+  });
+  await waitForChat(runtime, testGroupConversation, 'settled');
+  assert.equal(
+    (await runtime.transcript(testGroupConversation)).messages.at(-1)?.content,
+    'Ready for the group.',
+  );
+  assert.equal(model.doStreamCalls.length, 2);
+  for (const call of model.doStreamCalls) {
+    assert.equal(call.providerOptions?.openai?.reasoningEffort, 'high');
+  }
 });
 
 test('health reports the WhatsApp group service', async () => {
@@ -1700,7 +1736,10 @@ test('chat runtime publishes owner-scoped status changes and closes aborted subs
   const iterator = events[Symbol.asyncIterator]();
   const changed = iterator.next();
 
-  await runtime.post(testGroupConversation, { id: 'status-1', content: 'Hello' });
+  await runtime.post(testGroupConversation, {
+    id: 'status-1',
+    content: 'Hello',
+  });
 
   assert.deepEqual(await changed, {
     done: false,
@@ -1714,7 +1753,9 @@ test('chat runtime publishes owner-scoped status changes and closes aborted subs
   assert.equal((await iterator.next()).done, true);
 
   const stopAbort = new AbortController();
-  const stoppedEvents = await runtime.subscribeConversationStatus(stopAbort.signal);
+  const stoppedEvents = await runtime.subscribeConversationStatus(
+    stopAbort.signal,
+  );
   const stoppedIterator = stoppedEvents[Symbol.asyncIterator]();
   await runtime.stop(testGroupConversation);
   let stopped: IteratorResult<unknown>;
@@ -1739,7 +1780,9 @@ test('chat runtime publishes owner-scoped status changes and closes aborted subs
 
   const alreadyAborted = new AbortController();
   alreadyAborted.abort();
-  const closed = await runtime.subscribeConversationStatus(alreadyAborted.signal);
+  const closed = await runtime.subscribeConversationStatus(
+    alreadyAborted.signal,
+  );
   assert.equal((await closed[Symbol.asyncIterator]().next()).done, true);
 
   const disposable = memoryRuntime([]);
@@ -3023,7 +3066,7 @@ test('every group member answers a greeting addressed to the whole group', async
         {
           name: 'researcher',
           model: participant('researcher', 'Researcher here!'),
-          tools: createParticipantDefaults({ apiKey: 'test-key' }).tools,
+          tools: createParticipantDefaults().tools,
         },
         {
           name: 'critic',
@@ -3036,7 +3079,7 @@ test('every group member answers a greeting addressed to the whole group', async
   const messages = await group.send('Hi everyone!');
 
   assert.equal(maxActiveParticipationChecks, 2);
-  assert.match(JSON.stringify(researcherTools), /openrouter\.web_search/);
+  assert.match(JSON.stringify(researcherTools), /openai\.web_search/);
   assert.deepEqual(
     messages
       .filter(({ author }) => author !== 'user')
