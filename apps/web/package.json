@@ -16,7 +16,7 @@
     "@genui/input": "*",
     "@genui/voice": "*",
     "@sdk-it/client": "*",
-    "@zukhruf/shadcn": "^0.3.21",
+    "@zukhruf/shadcn": "^0.3.23",
     "better-auth": "^1.6.25",
     "cn": "^0.4.0",
     "lucide-react": "^1.26.0",
