@@ -2,11 +2,13 @@ import {
   Avatar,
   AvatarFallback,
   Button,
+  buttonVariants,
   Input,
   ScrollArea,
 } from "@zukhruf/shadcn"
 import { BellRing, MessageSquarePlus, Pin, Search, Square } from "lucide-react"
 import { useEffect, useState } from "react"
+import { cn } from "cn"
 import { Link, useLoaderData } from "react-router"
 
 import { api } from "./api"
@@ -66,16 +68,13 @@ function SidebarHeader() {
   return (
     <header className="flex h-14 shrink-0 items-center justify-between px-4">
       <h1 className="text-xl font-semibold tracking-tight">Baseera</h1>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
+      <Link
+        to="/groups/new"
         aria-label="New group"
-        nativeButton={false}
-        render={<Link to="/groups/new" />}
+        className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}
       >
         <MessageSquarePlus aria-hidden="true" />
-      </Button>
+      </Link>
     </header>
   )
 }

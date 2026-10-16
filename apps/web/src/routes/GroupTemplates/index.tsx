@@ -4,6 +4,7 @@ import {
   AvatarFallback,
   AvatarGroup,
   Button,
+  buttonVariants,
   FieldError,
   Input,
   ScrollArea,
@@ -179,16 +180,19 @@ export default function GroupTemplates() {
           className="min-w-0 flex-1 overflow-y-auto px-4 pt-6 pb-32 sm:px-6 md:px-8 md:pb-12"
         >
           <div className="mb-8 animate-in duration-300 ease-out fade-in slide-in-from-bottom-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-ms-2 mb-3"
-              nativeButton={false}
-              render={<Link to="/" />}
+            <Link
+              to="/"
+              className={cn(
+                buttonVariants({
+                  variant: "ghost",
+                  size: "sm",
+                  className: "-ms-2 mb-3",
+                })
+              )}
             >
               <ArrowLeft aria-hidden="true" />
               Back to group
-            </Button>
+            </Link>
             <h1
               id="templates-heading"
               className="text-2xl font-semibold tracking-tight sm:text-3xl"
