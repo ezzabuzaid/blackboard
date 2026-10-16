@@ -29,12 +29,12 @@
   "devDependencies": {},
   "dependencies": {
     "@base-ui/react": "^1.6.0",
-    "@stdlib/shadcn": "*",
     "@tiptap/core": "^3.27.1",
     "@tiptap/extension-link": "^3.27.1",
     "@tiptap/pm": "^3.27.1",
     "@tiptap/react": "^3.27.1",
     "@tiptap/starter-kit": "^3.27.1",
+    "cn": "^0.4.0",
     "lodash-es": "^4.17.21",
     "lucide-react": "^1.31.0",
     "react": "^19.2.8"

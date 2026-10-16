@@ -1,4 +1,4 @@
-import { cn } from "@stdlib/shadcn"
+import { cn } from "cn"
 import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import type { ReactNode } from "react"
 

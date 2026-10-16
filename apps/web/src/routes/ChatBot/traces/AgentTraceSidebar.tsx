@@ -9,7 +9,7 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@stdlib/shadcn"
+} from "@zukhruf/shadcn"
 import {
   Bot,
   Braces,
@@ -69,7 +69,7 @@ export function AgentTraceSidebar() {
 
   return (
     <Sheet open={agent !== null} onOpenChange={(open) => !open && close()}>
-      <SheetContent className="w-[min(92vw,38rem)] gap-0 p-0 sm:max-w-[38rem]">
+      <SheetContent className="w-[min(92vw,38rem)] gap-0 p-0 data-[side=right]:sm:max-w-[38rem]">
         <TraceHeader />
         <TraceList />
       </SheetContent>

@@ -1,11 +1,89 @@
 @import "@genui/input/styles.css";
 @import "tailwindcss";
+@import "@zukhruf/shadcn/styles.css";
+@import "streamdown/styles.css";
 
 /* nx-tailwind-sources:start */
 @source "../../../packages/annotation";
 @source "../../../packages/input";
-@source "../../../packages/ui";
 @source "../../../packages/voice";
 @source "../../api";
 /* nx-tailwind-sources:end */
-@import "../../../packages/ui/src/styles/globals.css";
+
+@theme {
+  --font-sans: "Inter", "Noto Sans Arabic", sans-serif;
+}
+
+:root {
+  --foreground: oklch(0.145 0.008 326);
+  --card-foreground: oklch(0.145 0.008 326);
+  --popover-foreground: oklch(0.145 0.008 326);
+  --primary: oklch(0.491 0.27 292.581);
+  --primary-foreground: oklch(0.969 0.016 293.756);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.96 0.003 325.6);
+  --muted-foreground: oklch(0.542 0.034 322.5);
+  --accent: oklch(0.96 0.003 325.6);
+  --accent-foreground: oklch(0.212 0.019 322.12);
+  --border: oklch(0.922 0.005 325.62);
+  --input: oklch(0.922 0.005 325.62);
+  --ring: oklch(0.711 0.019 323.02);
+}
+
+@layer base {
+  body {
+    min-height: 100svh;
+  }
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  a:not([class]) {
+    text-decoration-line: underline;
+    text-underline-offset: 0.15em;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Fix list item alignment in streamdown */
+[data-streamdown="list-item"] > p {
+  display: inline;
+}
+
+[data-streamdown="list-item"]
+  > :is(
+    [data-streamdown="ordered-list"],
+    [data-streamdown="unordered-list"]
+  ):only-child,
+[data-streamdown="list-item"]
+  > :is(
+    [data-streamdown="ordered-list"],
+    [data-streamdown="unordered-list"]
+  ):only-child
+  > [data-streamdown="list-item"] {
+  display: inline;
+}
+
+[data-streamdown="unordered-list"],
+[data-streamdown="ordered-list"] {
+  list-style-position: outside;
+  padding-left: 1.5rem;
+}

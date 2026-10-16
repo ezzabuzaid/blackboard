@@ -9,7 +9,7 @@ import {
   DialogTitle,
   DialogTrigger,
   Input,
-} from "@stdlib/shadcn"
+} from "@zukhruf/shadcn"
 import { Check, Copy, Share2 } from "lucide-react"
 import { useState } from "react"
 
@@ -63,10 +63,17 @@ export function ShareGroupDialog({ groupId }: { groupId: string }) {
         }
       }}
     >
-      <DialogTrigger asChild>
-        <Button type="button" variant="ghost" size="icon" aria-label="Share group">
-          <Share2 aria-hidden="true" />
-        </Button>
+      <DialogTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Share group"
+          />
+        }
+      >
+        <Share2 aria-hidden="true" />
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -137,10 +144,8 @@ export function ShareGroupDialog({ groupId }: { groupId: string }) {
               Revoke link
             </Button>
           )}
-          <DialogClose asChild>
-            <Button type="button" variant="outline">
-              Done
-            </Button>
+          <DialogClose render={<Button type="button" variant="outline" />}>
+            Done
           </DialogClose>
         </DialogFooter>
       </DialogContent>

@@ -5,7 +5,7 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-} from "@stdlib/shadcn"
+} from "@zukhruf/shadcn"
 import { MessageCircle } from "lucide-react"
 import { useMemo } from "react"
 import { useLoaderData } from "react-router"

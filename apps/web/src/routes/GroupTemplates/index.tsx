@@ -1,3 +1,4 @@
+import { cn } from "cn"
 import {
   Avatar,
   AvatarFallback,
@@ -11,8 +12,7 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  cn,
-} from "@stdlib/shadcn"
+} from "@zukhruf/shadcn"
 import { ArrowLeft, ArrowRight, Check, Plus, Search, Store } from "lucide-react"
 import { useId, useRef, useState } from "react"
 import {
@@ -179,11 +179,15 @@ export default function GroupTemplates() {
           className="min-w-0 flex-1 overflow-y-auto px-4 pt-6 pb-32 sm:px-6 md:px-8 md:pb-12"
         >
           <div className="mb-8 animate-in duration-300 ease-out fade-in slide-in-from-bottom-2">
-            <Button variant="ghost" size="sm" className="-ms-2 mb-3" asChild>
-              <Link to="/">
-                <ArrowLeft aria-hidden="true" />
-                Back to group
-              </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ms-2 mb-3"
+              nativeButton={false}
+              render={<Link to="/" />}
+            >
+              <ArrowLeft aria-hidden="true" />
+              Back to group
             </Button>
             <h1
               id="templates-heading"

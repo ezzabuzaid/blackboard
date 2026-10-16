@@ -1,9 +1,9 @@
+import { cn } from "cn"
 import {
   Bubble,
   BubbleContent,
   BubbleGroup,
   Button,
-  cn,
   Message,
   MessageContent,
   MessageHeader,
@@ -13,7 +13,7 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-} from "@stdlib/shadcn"
+} from "@zukhruf/shadcn"
 import { Annotation } from "@genui/annotation"
 import { CornerUpLeft, MessageSquareQuote } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
@@ -175,7 +175,7 @@ function GroupActivityIndicator({
   return (
     <Message role="status" className="items-start gap-2">
       <GroupAvatarStack members={participants} className="mt-0.5" />
-      <Bubble variant="outline">
+      <Bubble variant="outline" className="max-w-none">
         <BubbleContent className="relative flex h-8 items-center gap-1 !overflow-visible rounded-[8px] rounded-tl-none !border-transparent !bg-card px-3 before:absolute before:top-0 before:-left-2 before:size-2 before:bg-inherit before:content-[''] before:[clip-path:polygon(100%_0,100%_100%,0_0)]">
           <span className="mr-1 text-xs text-muted-foreground">{label}</span>
           <span
@@ -212,7 +212,7 @@ export function UserMessageCluster({
       <MessageContent>
         <BubbleGroup className="items-end gap-0.5">
           {cluster.messages.map((message, index) => (
-            <Bubble variant="tinted" key={message.id}>
+            <Bubble variant="tinted" className="max-w-none" key={message.id}>
               <ReplyButton message={message} align="end" onReply={onReply} />
               <BubbleContent
                 className={`relative max-w-[65ch] min-w-12 !overflow-visible rounded-[8px] px-[9px] py-1.5 text-sm leading-5 whitespace-pre-wrap ${
@@ -281,7 +281,7 @@ export function GroupReplyCluster({
       <GroupAvatar name={cluster.author} className="mt-0.5" />
       <BubbleGroup className="w-fit max-w-[85%] gap-0.5 sm:max-w-[75%]">
         {cluster.messages.map((message, index) => (
-          <Bubble variant="outline" key={message.id}>
+          <Bubble variant="outline" className="max-w-none" key={message.id}>
             <ReplyButton message={message} align="start" onReply={onReply} />
             <BubbleContent
               className={`relative max-w-[65ch] !overflow-visible rounded-[8px] !border-transparent !bg-card px-[9px] py-1.5 text-sm leading-5 ${

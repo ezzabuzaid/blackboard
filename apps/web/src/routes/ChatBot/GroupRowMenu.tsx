@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@stdlib/shadcn"
+} from "@zukhruf/shadcn"
 import {
   Archive,
   ChevronDown,
@@ -89,21 +89,23 @@ export function GroupRowMenu({
           if (open && agentIds.length > 0) void loadMarketplace()
         }}
       >
-        <DropdownMenuTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label={`Actions for ${name}`}
-            className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 data-[state=open]:opacity-100 max-sm:opacity-60"
-          >
-            <ChevronDown aria-hidden="true" />
-          </Button>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`Actions for ${name}`}
+              className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 data-popup-open:opacity-100 max-sm:opacity-60"
+            />
+          }
+        >
+          <ChevronDown aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-48">
           <DropdownMenuItem
             disabled={pending}
-            onSelect={() =>
+            onClick={() =>
               void run(() =>
                 api.request(
                   pinned
@@ -128,7 +130,7 @@ export function GroupRowMenu({
                 ? "Add at least one agent before publishing"
                 : undefined
             }
-            onSelect={() => setMarketplaceOpen(true)}
+            onClick={() => setMarketplaceOpen(true)}
           >
             <Store aria-hidden="true" />
             {marketplaceLoading
@@ -139,7 +141,7 @@ export function GroupRowMenu({
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={pending}
-            onSelect={() =>
+            onClick={() =>
               void run(() =>
                 api.request("POST /groups/{groupId}/archive", { groupId })
               )
@@ -152,7 +154,7 @@ export function GroupRowMenu({
           <DropdownMenuItem
             variant="destructive"
             disabled={pending}
-            onSelect={() => setConfirmingClear(true)}
+            onClick={() => setConfirmingClear(true)}
           >
             <CircleMinus aria-hidden="true" />
             Clear chat
@@ -160,7 +162,7 @@ export function GroupRowMenu({
           <DropdownMenuItem
             variant="destructive"
             disabled={pending}
-            onSelect={() => {
+            onClick={() => {
               setDeleteError(null)
               setConfirmingDelete(true)
             }}
@@ -185,8 +187,7 @@ export function GroupRowMenu({
             <AlertDialogAction
               variant="destructive"
               disabled={pending}
-              onClick={(event) => {
-                event.preventDefault()
+              onClick={() => {
                 void run(async () => {
                   await api.request("POST /groups/{groupId}/clear", { groupId })
                   setConfirmingClear(false)
@@ -212,30 +213,28 @@ export function GroupRowMenu({
         <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
             <AlertDialogTitle>Delete {name}?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="text-left">
-                <p>This cannot be undone.</p>
-                <dl className="mt-5 space-y-4">
-                  <div>
-                    <dt className="text-sm font-medium text-foreground">
-                      Deleted
-                    </dt>
-                    <dd className="mt-1 text-pretty leading-6">
-                      Conversation, agent memory, group files and artifacts,
-                      every share link, and any unpublished marketplace draft.
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-sm font-medium text-foreground">
-                      Kept
-                    </dt>
-                    <dd className="mt-1 text-pretty leading-6">
-                      Published marketplace template, account-level participant
-                      data, agent telemetry, and API request logs.
-                    </dd>
-                  </div>
-                </dl>
-              </div>
+            <AlertDialogDescription render={<div className="text-left" />}>
+              <p>This cannot be undone.</p>
+              <dl className="mt-5 space-y-4">
+                <div>
+                  <dt className="text-sm font-medium text-foreground">
+                    Deleted
+                  </dt>
+                  <dd className="mt-1 text-pretty leading-6">
+                    Conversation, agent memory, group files and artifacts,
+                    every share link, and any unpublished marketplace draft.
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-sm font-medium text-foreground">
+                    Kept
+                  </dt>
+                  <dd className="mt-1 text-pretty leading-6">
+                    Published marketplace template, account-level participant
+                    data, agent telemetry, and API request logs.
+                  </dd>
+                </div>
+              </dl>
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && (
@@ -248,8 +247,7 @@ export function GroupRowMenu({
             <AlertDialogAction
               variant="destructive"
               disabled={pending}
-              onClick={(event) => {
-                event.preventDefault()
+              onClick={() => {
                 setPending(true)
                 setDeleteError(null)
                 void api

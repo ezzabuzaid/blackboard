@@ -1,4 +1,5 @@
-import { Avatar, AvatarFallback, AvatarGroup, Button, cn } from "@stdlib/shadcn"
+import { cn } from "cn"
+import { Avatar, AvatarFallback, AvatarGroup, Button } from "@zukhruf/shadcn"
 
 import { useOptionalAgentTraceSelection } from "./traces/AgentTraceSidebar"
 

@@ -4,7 +4,7 @@ import {
   Button,
   Input,
   ScrollArea,
-} from "@stdlib/shadcn"
+} from "@zukhruf/shadcn"
 import { BellRing, MessageSquarePlus, Pin, Search, Square } from "lucide-react"
 import { useEffect, useState } from "react"
 import { Link, useLoaderData } from "react-router"
@@ -71,11 +71,10 @@ function SidebarHeader() {
         variant="ghost"
         size="icon"
         aria-label="New group"
-        asChild
+        nativeButton={false}
+        render={<Link to="/groups/new" />}
       >
-        <Link to="/groups/new">
-          <MessageSquarePlus aria-hidden="true" />
-        </Link>
+        <MessageSquarePlus aria-hidden="true" />
       </Button>
     </header>
   )

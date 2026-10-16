@@ -11,7 +11,7 @@ import {
   FieldLabel,
   Input,
   Textarea,
-} from "@stdlib/shadcn"
+} from "@zukhruf/shadcn"
 import { ArrowLeft, Store } from "lucide-react"
 import { useEffect, useState } from "react"
 
@@ -185,7 +185,7 @@ export function MarketplaceTemplateDialog({
         onOpenChange(next)
       }}
     >
-      <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         {loading && !editor ? (
           <div className="py-10 text-center text-sm text-muted-foreground">
             Loading template…

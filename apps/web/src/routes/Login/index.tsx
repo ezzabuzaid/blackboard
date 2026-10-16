@@ -1,4 +1,4 @@
-import { Button, Input, Label } from "@stdlib/shadcn"
+import { Button, Input, Label } from "@zukhruf/shadcn"
 import { KeyRound, LoaderCircle, MessageCircle } from "lucide-react"
 import { type FormEvent, useState } from "react"
 import {
