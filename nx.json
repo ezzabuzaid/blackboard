@@ -21,6 +21,13 @@
   "targetDefaults": {
     "build": {
       "dependsOn": ["^build"],
+      "inputs": [
+        "default",
+        "^default",
+        {
+          "env": "NODE_ENV"
+        }
+      ],
       "cache": true,
       "syncGenerators": ["@juristr/nx-tailwind-sync:source-directives"]
     },
