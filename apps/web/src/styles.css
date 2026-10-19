@@ -2,6 +2,7 @@
 @import "tailwindcss";
 @import "@zukhruf/shadcn/styles.css";
 @import "streamdown/styles.css";
+@source "../../../node_modules/streamdown/dist/*.js";
 
 /* nx-tailwind-sources:start */
 @source "../../../packages/annotation";
