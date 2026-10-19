@@ -23,14 +23,16 @@ describe("annotation composition", () => {
               onChange={(event) => setComment(event.currentTarget.value)}
             />
           </Annotation.Content>
-          <Annotation.Remove>
-            <button
-              type="button"
-              aria-label="Remove annotation"
-              onClick={remove}
-            >
-              Remove
-            </button>
+          <Annotation.Remove
+            render={
+              <button
+                type="button"
+                aria-label="Remove annotation"
+                onClick={remove}
+              />
+            }
+          >
+            Remove
           </Annotation.Remove>
         </Annotation.Root>
       )

@@ -1,20 +1,10 @@
-import { Popover } from "radix-ui"
+import { Popover, PopoverContent, PopoverTrigger } from "@zukhruf/shadcn"
 import * as React from "react"
 
 function AnnotationReferenceTrigger(
-  props: React.ComponentProps<typeof Popover.Trigger>
+  props: React.ComponentProps<typeof PopoverTrigger>
 ) {
-  return <Popover.Trigger data-slot="annotation-reference-trigger" {...props} />
-}
-
-function AnnotationReferenceContent(
-  props: React.ComponentProps<typeof Popover.Content>
-) {
-  return (
-    <Popover.Portal>
-      <Popover.Content {...props} />
-    </Popover.Portal>
-  )
+  return <PopoverTrigger data-slot="annotation-reference-trigger" {...props} />
 }
 
 function AnnotationReferenceExcerpt(props: React.ComponentProps<"span">) {
@@ -26,9 +16,9 @@ function AnnotationReferenceComment(props: React.ComponentProps<"span">) {
 }
 
 export const AnnotationReference = {
-  Root: Popover.Root,
+  Root: Popover,
   Trigger: AnnotationReferenceTrigger,
-  Content: AnnotationReferenceContent,
+  Content: PopoverContent,
   Excerpt: AnnotationReferenceExcerpt,
   Comment: AnnotationReferenceComment,
 } as const

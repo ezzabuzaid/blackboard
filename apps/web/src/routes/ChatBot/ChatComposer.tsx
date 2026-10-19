@@ -169,15 +169,17 @@ function ReferenceChip({
         <Annotation.Excerpt>{text}</Annotation.Excerpt>
         {children}
       </Annotation.Content>
-      <Annotation.Remove>
-        <InputGroupButton
-          size="icon-xs"
-          aria-label={removeLabel}
-          className="text-muted-foreground"
-          onClick={onRemove}
-        >
-          <X aria-hidden="true" />
-        </InputGroupButton>
+      <Annotation.Remove
+        render={
+          <InputGroupButton
+            size="icon-xs"
+            aria-label={removeLabel}
+            className="text-muted-foreground"
+            onClick={onRemove}
+          />
+        }
+      >
+        <X aria-hidden="true" />
       </Annotation.Remove>
     </Annotation.Root>
   )

@@ -137,28 +137,30 @@ export function Conversation() {
         </MessageScroller>
       </MessageScrollerProvider>
       {selection && (
-        <Annotation.Selection>
-          <Button
-            type="button"
-            size="sm"
-            className="fixed z-50 h-8 -translate-x-1/2 gap-1.5 rounded-full px-3 text-sm shadow-lg"
-            style={{
-              left: selection.x,
-              top: selection.below ? selection.y : undefined,
-              bottom: selection.below
-                ? undefined
-                : globalThis.innerHeight - selection.y,
-            }}
-            onPointerDown={(event) => event.preventDefault()}
-            onClick={() => {
-              addAnnotation(selection.message, selection.excerpt)
-              globalThis.getSelection()?.removeAllRanges()
-              setSelection(null)
-            }}
-          >
-            <MessageSquareQuote aria-hidden="true" />
-            Add to chat
-          </Button>
+        <Annotation.Selection
+          render={
+            <Button
+              type="button"
+              size="sm"
+              className="fixed z-50 h-8 -translate-x-1/2 gap-1.5 rounded-full px-3 text-sm shadow-lg"
+              style={{
+                left: selection.x,
+                top: selection.below ? selection.y : undefined,
+                bottom: selection.below
+                  ? undefined
+                  : globalThis.innerHeight - selection.y,
+              }}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => {
+                addAnnotation(selection.message, selection.excerpt)
+                globalThis.getSelection()?.removeAllRanges()
+                setSelection(null)
+              }}
+            />
+          }
+        >
+          <MessageSquareQuote aria-hidden="true" />
+          Add to chat
         </Annotation.Selection>
       )}
     </section>

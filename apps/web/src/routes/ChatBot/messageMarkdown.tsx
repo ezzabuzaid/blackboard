@@ -186,7 +186,7 @@ function ResponseAnnotationReference({
       <AnnotationReference.Content
         side="top"
         sideOffset={8}
-        className="bg-popover text-popover-foreground ring-foreground/10 z-50 flex w-64 flex-col gap-2 rounded-lg p-3 text-start text-xs shadow-md ring-1 outline-hidden"
+        className="w-64 gap-2 p-3 text-start text-xs"
       >
         <AnnotationReference.Excerpt>
           {annotation.excerpt}
