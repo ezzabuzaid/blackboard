@@ -384,7 +384,7 @@ function TemplateCard({
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           {template.outcome}
         </p>
-        {template.source === "marketplace" && template.publisherName && (
+        {template.source === "marketplace" && (
           <p className="mt-2 text-xs text-muted-foreground">
             By {template.publisherName}
           </p>

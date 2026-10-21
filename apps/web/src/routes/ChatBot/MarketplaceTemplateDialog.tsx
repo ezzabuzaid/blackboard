@@ -20,7 +20,7 @@ import { api } from "./api"
 interface MarketplaceTemplate {
   id: string
   sourceGroupId: string | null
-  publisherName: string | null
+  publisherName: string
   name: string
   category: string
   outcome: string
@@ -469,9 +469,7 @@ function readMarketplaceTemplate(value: unknown): MarketplaceTemplate {
     !(
       value.sourceGroupId === null || typeof value.sourceGroupId === "string"
     ) ||
-    !(
-      value.publisherName === null || typeof value.publisherName === "string"
-    ) ||
+    typeof value.publisherName !== "string" ||
     typeof value.name !== "string" ||
     typeof value.category !== "string" ||
     typeof value.outcome !== "string" ||

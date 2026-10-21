@@ -71,9 +71,11 @@ const trustedOrigins = process.env.WEB_ORIGIN
 
 await using resources = new AsyncDisposableStack();
 
+const authDatabasePath = resolve(dataDirectory, 'auth.sqlite');
+
 const authentication = resources.use(
   await createAuthentication({
-    databasePath: resolve(dataDirectory, 'auth.sqlite'),
+    databasePath: authDatabasePath,
     baseURL,
     secret: authSecret,
     trustedOrigins,
@@ -89,6 +91,7 @@ const groups = new GroupStore(
 resources.defer(() => groups[Symbol.dispose]());
 const marketplaceTemplates = new MarketplaceGroupTemplateStore(
   resolve(dataDirectory, 'group-templates.sqlite'),
+  authDatabasePath,
   agents.map(({ id }) => id),
 );
 resources.defer(() => marketplaceTemplates[Symbol.dispose]());

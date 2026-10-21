@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
 
+import { Declaration } from "@zukhruf/sqlite-drift"
+
 export interface GroupRecord {
   id: string
   name: string
@@ -41,8 +43,9 @@ export class GroupStore implements Disposable {
   constructor(databasePath: string, agentIds: Iterable<string>) {
     this.#database = new DatabaseSync(databasePath)
     this.#agentIds = new Set(agentIds)
-    this.#database.exec(`
-      CREATE TABLE IF NOT EXISTS groups (
+    new Declaration(
+      [
+        `CREATE TABLE groups (
         user_id TEXT NOT NULL,
         id TEXT NOT NULL,
         name TEXT NOT NULL,
@@ -56,30 +59,10 @@ export class GroupStore implements Disposable {
         pinned_at INTEGER,
         archived_at INTEGER,
         PRIMARY KEY (user_id, id)
-      ) STRICT
-    `)
-    const columns = new Set(
-      (
-        this.#database.prepare("PRAGMA table_info(groups)").all() as {
-          name: string
-        }[]
-      ).map(({ name }) => name)
-    )
-    for (const [name, definition] of [
-      ["last_message_author", "TEXT"],
-      ["last_message_content", "TEXT"],
-      ["last_message_at", "INTEGER"],
-      ["unread_count", "INTEGER NOT NULL DEFAULT 0"],
-      ["projected_message_cursor", "INTEGER NOT NULL DEFAULT 0"],
-      ["pinned_at", "INTEGER"],
-      ["archived_at", "INTEGER"],
-    ] as const) {
-      if (!columns.has(name)) {
-        this.#database.exec(
-          `ALTER TABLE groups ADD COLUMN ${name} ${definition}`
-        )
-      }
-    }
+      ) STRICT`,
+      ],
+      { rows: "keep" }
+    ).apply(this.#database)
   }
 
   create(

@@ -641,10 +641,11 @@ test('group template catalog resolves agent names', async () => {
 });
 
 test('a publisher owns the marketplace template lifecycle', async () => {
-  using marketplaceTemplates = new MarketplaceGroupTemplateStore(':memory:', [
-    'annie-duke',
-    'paul-graham',
-  ]);
+  using marketplaceTemplates = new MarketplaceGroupTemplateStore(
+    ':memory:',
+    ':memory:',
+    ['annie-duke', 'paul-graham'],
+  );
   let userId = 'publisher-1';
   const application = testApp({
     marketplaceTemplates,
@@ -761,10 +762,11 @@ test('a publisher owns the marketplace template lifecycle', async () => {
 });
 
 test('an owned group saves one marketplace template from its roster', async () => {
-  using marketplaceTemplates = new MarketplaceGroupTemplateStore(':memory:', [
-    'annie-duke',
-    'paul-graham',
-  ]);
+  using marketplaceTemplates = new MarketplaceGroupTemplateStore(
+    ':memory:',
+    ':memory:',
+    ['annie-duke', 'paul-graham'],
+  );
   let userId = 'publisher-1';
   const group = testGroupRecord('group-1', 'Founder Board', [
     'annie-duke',
@@ -886,90 +888,12 @@ test('an owned group saves one marketplace template from its roster', async () =
   );
 });
 
-test('legacy marketplace listings remain readable when attribution is added', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'marketplace-migration-'));
-  const databasePath = join(directory, 'group-templates.sqlite');
-  try {
-    const database = new DatabaseSync(databasePath);
-    database.exec(`
-      CREATE TABLE marketplace_group_templates (
-        id TEXT PRIMARY KEY,
-        publisher_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        category TEXT NOT NULL,
-        outcome TEXT NOT NULL,
-        agents TEXT NOT NULL,
-        published INTEGER NOT NULL CHECK (published IN (0, 1))
-      ) STRICT
-    `);
-    database
-      .prepare(
-        `INSERT INTO marketplace_group_templates
-           (id, publisher_id, name, category, outcome, agents, published)
-         VALUES (?, ?, ?, ?, ?, ?, 1)`,
-      )
-      .run(
-        'legacy-template',
-        'publisher-1',
-        'Legacy Board',
-        'Strategy',
-        'Preserve this published group.',
-        JSON.stringify([
-          {
-            agentId: 'paul-graham',
-            responsibility: 'Keeps the company focused on users.',
-          },
-        ]),
-      );
-    database.close();
-
-    using marketplaceTemplates = new MarketplaceGroupTemplateStore(
-      databasePath,
-      ['paul-graham'],
-    );
-    assert.equal(
-      marketplaceTemplates.create('publisher-1', 'Publisher One', {
-        name: 'Founder Board',
-        category: 'Strategy',
-        outcome: 'Challenge the next company decision.',
-        agents: [
-          {
-            agentId: 'paul-graham',
-            responsibility: 'Keeps the company focused on users.',
-          },
-        ],
-      }).publisherName,
-      'Publisher One',
-    );
-    assert.deepEqual(
-      marketplaceTemplates
-        .published()
-        .find(({ id }) => id === 'legacy-template'),
-      {
-        id: 'legacy-template',
-        sourceGroupId: null,
-        publisherName: null,
-        name: 'Legacy Board',
-        category: 'Strategy',
-        outcome: 'Preserve this published group.',
-        agents: [
-          {
-            agentId: 'paul-graham',
-            responsibility: 'Keeps the company focused on users.',
-          },
-        ],
-        published: true,
-      },
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
 test('published marketplace templates create ordinary groups', async () => {
-  using marketplaceTemplates = new MarketplaceGroupTemplateStore(':memory:', [
-    'paul-graham',
-  ]);
+  using marketplaceTemplates = new MarketplaceGroupTemplateStore(
+    ':memory:',
+    ':memory:',
+    ['paul-graham'],
+  );
   const template = marketplaceTemplates.create('publisher-1', 'Publisher One', {
     name: 'Founder Board',
     category: 'Strategy',

@@ -1,4 +1,8 @@
 import assert from "node:assert/strict"
+import { mkdtempDisposable } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import test from "node:test"
 
 import { GroupStore } from "./group-store.js"
@@ -161,4 +165,59 @@ test("groups are permanently deleted only by their owner", () => {
   assert.equal(groups.get("user-1", group.id), null)
   assert.equal(groups.ownerOf(group.id), null)
   assert.equal(groups.delete("user-1", group.id), false)
+})
+
+test("a groups table from an earlier version keeps its rows and takes the current table", async () => {
+  await using directory = await mkdtempDisposable(
+    join(tmpdir(), "group-store-upgrade-")
+  )
+  const databasePath = join(directory.path, "group.sqlite")
+  {
+    // The first GroupStore made the table without the sidebar columns.
+    using database = new DatabaseSync(databasePath)
+    database.exec(`
+      CREATE TABLE groups (
+        user_id TEXT NOT NULL,
+        id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        agent_ids TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (user_id, id)
+      ) STRICT
+    `)
+    database
+      .prepare("INSERT INTO groups VALUES (?, ?, ?, ?, ?)")
+      .run(
+        "user-1",
+        "group-1",
+        "Founder panel",
+        JSON.stringify(["annie-duke"]),
+        Date.parse("2026-08-04T00:00:00.000Z")
+      )
+  }
+
+  using groups = new GroupStore(databasePath, ["annie-duke"])
+  using fresh = new GroupStore(join(directory.path, "fresh.sqlite"), [])
+
+  assert.deepEqual(groups.list("user-1"), [
+    {
+      id: "group-1",
+      name: "Founder panel",
+      agentIds: ["annie-duke"],
+      createdAt: "2026-08-04T00:00:00.000Z",
+      lastMessage: null,
+      unreadCount: 0,
+      pinned: false,
+    },
+  ])
+  const storedTable = (path: string) => {
+    using database = new DatabaseSync(path, { readOnly: true })
+    return database
+      .prepare("SELECT sql FROM sqlite_schema WHERE name = 'groups'")
+      .get()
+  }
+  assert.deepEqual(
+    storedTable(databasePath),
+    storedTable(join(directory.path, "fresh.sqlite"))
+  )
 })

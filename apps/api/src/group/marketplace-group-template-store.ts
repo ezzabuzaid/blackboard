@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto"
 import { DatabaseSync } from "node:sqlite"
+import { pathToFileURL } from "node:url"
+
+import { Declaration } from "@zukhruf/sqlite-drift"
 
 import type { GroupTemplate } from "./group-template-catalog.js"
 
@@ -8,7 +11,7 @@ export type MarketplaceGroupTemplateInput = Omit<GroupTemplate, "id">
 export interface MarketplaceGroupTemplate {
   id: string
   sourceGroupId: string | null
-  publisherName: string | null
+  publisherName: string
   name: string
   category: string
   outcome: string
@@ -19,7 +22,7 @@ export interface MarketplaceGroupTemplate {
 type MarketplaceGroupTemplateRow = {
   id: string
   source_group_id: string | null
-  publisher_name: string | null
+  publisher_name: string
   name: string
   category: string
   outcome: string
@@ -38,11 +41,16 @@ export class MarketplaceGroupTemplateStore implements Disposable {
   readonly #database: DatabaseSync
   readonly #agentIds: ReadonlySet<string>
 
-  constructor(databasePath: string, agentIds: Iterable<string>) {
+  constructor(
+    databasePath: string,
+    authDatabasePath: string,
+    agentIds: Iterable<string>
+  ) {
     this.#database = new DatabaseSync(databasePath)
     this.#agentIds = new Set(agentIds)
-    this.#database.exec(`
-      CREATE TABLE IF NOT EXISTS marketplace_group_templates (
+    const templates = new Declaration(
+      [
+        `CREATE TABLE marketplace_group_templates (
         id TEXT PRIMARY KEY,
         publisher_id TEXT NOT NULL,
         publisher_name TEXT NOT NULL,
@@ -52,30 +60,42 @@ export class MarketplaceGroupTemplateStore implements Disposable {
         outcome TEXT NOT NULL,
         agents TEXT NOT NULL,
         published INTEGER NOT NULL CHECK (published IN (0, 1))
-      ) STRICT
-    `)
-    const columns = new Set(
-      (
-        this.#database
-          .prepare("PRAGMA table_info(marketplace_group_templates)")
-          .all() as { name: string }[]
-      ).map(({ name }) => name)
-    )
-    if (!columns.has("publisher_name")) {
-      this.#database.exec(
-        "ALTER TABLE marketplace_group_templates ADD COLUMN publisher_name TEXT"
-      )
-    }
-    if (!columns.has("source_group_id")) {
-      this.#database.exec(
-        "ALTER TABLE marketplace_group_templates ADD COLUMN source_group_id TEXT"
-      )
-    }
-    this.#database.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS marketplace_group_templates_source_group
+      ) STRICT`,
+        `CREATE UNIQUE INDEX marketplace_group_templates_source_group
       ON marketplace_group_templates (publisher_id, source_group_id)
-      WHERE source_group_id IS NOT NULL
-    `)
+      WHERE source_group_id IS NOT NULL`,
+      ],
+      { rows: "keep" }
+    )
+    if (templates.drift(this.#database) === "stale") {
+      // Tables made before publisher_name was NOT NULL hold rows without it.
+      // Each takes its publisher's name from better-auth; a template whose
+      // publisher has no user left is deleted.
+      this.#database
+        .prepare("ATTACH DATABASE ? AS auth")
+        .run(`${pathToFileURL(authDatabasePath).href}?mode=ro`)
+      try {
+        const hasPublisherName = this.#database
+          .prepare(
+            "SELECT 1 FROM pragma_table_info('marketplace_group_templates') WHERE name = 'publisher_name'"
+          )
+          .get()
+        if (!hasPublisherName) {
+          this.#database.exec(
+            "ALTER TABLE marketplace_group_templates ADD COLUMN publisher_name TEXT"
+          )
+        }
+        this.#database.exec(`
+          UPDATE marketplace_group_templates
+          SET publisher_name = (SELECT name FROM auth.user WHERE id = publisher_id)
+          WHERE publisher_name IS NULL;
+          DELETE FROM marketplace_group_templates WHERE publisher_name IS NULL;
+        `)
+      } finally {
+        this.#database.exec("DETACH DATABASE auth")
+      }
+    }
+    templates.apply(this.#database)
   }
 
   create(

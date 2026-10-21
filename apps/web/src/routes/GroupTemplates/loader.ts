@@ -30,7 +30,7 @@ export type GroupTemplate = GroupTemplateBase &
     | { source: "prebuilt" }
     | {
         source: "marketplace"
-        publisherName: string | null
+        publisherName: string
         owned: boolean
         detached: boolean
       }
