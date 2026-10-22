@@ -39,12 +39,11 @@ export function createStack(
 ) {
   const participantSlug = queueSlug(participantName);
   return defineStack(async () => {
-    const queue = new PgBossTurnQueue(boss, {
+    const queue = await PgBossTurnQueue.create(boss, {
       queue: `zukhruf-whatsapp-${participantSlug}`,
       schema: 'pgboss',
       pollingIntervalSeconds: 0.5,
     });
-    await queue.initialize();
     const wakes = new PgBossWakeScheduler<SchedulingWake>(boss, {
       queue: `zukhruf-whatsapp-wakes-${participantSlug}`,
       pollingIntervalSeconds: 0.5,

@@ -13,7 +13,7 @@ import {
   type AgentPluginDefinition,
   type ConversationId,
   type MailboxStore,
-  MessageDeliveryMode,
+  MessageDeliveryModes,
   createInterAgentCommunication,
   defineAgent,
 } from "@deepagents/experimental/zukhruf"
@@ -1008,7 +1008,7 @@ export class WhatsAppGroup implements AsyncDisposable {
                 .map(({ name }) => name),
             },
           }),
-          MessageDeliveryMode.QueueOnly,
+          MessageDeliveryModes.QueueOnly,
         )
         delivered.add(participant.name)
       }),
