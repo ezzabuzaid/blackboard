@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { existsSync, rmSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
@@ -20,6 +20,8 @@ import {
   SqliteMailboxStore,
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
+import { settleWithin } from '@zukhruf/testing/async';
+import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import type { DrainContext } from 'evlog';
@@ -360,8 +362,10 @@ test('session history is derived from the authenticated user groups', async () =
 });
 
 test('history does not initialize an unopened group runtime', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-history-'));
-  const queueDirectory = join(directory, 'queues');
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-history-',
+  );
+  const queueDirectory = join(directory.path, 'queues');
   let participantLoads = 0;
   await using runtime = new WhatsAppChatRuntime({
     loadParticipants: async () => {
@@ -370,8 +374,8 @@ test('history does not initialize an unopened group runtime', async () => {
     },
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
-    databasePath: join(directory, 'group.sqlite'),
-    mailboxPath: join(directory, 'mailbox.sqlite'),
+    databasePath: join(directory.path, 'group.sqlite'),
+    mailboxPath: join(directory.path, 'mailbox.sqlite'),
     queueDirectory,
   });
   const group = testGroupRecord('unopened-group', 'Unopened group', []);
@@ -543,7 +547,7 @@ test('participant model sends high reasoning effort and retains application tool
     id: 'codex-reasoning',
     content: 'Reply to the group.',
   });
-  await waitForChat(runtime, testGroupConversation, 'settled');
+  await waitForChat(t, runtime, testGroupConversation, 'settled');
   assert.equal(
     (await runtime.transcript(testGroupConversation)).messages.at(-1)?.content,
     'Ready for the group.',
@@ -1719,8 +1723,10 @@ test('chat runtime publishes owner-scoped status changes and closes aborted subs
   assert.equal((await pending).done, true);
 });
 
-test('chat runtime rebuilds message projections from the durable log', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-projection-'));
+test('chat runtime rebuilds message projections from the durable log', async (t) => {
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-projection-',
+  );
   const conversation = { chatId: 'projection-chat', userId: 'local-user' };
   const seen: unknown[] = [];
   const runtime = () =>
@@ -1731,29 +1737,25 @@ test('chat runtime rebuilds message projections from the durable log', async () 
       },
       limits: testGroupLimits,
       sandboxForChat: () => testGroupSandbox,
-      databasePath: join(directory, 'group.sqlite'),
-      mailboxPath: join(directory, 'mailbox.sqlite'),
-      queueDirectory: join(directory, 'queues'),
+      databasePath: join(directory.path, 'group.sqlite'),
+      mailboxPath: join(directory.path, 'mailbox.sqlite'),
+      queueDirectory: join(directory.path, 'queues'),
     });
 
-  try {
-    let message: Awaited<ReturnType<WhatsAppChatRuntime['post']>>;
-    {
-      await using first = runtime();
-      message = await first.post(conversation, {
-        id: 'projected-message',
-        content: 'Rebuild this sidebar state.',
-      });
-      await waitForChat(first, conversation, 'settled');
-    }
-
-    seen.length = 0;
-    await using second = runtime();
-    await second.replayMessages(conversation);
-    assert.deepEqual(seen, [{ conversation, message, cursor: 1 }]);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+  let message: Awaited<ReturnType<WhatsAppChatRuntime['post']>>;
+  {
+    await using first = runtime();
+    message = await first.post(conversation, {
+      id: 'projected-message',
+      content: 'Rebuild this sidebar state.',
+    });
+    await waitForChat(t, first, conversation, 'settled');
   }
+
+  seen.length = 0;
+  await using second = runtime();
+  await second.replayMessages(conversation);
+  assert.deepEqual(seen, [{ conversation, message, cursor: 1 }]);
 });
 
 test('snapshots reuse the active chat roster', async () => {
@@ -1777,7 +1779,7 @@ test('snapshots reuse the active chat roster', async () => {
   assert.equal(loads, 2);
 });
 
-test('new participants join an active chat, read its transcript, and greet once', async () => {
+test('new participants join an active chat, read its transcript, and greet once', async (t) => {
   const conversation = { userId: 'user-1', chatId: 'active-roster' };
   const joinReminder =
     'You just joined an ongoing group chat. Read the full public conversation included in this notification, then greet the group once with a brief, natural introduction.';
@@ -1827,7 +1829,7 @@ test('new participants join an active chat, read its transcript, and greet once'
     id: 'message-1',
     content: 'Factory, create a researcher for this conversation.',
   });
-  let snapshot = await waitForChat(runtime, conversation, 'settled');
+  let snapshot = await waitForChat(t, runtime, conversation, 'settled');
 
   assert.deepEqual(snapshot.participants, [
     { name: 'Factory' },
@@ -1852,7 +1854,7 @@ test('new participants join an active chat, read its transcript, and greet once'
     id: 'message-2',
     content: 'Thanks.',
   });
-  snapshot = await waitForChat(runtime, conversation, 'settled');
+  snapshot = await waitForChat(t, runtime, conversation, 'settled');
 
   assert.equal(
     snapshot.messages.filter(({ author }) => author === 'Researcher').length,
@@ -1860,7 +1862,7 @@ test('new participants join an active chat, read its transcript, and greet once'
   );
 });
 
-test('a chat stops instead of freezing when the pump throws', async () => {
+test('a chat stops instead of freezing when the pump throws', async (t) => {
   const conversation = { userId: 'user-1', chatId: 'pump-failure' };
   const roster: WhatsAppParticipant[] = [];
   let collided = false;
@@ -1892,17 +1894,19 @@ test('a chat stops instead of freezing when the pump throws', async () => {
   });
 
   await runtime.post(conversation, { id: 'message-1', content: 'Hello.' });
-  const snapshot = await waitForChat(runtime, conversation, 'stopped');
+  const snapshot = await waitForChat(t, runtime, conversation, 'stopped');
 
   assert.equal(snapshot.activity.stopReason, 'interrupted');
 });
 
-test('Docker shares group work and isolates chats and users', async (t) => {
-  const directory = await mkdtemp(join(tmpdir(), 'whatsapp-sandbox-'));
+test('Docker shares group work and isolates chats and users', async () => {
+  await using directory = await new TemporaryFiles().directory(
+    'whatsapp-sandbox-',
+  );
   const firstChat = { chatId: 'chat-1', userId: 'local-user' };
   const secondChat = { chatId: 'chat-2', userId: 'local-user' };
   const otherUserChat = { chatId: 'chat-1', userId: 'other-user' };
-  const builtins = resolve(directory, 'builtins', 'factory');
+  const builtins = resolve(directory.path, 'builtins', 'factory');
   await mkdir(builtins, { recursive: true });
   await Promise.all([
     writeFile(
@@ -1914,9 +1918,9 @@ test('Docker shares group work and isolates chats and users', async (t) => {
     writeFile(resolve(builtins, 'MEMORY.md'), '# Memory'),
   ]);
   const participants = new ParticipantDirectory({
-    directory: resolve(directory, 'participants'),
-    builtinsDirectory: resolve(directory, 'builtins'),
-    telemetryDirectory: resolve(directory, 'group-telemetry'),
+    directory: resolve(directory.path, 'participants'),
+    builtinsDirectory: resolve(directory.path, 'builtins'),
+    telemetryDirectory: resolve(directory.path, 'group-telemetry'),
     loadDefaults: async () => ({
       model: new MockLanguageModelV4({
         doStream: async () => groupTextResponse('unused'),
@@ -1924,18 +1928,17 @@ test('Docker shares group work and isolates chats and users', async (t) => {
       tools: {},
     }),
   });
-  const sandboxes = new GroupSandboxes({
-    dataDirectory: directory,
+  await using sandboxes = new GroupSandboxes({
+    dataDirectory: directory.path,
     mountsFor: (conversation) => participants.mounts(conversation.userId),
   });
-  t.after(async () => {
+  await using sandboxRemovals = new AsyncDisposableStack();
+  sandboxRemovals.defer(async () => {
     const removals = await Promise.allSettled(
       [firstChat, secondChat, otherUserChat].map((conversation) =>
         sandboxes.remove(conversation),
       ),
     );
-    await sandboxes[Symbol.asyncDispose]();
-    await rm(directory, { recursive: true, force: true });
     const failures = removals.filter(
       (result): result is PromiseRejectedResult => result.status === 'rejected',
     );
@@ -2055,7 +2058,7 @@ test('Docker shares group work and isolates chats and users', async (t) => {
   await sandboxes.remove(otherUserChat);
 });
 
-test('chat message POST returns before active participants settle', async () => {
+test('chat message POST returns before active participants settle', async (t) => {
   const chatId = '00000000-0000-4000-8000-000000000001';
   const conversation = { chatId, userId: 'local-user' };
   const participantStarted = Promise.withResolvers<void>();
@@ -2076,7 +2079,7 @@ test('chat message POST returns before active participants settle', async () => 
 
   try {
     const groupApp = testApp({ runtime });
-    const request = () =>
+    const request = async () =>
       groupApp.request(`/api/chat/${chatId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2085,12 +2088,11 @@ test('chat message POST returns before active participants settle', async () => 
           content: 'What should we do first?',
         }),
       });
-    const response = await Promise.race([
+    const response = await settleWithin(
       request(),
-      sleep(2_000).then(() => {
-        throw new Error('message POST waited for the participant');
-      }),
-    ]);
+      'the message POST, which must not wait for the participant',
+      2_000,
+    );
 
     assert.equal(response.status, 201);
     const posted = (await response.json()) as {
@@ -2149,7 +2151,7 @@ test('chat message POST returns before active participants settle', async () => 
     });
 
     releaseParticipant.resolve();
-    await waitForChat(runtime, conversation, 'settled');
+    await waitForChat(t, runtime, conversation, 'settled');
 
     async function readEvents() {
       const controller = new AbortController();
@@ -2944,14 +2946,11 @@ test('every group member answers a greeting addressed to the whole group', async
       activeParticipationChecks,
     );
     if (firstParticipants.size === 2) firstNotificationStarted.resolve();
-    await Promise.race([
+    await settleWithin(
       firstNotificationStarted.promise,
-      sleep(2_000).then(() => {
-        throw new Error(
-          'members did not receive the notification concurrently',
-        );
-      }),
-    ]);
+      'every member to receive the notification concurrently',
+      2_000,
+    );
     activeParticipationChecks--;
   };
 
@@ -3255,8 +3254,8 @@ test('the previous responder answers an ambiguous short follow-up', async () => 
   );
 });
 
-test('a chat survives a runtime restart and replays persisted events', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-chat-'));
+test('a chat survives a runtime restart and replays persisted events', async (t) => {
+  await using directory = await new TemporaryFiles().directory('zukhruf-chat-');
   const conversation = { chatId: 'durable-chat', userId: 'local-user' };
   const liveEvents: WhatsAppChatEvent[] = [];
   const participants = [
@@ -3268,66 +3267,19 @@ test('a chat survives a runtime restart and replays persisted events', async () 
     },
   ];
 
-  try {
-    {
-      await using runtime = durableRuntime(participants, directory);
-      await runtime.createSession(conversation);
-      const stream = await runtime.observe(conversation).resume();
-      assert.ok(stream);
-      const reader = stream.getReader();
-      await runtime.post(conversation, {
-        id: 'message-1',
-        content: 'Keep this after restart.',
-      });
-      await waitForChat(runtime, conversation, 'settled');
-      while (
-        !liveEvents.some(
-          (event) =>
-            event.type === 'activity' && event.activity.type === 'settled',
-        )
-      ) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value.type === 'data-whatsapp-chat-event') {
-          liveEvents.push(value.data as WhatsAppChatEvent);
-        }
-      }
-      await reader.cancel();
-    }
-
-    assert.equal(
-      liveEvents.some(
-        (event) =>
-          event.type === 'activity' && event.activity.type === 'presence',
-      ),
-      true,
-    );
-
-    await using runtime = durableRuntime(participants, directory);
-    const snapshot = await runtime.snapshot(conversation);
-    assert.deepEqual(
-      snapshot.messages.map(({ id, author, content }) => ({
-        id,
-        author,
-        content,
-      })),
-      [
-        {
-          id: 'message-1',
-          author: 'user',
-          content: 'Keep this after restart.',
-        },
-      ],
-    );
-    assert.deepEqual(snapshot.participants, [{ name: 'Maya' }]);
-    assert.equal(snapshot.activity.phase, 'settled');
-
+  {
+    await using runtime = durableRuntime(participants, directory.path);
+    await runtime.createSession(conversation);
     const stream = await runtime.observe(conversation).resume();
     assert.ok(stream);
     const reader = stream.getReader();
-    const replayed: WhatsAppChatEvent[] = [];
+    await runtime.post(conversation, {
+      id: 'message-1',
+      content: 'Keep this after restart.',
+    });
+    await waitForChat(t, runtime, conversation, 'settled');
     while (
-      !replayed.some(
+      !liveEvents.some(
         (event) =>
           event.type === 'activity' && event.activity.type === 'settled',
       )
@@ -3335,41 +3287,85 @@ test('a chat survives a runtime restart and replays persisted events', async () 
       const { done, value } = await reader.read();
       if (done) break;
       if (value.type === 'data-whatsapp-chat-event') {
-        replayed.push(value.data as WhatsAppChatEvent);
+        liveEvents.push(value.data as WhatsAppChatEvent);
       }
     }
     await reader.cancel();
-    assert.equal(
-      replayed.some(
-        (event) =>
-          event.type === 'activity' && event.activity.type === 'presence',
-      ),
-      false,
-    );
-    assert.deepEqual(
-      replayed.map(({ cursor }) => cursor),
-      liveEvents
-        .filter(
-          (event) =>
-            event.type !== 'activity' || event.activity.type !== 'presence',
-        )
-        .map(({ cursor }) => cursor),
-    );
-    assert.equal(replayed.at(-1)?.cursor, snapshot.cursor);
-    assert.equal(
-      replayed.some(
-        ({ cursor }, index) =>
-          index > 0 && cursor > replayed[index - 1]!.cursor + 1,
-      ),
-      true,
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
   }
+
+  assert.equal(
+    liveEvents.some(
+      (event) =>
+        event.type === 'activity' && event.activity.type === 'presence',
+    ),
+    true,
+  );
+
+  await using runtime = durableRuntime(participants, directory.path);
+  const snapshot = await runtime.snapshot(conversation);
+  assert.deepEqual(
+    snapshot.messages.map(({ id, author, content }) => ({
+      id,
+      author,
+      content,
+    })),
+    [
+      {
+        id: 'message-1',
+        author: 'user',
+        content: 'Keep this after restart.',
+      },
+    ],
+  );
+  assert.deepEqual(snapshot.participants, [{ name: 'Maya' }]);
+  assert.equal(snapshot.activity.phase, 'settled');
+
+  const stream = await runtime.observe(conversation).resume();
+  assert.ok(stream);
+  const reader = stream.getReader();
+  const replayed: WhatsAppChatEvent[] = [];
+  while (
+    !replayed.some(
+      (event) => event.type === 'activity' && event.activity.type === 'settled',
+    )
+  ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value.type === 'data-whatsapp-chat-event') {
+      replayed.push(value.data as WhatsAppChatEvent);
+    }
+  }
+  await reader.cancel();
+  assert.equal(
+    replayed.some(
+      (event) =>
+        event.type === 'activity' && event.activity.type === 'presence',
+    ),
+    false,
+  );
+  assert.deepEqual(
+    replayed.map(({ cursor }) => cursor),
+    liveEvents
+      .filter(
+        (event) =>
+          event.type !== 'activity' || event.activity.type !== 'presence',
+      )
+      .map(({ cursor }) => cursor),
+  );
+  assert.equal(replayed.at(-1)?.cursor, snapshot.cursor);
+  assert.equal(
+    replayed.some(
+      ({ cursor }, index) =>
+        index > 0 && cursor > replayed[index - 1]!.cursor + 1,
+    ),
+    true,
+  );
 });
 
-test('participant conversations stay attached to their identity when the roster changes', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-roster-'));
+test('participant conversations stay attached to their identity when the roster changes', async (t) => {
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-roster-',
+  );
   const conversation = { chatId: 'roster-chat', userId: 'local-user' };
   const factoryPrompts: unknown[] = [];
   const asymmetryPrompts: unknown[] = [];
@@ -3382,49 +3378,47 @@ test('participant conversations stay attached to their identity when the roster 
     });
   const factory = model(factoryPrompts);
 
-  try {
-    {
-      await using runtime = durableRuntime(
-        [{ name: 'Factory', model: factory }],
-        directory,
-      );
-      await runtime.post(conversation, {
-        id: 'message-1',
-        content: 'Factory should remember this.',
-      });
-      await waitForChat(runtime, conversation, 'settled');
-    }
-
+  {
     await using runtime = durableRuntime(
-      [
-        { name: 'Asymmetry', model: model(asymmetryPrompts) },
-        { name: 'Factory', model: factory },
-      ],
-      directory,
+      [{ name: 'Factory', model: factory }],
+      directory.path,
     );
     await runtime.post(conversation, {
-      id: 'message-2',
-      content: 'The roster changed.',
+      id: 'message-1',
+      content: 'Factory should remember this.',
     });
-    await waitForChat(runtime, conversation, 'settled');
-
-    assert.equal(asymmetryPrompts.length, 1);
-    assert.equal(factoryPrompts.length, 2);
-    assert.doesNotMatch(
-      JSON.stringify(asymmetryPrompts.at(-1)),
-      /Factory should remember this\./,
-    );
-    assert.match(
-      JSON.stringify(factoryPrompts.at(-1)),
-      /Factory should remember this\./,
-    );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
+    await waitForChat(t, runtime, conversation, 'settled');
   }
+
+  await using runtime = durableRuntime(
+    [
+      { name: 'Asymmetry', model: model(asymmetryPrompts) },
+      { name: 'Factory', model: factory },
+    ],
+    directory.path,
+  );
+  await runtime.post(conversation, {
+    id: 'message-2',
+    content: 'The roster changed.',
+  });
+  await waitForChat(t, runtime, conversation, 'settled');
+
+  assert.equal(asymmetryPrompts.length, 1);
+  assert.equal(factoryPrompts.length, 2);
+  assert.doesNotMatch(
+    JSON.stringify(asymmetryPrompts.at(-1)),
+    /Factory should remember this\./,
+  );
+  assert.match(
+    JSON.stringify(factoryPrompts.at(-1)),
+    /Factory should remember this\./,
+  );
 });
 
 test('runtime shutdown persists interrupted participant work as stopped', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'zukhruf-interrupted-chat-'));
+  await using directory = await new TemporaryFiles().directory(
+    'zukhruf-interrupted-chat-',
+  );
   const conversation = { chatId: 'interrupted-chat', userId: 'local-user' };
   const participantStarted = Promise.withResolvers<void>();
   const releaseParticipant = Promise.withResolvers<void>();
@@ -3449,7 +3443,7 @@ test('runtime shutdown persists interrupted participant work as stopped', async 
   ];
 
   try {
-    const firstRuntime = durableRuntime(participants, directory);
+    const firstRuntime = durableRuntime(participants, directory.path);
     await firstRuntime.post(conversation, {
       id: 'message-1',
       content: 'This work will be interrupted.',
@@ -3457,7 +3451,7 @@ test('runtime shutdown persists interrupted participant work as stopped', async 
     await participantStarted.promise;
     await firstRuntime[Symbol.asyncDispose]();
 
-    await using secondRuntime = durableRuntime(participants, directory);
+    await using secondRuntime = durableRuntime(participants, directory.path);
     const snapshot = await secondRuntime.snapshot(conversation);
     assert.equal(snapshot.activity.phase, 'stopped');
     assert.equal(snapshot.activity.stopReason, 'interrupted');
@@ -3472,7 +3466,6 @@ test('runtime shutdown persists interrupted participant work as stopped', async 
     );
   } finally {
     releaseParticipant.resolve();
-    await rm(directory, { recursive: true, force: true });
   }
 });
 
@@ -3620,165 +3613,154 @@ test('one participant failure does not erase successful replies', async () => {
   );
 });
 
-test('shared transcripts are read from storage without starting the group', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'share-transcript-'));
-  try {
-    const conversation = { chatId: 'shared-chat', userId: 'owner-user' };
-    let replies = 0;
-    const participants = [
+test('shared transcripts are read from storage without starting the group', async (t) => {
+  await using directory = await new TemporaryFiles().directory(
+    'share-transcript-',
+  );
+  const conversation = { chatId: 'shared-chat', userId: 'owner-user' };
+  let replies = 0;
+  const participants = [
+    {
+      name: 'Annie Duke',
+      model: new MockLanguageModelV4({
+        doStream: async () =>
+          replies++ === 0
+            ? groupToolResponse('reply_to_group', 'annie-reply', {
+                message: 'Separate the decision from the outcome.',
+              })
+            : groupTextResponse('Reply posted.'),
+      }),
+    },
+  ];
+  await using runtime = durableRuntime(participants, directory.path);
+  await runtime.post(conversation, {
+    id: 'message-1',
+    content: 'How should we price this?',
+  });
+  await waitForChat(t, runtime, conversation, 'settled');
+
+  await using reader = durableRuntime(participants, directory.path);
+  const transcript = await reader.transcript(conversation);
+
+  assert.deepEqual(
+    transcript.messages.map(({ author, content }) => ({ author, content })),
+    [
+      { author: 'user', content: 'How should we price this?' },
       {
-        name: 'Annie Duke',
-        model: new MockLanguageModelV4({
-          doStream: async () =>
-            replies++ === 0
-              ? groupToolResponse('reply_to_group', 'annie-reply', {
-                  message: 'Separate the decision from the outcome.',
-                })
-              : groupTextResponse('Reply posted.'),
-        }),
+        author: 'Annie Duke',
+        content: 'Separate the decision from the outcome.',
       },
-    ];
-    await using runtime = durableRuntime(participants, directory);
-    await runtime.post(conversation, {
-      id: 'message-1',
-      content: 'How should we price this?',
-    });
-    await waitForChat(runtime, conversation, 'settled');
+    ],
+  );
+  assert.deepEqual(transcript.participants, [{ name: 'Annie Duke' }]);
 
-    await using reader = durableRuntime(participants, directory);
-    const transcript = await reader.transcript(conversation);
+  const untouched = { chatId: 'never-opened-chat', userId: 'owner-user' };
+  assert.deepEqual(await reader.transcript(untouched), {
+    messages: [],
+    participants: [{ name: 'Annie Duke' }],
+  });
+  assert.equal(await reader.sessionExists(untouched), false);
+});
 
-    assert.deepEqual(
-      transcript.messages.map(({ author, content }) => ({ author, content })),
+test('agent inspector reads durable chat executions without telemetry', async (t) => {
+  await using directory = await new TemporaryFiles().directory(
+    'agent-executions-',
+  );
+  const conversation = { chatId: 'execution-chat', userId: 'owner-user' };
+  let modelCalls = 0;
+  const participant = {
+    name: 'Maya',
+    model: new MockLanguageModelV4({
+      modelId: 'model-v1',
+      doStream: async () =>
+        modelCalls++ === 0
+          ? groupToolResponse('bash', 'inspect-plan', {
+              command: 'printf inspected',
+            })
+          : groupTextResponse('Nothing useful to add.'),
+    }),
+  };
+
+  await using runtime = durableRuntime([participant], directory.path);
+  await runtime.post(conversation, {
+    id: 'message-1',
+    content: 'Review this plan.',
+  });
+  await waitForChat(t, runtime, conversation, 'settled');
+
+  const inspector = await runtime.traces(conversation, participant.name);
+  assert.equal(inspector?.agent, participant.name);
+  assert.equal(inspector?.turns.length, 1);
+  assert.equal(inspector?.turns[0]?.modelId, participant.model.modelId);
+  assert.equal(inspector?.turns[0]?.status, 'completed');
+  assert.equal(inspector?.turns[0]?.finishReason, 'stop');
+  assert.equal(inspector?.turns[0]?.usage.totalTokens, 4);
+  assert.match(inspector?.turns[0]?.notification ?? '', /Review this plan\./u);
+  const content = inspector?.turns[0]?.steps.flatMap((step) => step.content);
+  assert.match(JSON.stringify(content), /"type":"tool-call"/u);
+  assert.match(JSON.stringify(content), /"toolName":"bash"/u);
+  assert.match(JSON.stringify(content), /"type":"tool-result"/u);
+  assert.deepEqual(content?.at(-1), {
+    type: 'text',
+    text: 'Nothing useful to add.',
+  });
+
+  {
+    await using reader = durableRuntime(
       [
-        { author: 'user', content: 'How should we price this?' },
         {
-          author: 'Annie Duke',
-          content: 'Separate the decision from the outcome.',
+          ...participant,
+          model: new MockLanguageModelV4({ modelId: 'model-v2' }),
         },
       ],
+      directory.path,
     );
-    assert.deepEqual(transcript.participants, [{ name: 'Annie Duke' }]);
-
-    const untouched = { chatId: 'never-opened-chat', userId: 'owner-user' };
-    assert.deepEqual(await reader.transcript(untouched), {
-      messages: [],
-      participants: [{ name: 'Annie Duke' }],
-    });
-    assert.equal(await reader.sessionExists(untouched), false);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('agent inspector reads durable chat executions without telemetry', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'agent-executions-'));
-  try {
-    const conversation = { chatId: 'execution-chat', userId: 'owner-user' };
-    let modelCalls = 0;
-    const participant = {
-      name: 'Maya',
-      model: new MockLanguageModelV4({
-        modelId: 'model-v1',
-        doStream: async () =>
-          modelCalls++ === 0
-            ? groupToolResponse('bash', 'inspect-plan', {
-                command: 'printf inspected',
-              })
-            : groupTextResponse('Nothing useful to add.'),
-      }),
-    };
-
-    await using runtime = durableRuntime([participant], directory);
-    await runtime.post(conversation, {
-      id: 'message-1',
-      content: 'Review this plan.',
-    });
-    await waitForChat(runtime, conversation, 'settled');
-
-    const inspector = await runtime.traces(conversation, participant.name);
-    assert.equal(inspector?.agent, participant.name);
-    assert.equal(inspector?.turns.length, 1);
-    assert.equal(inspector?.turns[0]?.modelId, participant.model.modelId);
-    assert.equal(inspector?.turns[0]?.status, 'completed');
-    assert.equal(inspector?.turns[0]?.finishReason, 'stop');
-    assert.equal(inspector?.turns[0]?.usage.totalTokens, 4);
-    assert.match(
-      inspector?.turns[0]?.notification ?? '',
-      /Review this plan\./u,
-    );
-    const content = inspector?.turns[0]?.steps.flatMap((step) => step.content);
-    assert.match(JSON.stringify(content), /"type":"tool-call"/u);
-    assert.match(JSON.stringify(content), /"toolName":"bash"/u);
-    assert.match(JSON.stringify(content), /"type":"tool-result"/u);
-    assert.deepEqual(content?.at(-1), {
-      type: 'text',
-      text: 'Nothing useful to add.',
-    });
-
-    {
-      await using reader = durableRuntime(
-        [
-          {
-            ...participant,
-            model: new MockLanguageModelV4({ modelId: 'model-v2' }),
-          },
-        ],
-        directory,
-      );
-      assert.deepEqual(
-        await reader.traces(conversation, participant.name),
-        inspector,
-      );
-    }
-
-    await runtime.clear(conversation);
     assert.deepEqual(
-      (await runtime.traces(conversation, participant.name))?.turns,
-      [],
+      await reader.traces(conversation, participant.name),
+      inspector,
     );
-  } finally {
-    await rm(directory, { recursive: true, force: true });
   }
+
+  await runtime.clear(conversation);
+  assert.deepEqual(
+    (await runtime.traces(conversation, participant.name))?.turns,
+    [],
+  );
 });
 
-test('clearing a chat erases the stored transcript for every runtime', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'clear-chat-'));
-  try {
-    const conversation = { chatId: 'cleared-chat', userId: 'owner-user' };
-    let replies = 0;
-    const participants = [
-      {
-        name: 'Annie Duke',
-        model: new MockLanguageModelV4({
-          doStream: async () =>
-            replies++ === 0
-              ? groupToolResponse('reply_to_group', 'annie-reply', {
-                  message: 'Separate the decision from the outcome.',
-                })
-              : groupTextResponse('Reply posted.'),
-        }),
-      },
-    ];
+test('clearing a chat erases the stored transcript for every runtime', async (t) => {
+  await using directory = await new TemporaryFiles().directory('clear-chat-');
+  const conversation = { chatId: 'cleared-chat', userId: 'owner-user' };
+  let replies = 0;
+  const participants = [
+    {
+      name: 'Annie Duke',
+      model: new MockLanguageModelV4({
+        doStream: async () =>
+          replies++ === 0
+            ? groupToolResponse('reply_to_group', 'annie-reply', {
+                message: 'Separate the decision from the outcome.',
+              })
+            : groupTextResponse('Reply posted.'),
+      }),
+    },
+  ];
 
-    await using runtime = durableRuntime(participants, directory);
-    await runtime.post(conversation, {
-      id: 'message-1',
-      content: 'How should we price this?',
-    });
-    await waitForChat(runtime, conversation, 'settled');
-    assert.equal((await runtime.transcript(conversation)).messages.length, 2);
+  await using runtime = durableRuntime(participants, directory.path);
+  await runtime.post(conversation, {
+    id: 'message-1',
+    content: 'How should we price this?',
+  });
+  await waitForChat(t, runtime, conversation, 'settled');
+  assert.equal((await runtime.transcript(conversation)).messages.length, 2);
 
-    await runtime.clear(conversation);
+  await runtime.clear(conversation);
 
-    assert.deepEqual((await runtime.transcript(conversation)).messages, []);
-    assert.equal(await runtime.sessionExists(conversation), false);
+  assert.deepEqual((await runtime.transcript(conversation)).messages, []);
+  assert.equal(await runtime.sessionExists(conversation), false);
 
-    await using reader = durableRuntime(participants, directory);
-    assert.deepEqual((await reader.transcript(conversation)).messages, []);
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
+  await using reader = durableRuntime(participants, directory.path);
+  assert.deepEqual((await reader.transcript(conversation)).messages, []);
 });
 
 test('participant identities cannot collide with the human author', async () => {
@@ -3820,18 +3802,20 @@ test('participant identities cannot collide with the human author', async () => 
   );
 });
 
-async function waitForChat(
+function waitForChat(
+  t: TestContext,
   runtime: WhatsAppChatRuntime,
   conversation: { chatId: string; userId: string },
   phase: 'settled' | 'stopped',
-  attempts = 500,
 ) {
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    const snapshot = await runtime.snapshot(conversation);
-    if (snapshot.activity.phase === phase) return snapshot;
-    await sleep(10);
-  }
-  throw new Error(`Chat did not become ${phase}`);
+  return t.waitFor(
+    async () => {
+      const snapshot = await runtime.snapshot(conversation);
+      assert.equal(snapshot.activity.phase, phase);
+      return snapshot;
+    },
+    { interval: 10, timeout: 10_000 },
+  );
 }
 
 const groupUsage = {
