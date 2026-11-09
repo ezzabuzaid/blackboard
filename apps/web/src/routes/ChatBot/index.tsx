@@ -11,19 +11,19 @@ import { BellRing, MessageSquarePlus, Pin, Search, Square } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link, useLoaderData } from 'react-router';
 
-import { ChatComposer } from './ChatComposer';
-import { Conversation } from './Conversation';
-import { GroupAvatarStack } from './GroupAvatar';
-import { GroupChatProvider, useGroupChat } from './GroupChat';
-import { GroupRowMenu } from './GroupRowMenu';
-import { ShareGroupDialog } from './ShareGroupDialog';
-import { api } from './api';
-import { loader } from './loader';
-import { messageDisplayText } from './mentions';
+import { ChatComposer } from './ChatComposer.tsx';
+import { Conversation } from './Conversation.tsx';
+import { GroupAvatarStack } from './GroupAvatar.tsx';
+import { GroupChatProvider, useGroupChat } from './GroupChat.tsx';
+import { GroupRowMenu } from './GroupRowMenu.tsx';
+import { ShareGroupDialog } from './ShareGroupDialog.tsx';
+import { api } from './api.ts';
+import { loader } from './loader.ts';
+import { messageDisplayText } from './mentions.ts';
 import {
   AgentTraceProvider,
   AgentTraceSidebar,
-} from './traces/AgentTraceSidebar';
+} from './traces/AgentTraceSidebar.tsx';
 
 export { loader };
 

@@ -1,7 +1,7 @@
 export * from './index.ts';
-export { Composer, useComposer } from './lib/Composer';
-export { PersistedPromptText } from './lib/PersistedPromptText';
-export { reconstructPersistedPromptSelection } from './lib/persisted-prompt-selection';
+export { Composer, useComposer } from './lib/Composer.tsx';
+export { PersistedPromptText } from './lib/PersistedPromptText.tsx';
+export { reconstructPersistedPromptSelection } from './lib/persisted-prompt-selection.ts';
 export type {
   ComposerAcceptSuggestionOptions,
   ComposerActions,
@@ -22,9 +22,9 @@ export type {
   ComposerShortcutsProps,
   ComposerSubmitProps,
   ComposerToolbarProps,
-} from './lib/Composer';
-export type { ComposerPreparedPayload } from './lib/ComposerCore';
-export { isVisibleInPhase } from './lib/ComposerVisibility';
+} from './lib/Composer.tsx';
+export type { ComposerPreparedPayload } from './lib/ComposerCore.ts';
+export { isVisibleInPhase } from './lib/ComposerVisibility.ts';
 export type {
   ActivePopup,
   ComposerDropTransfer,
@@ -44,9 +44,9 @@ export type {
   ComposerItemEntry,
   ComposerItem,
   ComposerTriggerSets,
-} from './lib/ComposerTypes';
+} from './lib/ComposerTypes.ts';
 export type {
   ComposerCommandProps,
   ComposerMentionProps,
   ComposerTriggerProps,
-} from './lib/ComposerRegistry';
+} from './lib/ComposerRegistry.tsx';

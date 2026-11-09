@@ -27,13 +27,13 @@ import {
   useState,
 } from 'react';
 
-import { useGroupChat } from '../GroupChat';
+import { useGroupChat } from '../GroupChat.tsx';
 import {
   type AgentTraceItem,
   type AgentTraceTurn,
   fetchAgentTraces,
   traceItems,
-} from './agentTrace';
+} from './agentTrace.ts';
 
 interface AgentTraceSelection {
   agent: string | null;

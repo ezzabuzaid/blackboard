@@ -5,7 +5,7 @@ import {
   type PersistedPromptToken,
   tokenizePersistedPrompt,
 } from '../persisted-prompt.ts';
-import { reconstructPersistedPromptSelection } from './persisted-prompt-selection';
+import { reconstructPersistedPromptSelection } from './persisted-prompt-selection.ts';
 
 export function PersistedPromptText({ text }: { text: string }) {
   const tokens = tokenizePersistedPrompt(text);

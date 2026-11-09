@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
 
 import { serializeMentionPromptLink } from '../persisted-prompt.ts';
-import { createDraftFromPersistedText } from './ComposerCore';
-import type { ComposerItemEntry } from './ComposerTypes';
+import { createDraftFromPersistedText } from './ComposerCore.ts';
+import type { ComposerItemEntry } from './ComposerTypes.ts';
 
 const maya: ComposerItemEntry = {
   id: 'agent:Maya',

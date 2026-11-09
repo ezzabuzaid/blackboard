@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { type Mock, describe, expect, it, vi } from 'vitest';
 
-import { VoiceRecordButton } from './VoiceRecordButton';
+import { VoiceRecordButton } from './VoiceRecordButton.tsx';
 
 const recorderMock = vi.hoisted(() => {
   const recorder: {

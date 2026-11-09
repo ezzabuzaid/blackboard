@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { PersistedPromptText } from './PersistedPromptText';
+import { PersistedPromptText } from './PersistedPromptText.tsx';
 
 describe('PersistedPromptText', () => {
   it('renders only the supported prompt markup', () => {

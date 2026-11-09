@@ -15,7 +15,7 @@ import {
 import { ArrowLeft, Store } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { api } from './api';
+import { api } from './api.ts';
 
 interface MarketplaceTemplate {
   id: string;

@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 
-import { Composer } from '../browser';
+import { Composer } from '../browser.ts';
 
 function DraftScenario({
   draftKey,

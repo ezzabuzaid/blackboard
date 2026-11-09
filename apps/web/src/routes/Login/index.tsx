@@ -9,9 +9,9 @@ import {
   useNavigate,
 } from 'react-router';
 
-import { hasIdentity, redirectDestination } from '../../auth';
-import { authClient } from '../../auth-client';
-import { api } from '../ChatBot/api';
+import { authClient } from '../../auth-client.ts';
+import { hasIdentity, redirectDestination } from '../../auth.ts';
+import { api } from '../ChatBot/api.ts';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {

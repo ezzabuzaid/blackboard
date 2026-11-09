@@ -1,7 +1,7 @@
 import { Avatar, AvatarFallback, AvatarGroup, Button } from '@zukhruf/shadcn';
 import { cn } from 'cn';
 
-import { useOptionalAgentTraceSelection } from './traces/AgentTraceSidebar';
+import { useOptionalAgentTraceSelection } from './traces/AgentTraceSidebar.tsx';
 
 const groupMemberAvatarClass = 'bg-muted text-foreground';
 export const groupMemberNameClass = 'text-foreground';

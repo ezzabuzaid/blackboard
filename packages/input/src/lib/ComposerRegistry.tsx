@@ -5,7 +5,7 @@ import type {
   ComposerItemEntry,
   ComposerPopupTrigger,
   ComposerVisibility,
-} from './ComposerTypes';
+} from './ComposerTypes.ts';
 
 const TRIGGER_ROLE = Symbol.for('composer.registry.trigger');
 const COMMAND_ROLE = Symbol.for('composer.registry.command');

@@ -1,5 +1,5 @@
-import type { ComposerItemEntry } from './ComposerTypes';
-import { isVisibleInPhase } from './ComposerVisibility';
+import type { ComposerItemEntry } from './ComposerTypes.ts';
+import { isVisibleInPhase } from './ComposerVisibility.ts';
 
 type RankedSlashCommand = {
   command: ComposerItemEntry;

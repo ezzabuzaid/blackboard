@@ -3,7 +3,7 @@ import { DOMSerializer, DOMParser as PMDOMParser } from '@tiptap/pm/model';
 import type { Schema } from '@tiptap/pm/model';
 import { expect, it } from 'vitest';
 
-import { createComposerTiptapExtensions } from './ComposerTiptapDomain';
+import { createComposerTiptapExtensions } from './ComposerTiptapDomain.ts';
 
 function composerSchema() {
   return getSchema(

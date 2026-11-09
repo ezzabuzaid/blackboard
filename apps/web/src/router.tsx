@@ -1,6 +1,6 @@
 import { createBrowserRouter } from 'react-router';
 
-import { ErrorBoundary, Root } from './root';
+import { ErrorBoundary, Root } from './root.tsx';
 
 export const router = createBrowserRouter([
   {
@@ -12,28 +12,28 @@ export const router = createBrowserRouter([
       {
         index: true,
         lazy: async () => {
-          const route = await import('./routes/ChatBot');
+          const route = await import('./routes/ChatBot/index.tsx');
           return { Component: route.default, loader: route.loader };
         },
       },
       {
         path: 'login',
         lazy: async () => {
-          const route = await import('./routes/Login');
+          const route = await import('./routes/Login/index.tsx');
           return { Component: route.default, loader: route.loader };
         },
       },
       {
         path: 'groups/new',
         lazy: async () => {
-          const route = await import('./routes/GroupTemplates');
+          const route = await import('./routes/GroupTemplates/index.tsx');
           return { Component: route.default, loader: route.loader };
         },
       },
       {
         path: 'share/:token',
         lazy: async () => {
-          const route = await import('./routes/Share');
+          const route = await import('./routes/Share/index.tsx');
           return { Component: route.default, loader: route.loader };
         },
       },

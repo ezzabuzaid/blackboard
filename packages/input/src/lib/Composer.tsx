@@ -28,17 +28,17 @@ import {
   selectedRemoteImageIndex,
   shouldNavigateHistory,
   unknownSlashCommand,
-} from './ComposerCore';
-import { readStoredDraft, writeStoredDraft } from './ComposerDraft';
+} from './ComposerCore.ts';
+import { readStoredDraft, writeStoredDraft } from './ComposerDraft.ts';
 import {
   ComposerCommand,
   ComposerMention,
   ComposerTrigger,
   collectComposerRegistry,
   composerRegistrySignature,
-} from './ComposerRegistry';
-import { popupSuggestionMatches } from './ComposerSuggestions';
-import { itemToken } from './ComposerTriggers';
+} from './ComposerRegistry.tsx';
+import { popupSuggestionMatches } from './ComposerSuggestions.ts';
+import { itemToken } from './ComposerTriggers.ts';
 import type {
   ActivePopup,
   ComposerDraftSource,
@@ -51,7 +51,7 @@ import type {
   ComposerState,
   ComposerSubmission,
   ComposerSuggestion,
-} from './ComposerTypes';
+} from './ComposerTypes.ts';
 import {
   type ComposerTiptapKillBuffer,
   activeEditorToken,
@@ -79,7 +79,7 @@ import {
   serializeTiptapContent,
   stableId,
   wrapIndex,
-} from './tiptap/ComposerTiptapDomain';
+} from './tiptap/ComposerTiptapDomain.ts';
 
 export type ComposerRootProps = {
   draftKey?: string;

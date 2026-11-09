@@ -28,19 +28,19 @@ import { Link, useLoaderData, useNavigate, useRevalidator } from 'react-router';
 import {
   type MarketplaceEditor,
   MarketplaceTemplateDialog,
-} from '../ChatBot/MarketplaceTemplateDialog';
-import { api } from '../ChatBot/api';
+} from '../ChatBot/MarketplaceTemplateDialog.tsx';
+import { api } from '../ChatBot/api.ts';
 import {
   type CatalogAgent,
   type GroupAgent,
   type GroupTemplate,
   loader,
-} from './loader';
+} from './loader.ts';
 import {
   loginPathForTemplate,
   matchesTemplateFilter,
   toggleAgentSelection,
-} from './selection';
+} from './selection.ts';
 
 export { loader };
 

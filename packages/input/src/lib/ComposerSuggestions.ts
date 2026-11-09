@@ -1,11 +1,11 @@
-import { slashCommandMatches } from './ComposerSlashCommands';
-import { itemToken } from './ComposerTriggers';
+import { slashCommandMatches } from './ComposerSlashCommands.ts';
+import { itemToken } from './ComposerTriggers.ts';
 import type {
   ActivePopup,
   ComposerItemEntry,
   ComposerSuggestion,
-} from './ComposerTypes';
-import { isVisibleInPhase } from './ComposerVisibility';
+} from './ComposerTypes.ts';
+import { isVisibleInPhase } from './ComposerVisibility.ts';
 
 export function popupSuggestionMatches(
   popup: ActivePopup,

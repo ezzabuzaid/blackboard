@@ -10,12 +10,15 @@ import { MessageCircle } from 'lucide-react';
 import { useMemo } from 'react';
 import { useLoaderData } from 'react-router';
 
-import { GroupReplyCluster, UserMessageCluster } from '../ChatBot/Conversation';
-import { GroupAvatarStack } from '../ChatBot/GroupAvatar';
-import { groupMessageClusters } from '../ChatBot/groupMessages';
-import type { loader } from './loader';
+import {
+  GroupReplyCluster,
+  UserMessageCluster,
+} from '../ChatBot/Conversation.tsx';
+import { GroupAvatarStack } from '../ChatBot/GroupAvatar.tsx';
+import { groupMessageClusters } from '../ChatBot/groupMessages.ts';
+import type { loader } from './loader.ts';
 
-export { loader } from './loader';
+export { loader } from './loader.ts';
 
 export default function Share() {
   const { shared } = useLoaderData<typeof loader>();

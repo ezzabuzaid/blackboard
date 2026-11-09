@@ -8,8 +8,8 @@ import {
   defaultRemarkPlugins,
 } from 'streamdown';
 
-import { artifactRemarkPlugins } from './artifactLinks';
-import type { GroupMessageAnnotation } from './groupMessages';
+import { artifactRemarkPlugins } from './artifactLinks.ts';
+import type { GroupMessageAnnotation } from './groupMessages.ts';
 
 interface MarkdownNode {
   attributes?: Record<string, string | null | undefined> | null;

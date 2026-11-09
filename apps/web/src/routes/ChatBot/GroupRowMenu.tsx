@@ -30,8 +30,8 @@ import {
   type MarketplaceEditor,
   MarketplaceTemplateDialog,
   loadMarketplaceEditor,
-} from './MarketplaceTemplateDialog';
-import { api } from './api';
+} from './MarketplaceTemplateDialog.tsx';
+import { api } from './api.ts';
 
 export function GroupRowMenu({
   groupId,

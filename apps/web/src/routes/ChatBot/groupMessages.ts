@@ -4,7 +4,7 @@ import {
   isGroupActivityEvent,
   isGroupActivityState,
   reduceGroupActivity,
-} from './groupActivity';
+} from './groupActivity.ts';
 
 export interface GroupMessage {
   id: string;

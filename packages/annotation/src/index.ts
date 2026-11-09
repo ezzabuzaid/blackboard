@@ -1,2 +1,2 @@
-export { Annotation } from './Annotation';
-export { AnnotationReference } from './AnnotationReference';
+export { Annotation } from './Annotation.tsx';
+export { AnnotationReference } from './AnnotationReference.tsx';

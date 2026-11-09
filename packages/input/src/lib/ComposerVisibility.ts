@@ -1,4 +1,4 @@
-import type { ComposerVisibility } from './ComposerTypes';
+import type { ComposerVisibility } from './ComposerTypes.ts';
 
 export function isVisibleInPhase(
   visibility: ComposerVisibility | undefined,

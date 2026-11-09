@@ -12,12 +12,12 @@ import {
 import type {
   RecorderCommand,
   RecorderControllerState,
-} from './voice-recorder-controller';
+} from './voice-recorder-controller.tsx';
 
 type MicPermissionState = PermissionState | 'unknown';
 
 const VoiceRecorderController = lazy(() =>
-  import('./voice-recorder-controller').then((module) => ({
+  import('./voice-recorder-controller.tsx').then((module) => ({
     default: module.VoiceRecorderController,
   })),
 );

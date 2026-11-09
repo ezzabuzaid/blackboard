@@ -1,4 +1,4 @@
-import type { GroupMessageAnnotation } from './groupMessages';
+import type { GroupMessageAnnotation } from './groupMessages.ts';
 
 const STORAGE_KEY_PREFIX = 'chat-reference-draft:v1:';
 

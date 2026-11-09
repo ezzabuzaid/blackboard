@@ -4,13 +4,13 @@ import {
   serializePersistedPromptLink,
   tokenizePersistedPrompt,
 } from '../persisted-prompt.ts';
-import { findSlashCommandByName } from './ComposerSlashCommands';
+import { findSlashCommandByName } from './ComposerSlashCommands.ts';
 import {
   itemToken,
   startsWithTrigger,
   tokenScanPattern,
   triggerAlternation,
-} from './ComposerTriggers';
+} from './ComposerTriggers.ts';
 import type {
   ComposerDraftSource,
   ComposerInitialDraft,
@@ -24,7 +24,7 @@ import type {
   ComposerTextElement,
   CreateComposerStateOptions,
   TokenKind,
-} from './ComposerTypes';
+} from './ComposerTypes.ts';
 
 export function createComposerState({
   initialDraft,

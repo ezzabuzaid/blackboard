@@ -1,6 +1,6 @@
 import { type LoaderFunctionArgs, replace } from 'react-router';
 
-import { api } from './routes/ChatBot/api';
+import { api } from './routes/ChatBot/api.ts';
 
 export async function requireIdentity({ request }: LoaderFunctionArgs) {
   const session: unknown = await api.request(

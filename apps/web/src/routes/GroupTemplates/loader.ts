@@ -1,7 +1,7 @@
 import type { LoaderFunctionArgs } from 'react-router';
 
-import { hasIdentity } from '../../auth';
-import { api } from '../ChatBot/api';
+import { hasIdentity } from '../../auth.ts';
+import { api } from '../ChatBot/api.ts';
 
 export interface GroupAgent {
   id: string;

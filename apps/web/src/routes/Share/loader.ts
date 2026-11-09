@@ -1,7 +1,10 @@
 import type { LoaderFunctionArgs } from 'react-router';
 
-import { api } from '../ChatBot/api';
-import type { GroupMessage, GroupParticipant } from '../ChatBot/groupMessages';
+import { api } from '../ChatBot/api.ts';
+import type {
+  GroupMessage,
+  GroupParticipant,
+} from '../ChatBot/groupMessages.ts';
 
 export interface SharedGroup {
   name: string;

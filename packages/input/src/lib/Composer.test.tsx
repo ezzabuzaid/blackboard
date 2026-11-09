@@ -10,7 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Composer, useComposer } from '../browser';
+import { Composer, useComposer } from '../browser.ts';
 import {
   type ComposerPreparedPayload,
   createComposerDraftSource,
@@ -18,15 +18,15 @@ import {
   createDraftFromPersistedText,
   createPersistedTextFromDraft,
   prepareComposerPayload,
-} from './ComposerCore';
+} from './ComposerCore.ts';
 import type {
   ComposerInitialDraft,
   ComposerItem,
   ComposerItemEntry,
   ComposerState,
   ComposerSubmission,
-} from './ComposerTypes';
-import { serializeTiptapContent } from './tiptap/ComposerTiptapDomain';
+} from './ComposerTypes.ts';
+import { serializeTiptapContent } from './tiptap/ComposerTiptapDomain.ts';
 
 const COMMAND_TRIGGERS = ['/'];
 

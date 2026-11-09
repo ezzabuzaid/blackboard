@@ -1,2 +1,2 @@
-export * from './lib/VoiceRecordButton';
-export * from './lib/use-voice-transcription';
+export * from './lib/VoiceRecordButton.tsx';
+export * from './lib/use-voice-transcription.tsx';

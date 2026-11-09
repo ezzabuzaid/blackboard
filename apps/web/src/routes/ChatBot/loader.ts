@@ -1,9 +1,9 @@
 import { type LoaderFunctionArgs, redirect } from 'react-router';
 
-import { requireIdentity } from '../../auth';
-import { api } from './api';
-import { initialGroupActivity } from './groupActivity';
-import { isGroupChatState } from './groupMessages';
+import { requireIdentity } from '../../auth.ts';
+import { api } from './api.ts';
+import { initialGroupActivity } from './groupActivity.ts';
+import { isGroupChatState } from './groupMessages.ts';
 
 export interface GroupSummary {
   id: string;

@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-import { Annotation, AnnotationReference } from './index';
+import { Annotation, AnnotationReference } from './index.ts';
 
 describe('annotation composition', () => {
   it('composes an editable annotation card from independent parts', async () => {

@@ -7,17 +7,17 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { LoaderFunctionArgs } from 'react-router';
 import { Streamdown } from 'streamdown';
 
-import { artifactRemarkPlugins, sandboxArtifactUrl } from './artifactLinks';
+import { artifactRemarkPlugins, sandboxArtifactUrl } from './artifactLinks.ts';
 import {
   readChatReferenceDraft,
   writeChatReferenceDraft,
-} from './chatReferenceDraft';
+} from './chatReferenceDraft.ts';
 import {
   type GroupActivityEvent,
   groupActivityIndicator,
   initialGroupActivity,
   reduceGroupActivity,
-} from './groupActivity';
+} from './groupActivity.ts';
 import {
   type GroupChatState,
   addGroupMessage,
@@ -26,11 +26,11 @@ import {
   groupMessageClusters,
   reduceGroupChat,
   updateGroupMessageAnnotationComment,
-} from './groupMessages';
-import { loader } from './loader';
-import { messageDisplayText, messageSegments } from './mentions';
-import { messageComponents, messageRemarkPlugins } from './messageMarkdown';
-import { traceItems } from './traces/agentTrace';
+} from './groupMessages.ts';
+import { loader } from './loader.ts';
+import { messageDisplayText, messageSegments } from './mentions.ts';
+import { messageComponents, messageRemarkPlugins } from './messageMarkdown.tsx';
+import { traceItems } from './traces/agentTrace.ts';
 
 const sentAt = '2026-07-31T12:00:00.000Z';
 const groupSummary = {

@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import {
   type UseVoiceTranscriptionParams,
   useVoiceTranscription,
-} from './use-voice-transcription';
+} from './use-voice-transcription.tsx';
 
 export interface VoiceRecordButtonRenderProps {
   icon: ReactNode;

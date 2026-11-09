@@ -17,11 +17,11 @@ import {
   useState,
 } from 'react';
 
-import { useGroupChat } from './GroupChat';
-import { api } from './api';
-import type { GroupActivityState } from './groupActivity';
-import type { GroupParticipant } from './groupMessages';
-import { messageDisplayText } from './mentions';
+import { useGroupChat } from './GroupChat.tsx';
+import { api } from './api.ts';
+import type { GroupActivityState } from './groupActivity.ts';
+import type { GroupParticipant } from './groupMessages.ts';
+import { messageDisplayText } from './mentions.ts';
 
 export function ChatComposer() {
   const {

@@ -24,14 +24,14 @@ import {
   decodeComposerTextLinkHref,
   nextWordEnd,
   previousWordStart,
-} from '../ComposerCore';
-import { findSlashCommandByName } from '../ComposerSlashCommands';
+} from '../ComposerCore.ts';
+import { findSlashCommandByName } from '../ComposerSlashCommands.ts';
 import {
   itemToken,
   startsWithTrigger,
   tokenScanPattern,
   triggerAlternation,
-} from '../ComposerTriggers';
+} from '../ComposerTriggers.ts';
 import type {
   ComposerDropTransfer,
   ComposerInitialDraft,
@@ -42,7 +42,7 @@ import type {
   ComposerState,
   ComposerTextElement,
   ComposerTriggerSets,
-} from '../ComposerTypes';
+} from '../ComposerTypes.ts';
 
 export type ComposerTiptapKillBuffer = {
   text: string;

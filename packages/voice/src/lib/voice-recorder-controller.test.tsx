@@ -7,7 +7,7 @@ import {
   type RecorderCommand,
   type RecorderControllerState,
   VoiceRecorderController,
-} from './voice-recorder-controller';
+} from './voice-recorder-controller.tsx';
 
 const recorderMock = vi.hoisted(() => {
   const state: {

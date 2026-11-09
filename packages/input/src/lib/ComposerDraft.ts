@@ -1,4 +1,4 @@
-import type { ComposerDraftSource } from './ComposerTypes';
+import type { ComposerDraftSource } from './ComposerTypes.ts';
 
 const STORAGE_KEY_PREFIX = 'composer-draft:v1:';
 

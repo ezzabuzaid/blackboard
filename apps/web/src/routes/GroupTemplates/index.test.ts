@@ -3,12 +3,12 @@ import test from 'node:test';
 
 import type { LoaderFunctionArgs } from 'react-router';
 
-import { loader } from './loader';
+import { loader } from './loader.ts';
 import {
   loginPathForTemplate,
   matchesTemplateFilter,
   toggleAgentSelection,
-} from './selection';
+} from './selection.ts';
 
 test('character selection toggles without exceeding the group limit', () => {
   assert.deepEqual(toggleAgentSelection(['annie-duke'], 'paul-graham'), [

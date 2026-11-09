@@ -6,11 +6,11 @@ import {
   useState,
 } from 'react';
 
-import { api, apiUrl } from './api';
+import { api, apiUrl } from './api.ts';
 import {
   readChatReferenceDraft,
   writeChatReferenceDraft,
-} from './chatReferenceDraft';
+} from './chatReferenceDraft.ts';
 import {
   type GroupChatState,
   type GroupMessage,
@@ -22,7 +22,7 @@ import {
   isGroupMessage,
   reduceGroupChat,
   updateGroupMessageAnnotationComment,
-} from './groupMessages';
+} from './groupMessages.ts';
 
 interface GroupChat extends GroupChatState {
   chatId: string;

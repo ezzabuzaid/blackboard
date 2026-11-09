@@ -1,6 +1,6 @@
 import { defaultRemarkPlugins } from 'streamdown';
 
-import { apiUrl } from './api';
+import { apiUrl } from './api.ts';
 
 interface MarkdownNode {
   children?: MarkdownNode[];

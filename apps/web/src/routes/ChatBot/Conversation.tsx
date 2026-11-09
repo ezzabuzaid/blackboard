@@ -24,22 +24,22 @@ import {
   GroupAvatar,
   GroupAvatarStack,
   groupMemberNameClass,
-} from './GroupAvatar';
-import { useGroupChat } from './GroupChat';
-import { artifactBaseUrl } from './artifactLinks';
-import { groupActivityIndicator } from './groupActivity';
+} from './GroupAvatar.tsx';
+import { useGroupChat } from './GroupChat.tsx';
+import { artifactBaseUrl } from './artifactLinks.ts';
+import { groupActivityIndicator } from './groupActivity.ts';
 import {
   type GroupMessage,
   type GroupMessageAnnotation,
   type GroupMessageCluster,
   groupMessageClusters,
-} from './groupMessages';
-import { messageDisplayText, messageSegments } from './mentions';
+} from './groupMessages.ts';
+import { messageDisplayText, messageSegments } from './mentions.ts';
 import {
   ParticipantMention,
   messageComponents,
   messageRemarkPlugins,
-} from './messageMarkdown';
+} from './messageMarkdown.tsx';
 
 const messageTime = new Intl.DateTimeFormat(undefined, {
   hour: 'numeric',
