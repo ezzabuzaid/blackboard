@@ -1,10 +1,28 @@
-import zukhruf from '@zukhruf/eslint';
-import tseslint from 'typescript-eslint';
+import zukhruf, {
+  noUnassignedImport,
+  reactRouterOnlyThrowError,
+} from '@zukhruf/eslint';
 
 export default [
-  { ignores: ['**/dist', '**/test-output', '.sdk-it'] },
-  // zukhruf/tests has no parser of its own: zukhruf/base brings one, and this
-  // repo does not turn base on.
-  tseslint.configs.base,
+  { ignores: ['**/dist', '**/build', '**/test-output', '.sdk-it'] },
+  ...zukhruf.configs.base,
   ...zukhruf.configs.tests,
+  {
+    files: ['packages/*/src/test-setup.ts'],
+    rules: {
+      'import-x/no-unassigned-import': [
+        'error',
+        noUnassignedImport({ allow: ['@testing-library/jest-dom/vitest'] }),
+      ],
+    },
+  },
+  {
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    rules: {
+      '@typescript-eslint/only-throw-error': [
+        'error',
+        reactRouterOnlyThrowError(),
+      ],
+    },
+  },
 ];
