@@ -20,6 +20,7 @@ import {
   type TurnRequest,
 } from '@deepagents/experimental/zukhruf';
 import { open } from '@zukhruf/sqlite-open';
+import pMemoize from 'p-memoize';
 
 import { readAgentExecutions } from './agent-executions.js';
 import {
@@ -46,7 +47,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     root: 'whatsapp-group',
     agents: [],
   };
-  readonly #chats = new Map<string, Promise<ChatSession>>();
+  readonly #chats = new Map<string, () => Promise<ChatSession>>();
   readonly #statusAbort = new AbortController();
   readonly #statusEvents = new EventEmitter();
   readonly #resources = new AsyncDisposableStack();
@@ -195,7 +196,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   ): Promise<ConversationStatus> {
     const active = this.#chats.get(conversation.chatId);
     if (active)
-      return statusForActivity((await active).group.snapshot().activity);
+      return statusForActivity((await active()).group.snapshot().activity);
     const activity = (
       await this.#durableEvents(streamId(conversation))
     ).findLast((event) => event.type === 'activity');
@@ -270,7 +271,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     const key = conversation.chatId;
     const pending = this.#chats.get(key);
     this.#chats.delete(key);
-    const session = await pending?.catch(() => undefined);
+    const session = await pending?.().catch(() => undefined);
     await session?.resources.disposeAsync();
 
     await rm(this.#queuePath(conversation), { recursive: true, force: true });
@@ -312,7 +313,9 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
 
   async [Symbol.asyncDispose]() {
     this.#statusAbort.abort();
-    const sessions = await Promise.allSettled(this.#chats.values());
+    const sessions = await Promise.allSettled(
+      [...this.#chats.values()].map((chat) => chat()),
+    );
     await Promise.allSettled(
       sessions.map((session) =>
         session.status === 'fulfilled'
@@ -326,14 +329,18 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
   #chat(conversation: ConversationId) {
     const key = conversation.chatId;
     const existing = this.#chats.get(key);
-    if (existing) return existing;
+    if (existing) return existing();
 
-    const chat = this.#createChat(conversation);
-    this.#chats.set(key, chat);
-    void chat.catch(() => {
-      if (this.#chats.get(key) === chat) this.#chats.delete(key);
+    const chat: () => Promise<ChatSession> = pMemoize(async () => {
+      try {
+        return await this.#createChat(conversation);
+      } catch (error) {
+        if (this.#chats.get(key) === chat) this.#chats.delete(key);
+        throw error;
+      }
     });
-    return chat;
+    this.#chats.set(key, chat);
+    return chat();
   }
 
   async #createChat(conversation: ConversationId) {

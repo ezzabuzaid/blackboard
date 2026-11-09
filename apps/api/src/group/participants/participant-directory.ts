@@ -7,6 +7,7 @@ import { type AgentModel, fragment } from '@deepagents/context';
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
 import { isErrno } from '@zukhruf/fs';
 import type { ToolSet } from 'ai';
+import pMemoize from 'p-memoize';
 
 import type { WhatsAppParticipant } from '../whatsapp.js';
 
@@ -48,10 +49,9 @@ export class ParticipantDirectory {
   readonly #catalogDirectories: readonly string[];
   readonly #catalogDirectory?: string;
   readonly #directory: string;
-  readonly #defaults = new Map<string, Promise<ParticipantDefaults>>();
   readonly #builtinsDirectory: string;
   readonly #telemetryDirectory: string;
-  readonly #loadDefaults: ParticipantDirectoryOptions['loadDefaults'];
+  readonly #defaultsFor: ParticipantDirectoryOptions['loadDefaults'];
 
   constructor(options: ParticipantDirectoryOptions) {
     this.#directory = resolve(options.directory);
@@ -60,7 +60,7 @@ export class ParticipantDirectory {
       ? resolve(options.catalogDirectory)
       : undefined;
     this.#telemetryDirectory = resolve(options.telemetryDirectory);
-    this.#loadDefaults = options.loadDefaults;
+    this.#defaultsFor = pMemoize(options.loadDefaults);
     this.#builtinDirectories = this.#loadBuiltinDirectories();
     this.#catalogDirectories = this.#catalogDirectory
       ? directoryNames(this.#catalogDirectory)
@@ -216,18 +216,6 @@ export class ParticipantDirectory {
         },
       ],
     };
-  }
-
-  #defaultsFor(userId: string) {
-    let defaults = this.#defaults.get(userId);
-    if (!defaults) {
-      defaults = this.#loadDefaults(userId).catch((error: unknown) => {
-        this.#defaults.delete(userId);
-        throw error;
-      });
-      this.#defaults.set(userId, defaults);
-    }
-    return defaults;
   }
 
   #userDirectory(userId: string) {

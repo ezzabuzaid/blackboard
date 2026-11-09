@@ -12,6 +12,7 @@ import {
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
 import { isErrno } from '@zukhruf/fs';
+import pMemoize from 'p-memoize';
 
 import type { ParticipantMount } from './group/participants/index.js';
 
@@ -23,16 +24,11 @@ interface GroupSandboxesOptions {
   mountsFor: (conversation: ConversationId) => ParticipantMount[];
 }
 
-interface GroupSandbox {
-  conversation: ConversationId;
-  sandbox: AgentDeclaration['sandbox'];
-  backend?: Promise<DisposableSandbox>;
-}
-
 export class GroupSandboxes implements AsyncDisposable {
   readonly #dataDirectory: string;
   readonly #mountsFor: GroupSandboxesOptions['mountsFor'];
-  readonly #sandboxes = new Map<string, GroupSandbox>();
+  readonly #sandboxes = new Map<string, AgentDeclaration['sandbox']>();
+  readonly #backends = new Map<string, () => Promise<DisposableSandbox>>();
 
   constructor(options: GroupSandboxesOptions) {
     this.#dataDirectory = resolve(options.dataDirectory);
@@ -42,12 +38,11 @@ export class GroupSandboxes implements AsyncDisposable {
   sandboxFor(conversation: ConversationId): AgentDeclaration['sandbox'] {
     const name = sandboxName(conversation);
     const current = this.#sandboxes.get(name);
-    if (current) return current.sandbox;
+    if (current) return current;
 
-    const entry = { conversation } as GroupSandbox;
-    entry.sandbox = defineSandbox(() => this.#backend(name, entry));
-    this.#sandboxes.set(name, entry);
-    return entry.sandbox;
+    const sandbox = defineSandbox(() => this.#backend(name, conversation));
+    this.#sandboxes.set(name, sandbox);
+    return sandbox;
   }
 
   async openArtifact(conversation: ConversationId, path: string) {
@@ -69,9 +64,10 @@ export class GroupSandboxes implements AsyncDisposable {
   async remove(conversation: ConversationId): Promise<void> {
     const name = sandboxName(conversation);
     const root = this.#root(conversation);
-    const entry = this.#sandboxes.get(name);
+    const opened = this.#backends.get(name);
     this.#sandboxes.delete(name);
-    const backend = await entry?.backend?.catch(() => undefined);
+    this.#backends.delete(name);
+    const backend = await opened?.().catch(() => undefined);
     if (!backend) {
       try {
         await stat(root);
@@ -92,26 +88,33 @@ export class GroupSandboxes implements AsyncDisposable {
   }
 
   async [Symbol.asyncDispose](): Promise<void> {
-    const entries = [...this.#sandboxes.values()];
+    const backends = [...this.#backends.values()];
     this.#sandboxes.clear();
+    this.#backends.clear();
     await Promise.all(
-      entries.map((entry) =>
-        entry.backend?.then(
-          (backend) => backend.dispose(),
+      backends.map((backend) =>
+        backend().then(
+          (opened) => opened.dispose(),
           () => undefined,
         ),
       ),
     );
   }
 
-  #backend(name: string, entry: GroupSandbox) {
-    if (entry.backend) return entry.backend;
-    const creating = this.#create(entry.conversation, name);
-    entry.backend = creating;
-    void creating.catch(() => {
-      if (entry.backend === creating) entry.backend = undefined;
+  #backend(name: string, conversation: ConversationId) {
+    const existing = this.#backends.get(name);
+    if (existing) return existing();
+
+    const backend: () => Promise<DisposableSandbox> = pMemoize(async () => {
+      try {
+        return await this.#create(conversation, name);
+      } catch (error) {
+        if (this.#backends.get(name) === backend) this.#backends.delete(name);
+        throw error;
+      }
     });
-    return creating;
+    this.#backends.set(name, backend);
+    return backend();
   }
 
   async #create(conversation: ConversationId, name: string) {

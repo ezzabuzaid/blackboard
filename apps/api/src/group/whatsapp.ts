@@ -17,7 +17,9 @@ import {
   createInterAgentCommunication,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
+import { Latch } from '@zukhruf/async';
 import type { ToolSet } from 'ai';
+import PQueue from 'p-queue';
 
 import { baseeraGroupChatAgent } from '../agent/group-chat-agent.js';
 import {
@@ -206,8 +208,20 @@ interface GroupSubscriber extends Pick<
   WhatsAppGroupOptions,
   'onMessage' | 'onActivity' | 'onEvent'
 > {
-  delivery: Promise<void>;
+  deliveries: PQueue;
 }
+
+type StopReason = 'user' | 'limit' | 'interrupted';
+
+type GroupState =
+  | { type: 'accepting' }
+  | { type: 'stopping'; reason: StopReason }
+  | { type: 'closed' };
+
+type PumpOutcome = { type: 'completed' } | { type: 'failed'; cause: unknown };
+
+type PumpState =
+  { type: 'idle' } | { type: 'running'; finished: Latch<PumpOutcome> };
 
 export class WhatsAppGroup implements AsyncDisposable {
   readonly #resources: AsyncDisposableStack;
@@ -233,12 +247,11 @@ export class WhatsAppGroup implements AsyncDisposable {
     participants: [],
     presence: [],
   };
-  #pump: Promise<void> | null = null;
+  #pump: PumpState = { type: 'idle' };
   #sequence = 0;
   #cursor = 0;
   #agentMessages = 0;
-  #stopRequested: 'user' | 'limit' | 'interrupted' | null = null;
-  #closed = false;
+  #state: GroupState = { type: 'accepting' };
 
   private constructor(
     options: WhatsAppGroupOptions,
@@ -280,7 +293,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         onMessage: options.onMessage,
         onActivity: options.onActivity,
         onEvent: options.onEvent,
-        delivery: Promise.resolve(),
+        deliveries: new PQueue({ concurrency: 1 }),
       });
     }
   }
@@ -384,13 +397,15 @@ export class WhatsAppGroup implements AsyncDisposable {
     replyToMessageId?: string,
     annotations?: readonly WhatsAppMessageAnnotation[],
   ) {
-    if (this.#closed) throw new Error('WhatsAppGroup is closed');
+    if (this.#state.type === 'closed') {
+      throw new Error('WhatsAppGroup is closed');
+    }
     const message = content.trim();
     if (!message && !annotations?.length) {
       throw new Error('WhatsAppGroup message cannot be empty');
     }
-    if (!this.#pump) {
-      this.#stopRequested = null;
+    if (this.#pump.type === 'idle') {
+      this.#state = { type: 'accepting' };
       this.#agentMessages = 0;
     }
     return this.#post('user', message, id, replyToMessageId, annotations);
@@ -405,13 +420,15 @@ export class WhatsAppGroup implements AsyncDisposable {
     };
   }
 
-  async stop(reason: 'user' | 'limit' | 'interrupted' = 'user') {
-    if (this.#closed) throw new Error('WhatsAppGroup is closed');
-    if (!this.#pump && this.#activity.phase !== 'active') {
+  async stop(reason: StopReason = 'user') {
+    if (this.#state.type === 'closed') {
+      throw new Error('WhatsAppGroup is closed');
+    }
+    if (this.#pump.type === 'idle' && this.#activity.phase !== 'active') {
       return this.snapshot();
     }
 
-    this.#stopRequested = reason;
+    this.#state = { type: 'stopping', reason };
     this.#pending.length = 0;
     await Promise.allSettled(
       this.#participants
@@ -422,7 +439,7 @@ export class WhatsAppGroup implements AsyncDisposable {
             .cancel(participant.turnId),
         ),
     );
-    await this.#pump?.catch(() => undefined);
+    if (this.#pump.type === 'running') await this.#pump.finished.wait();
     await this.#emitStopped(reason);
     return this.snapshot();
   }
@@ -441,16 +458,18 @@ export class WhatsAppGroup implements AsyncDisposable {
   }: Pick<WhatsAppGroupOptions, 'onMessage' | 'onActivity' | 'onEvent'> & {
     after?: number;
   }) {
-    if (this.#closed) throw new Error('WhatsAppGroup is closed');
+    if (this.#state.type === 'closed') {
+      throw new Error('WhatsAppGroup is closed');
+    }
     const subscriber: GroupSubscriber = {
       onMessage,
       onActivity,
       onEvent,
-      delivery: Promise.resolve(),
+      deliveries: new PQueue({ concurrency: 1 }),
     };
     this.#subscribers.add(subscriber);
     for (const event of this.#events) {
-      if (event.cursor > after) this.#deliver(subscriber, event);
+      if (event.cursor > after) void this.#deliver(subscriber, event);
     }
     return {
       [Symbol.dispose]: () => {
@@ -460,9 +479,9 @@ export class WhatsAppGroup implements AsyncDisposable {
   }
 
   async [Symbol.asyncDispose]() {
-    if (this.#closed) return;
-    if (this.#pump) await this.stop('interrupted');
-    this.#closed = true;
+    if (this.#state.type === 'closed') return;
+    if (this.#pump.type === 'running') await this.stop('interrupted');
+    this.#state = { type: 'closed' };
     await this.#resources.disposeAsync();
   }
 
@@ -540,12 +559,12 @@ export class WhatsAppGroup implements AsyncDisposable {
     replyToMessageId?: string,
     annotations?: readonly WhatsAppMessageAnnotation[],
   ): Promise<WhatsAppReplyResult> {
-    if (this.#stopRequested) return { posted: false, reason: 'stopped' };
+    if (this.#stopReason()) return { posted: false, reason: 'stopped' };
     if (
       this.#agentMessages >= this.#limits.agentMessages ||
       this.#messages.length >= this.#limits.transcriptMessages
     ) {
-      this.#stopRequested = 'limit';
+      this.#state = { type: 'stopping', reason: 'limit' };
       return { posted: false, reason: 'limit' };
     }
 
@@ -587,29 +606,37 @@ export class WhatsAppGroup implements AsyncDisposable {
     return { posted: true };
   }
 
+  #stopReason() {
+    return this.#state.type === 'stopping' ? this.#state.reason : null;
+  }
+
   #ensurePump() {
-    if (this.#pump) return;
-    const pump = Promise.resolve().then(() => this.#runPump());
-    this.#pump = pump;
-    void pump.then(
-      () => this.#finishPump(pump, true),
-      (cause) => this.#abandonPump(pump, cause),
-    );
+    if (this.#pump.type === 'running') return;
+    const finished = new Latch<PumpOutcome>();
+    this.#pump = { type: 'running', finished };
+    void Promise.resolve()
+      .then(() => this.#runPump())
+      .then(
+        () => this.#finishPump(finished),
+        (cause: unknown) => this.#abandonPump(finished, cause),
+      );
   }
 
-  #finishPump(pump: Promise<void>, restart: boolean) {
-    if (this.#pump === pump) this.#pump = null;
-    if (restart && this.#pending.length > 0) this.#ensurePump();
+  #finishPump(finished: Latch<PumpOutcome>) {
+    this.#pump = { type: 'idle' };
+    finished.open({ type: 'completed' });
+    if (this.#pending.length > 0) this.#ensurePump();
   }
 
-  async #abandonPump(pump: Promise<void>, cause: unknown) {
-    this.#finishPump(pump, false);
+  async #abandonPump(finished: Latch<PumpOutcome>, cause: unknown) {
+    this.#pump = { type: 'idle' };
+    finished.open({ type: 'failed', cause });
     this.#pending.length = 0;
     console.error('[group pump failed]', cause);
     try {
       // #deliver hands back the uncaught delivery promise, so a subscriber
       // that throws rejects this too — and nothing above would catch it.
-      await this.#emitStopped(this.#stopRequested ?? 'interrupted');
+      await this.#emitStopped(this.#stopReason() ?? 'interrupted');
     } catch (emitCause) {
       console.error('[group pump stop notice failed]', emitCause);
     }
@@ -624,11 +651,11 @@ export class WhatsAppGroup implements AsyncDisposable {
 
     while (this.#pending.length > 0) {
       if (
-        this.#stopRequested ||
+        this.#stopReason() ||
         notification >= this.#limits.notifications ||
         this.#agentMessages >= this.#limits.agentMessages
       ) {
-        const reason = this.#stopRequested ?? 'limit';
+        const reason = this.#stopReason() ?? 'limit';
         this.#pending.length = 0;
         await this.#emitStopped(reason);
         return;
@@ -663,20 +690,21 @@ export class WhatsAppGroup implements AsyncDisposable {
         );
       }
       for (const { id } of pending) this.#mailboxRecipients.delete(id);
-      if (this.#stopRequested) {
+      const stopReason = this.#stopReason();
+      if (stopReason) {
         this.#pending.length = 0;
-        await this.#emitStopped(this.#stopRequested);
+        await this.#emitStopped(stopReason);
         return;
       }
 
       let joined = await this.#joinParticipants();
       while (joined.length > 0) {
         if (
-          this.#stopRequested ||
+          this.#stopReason() ||
           notification >= this.#limits.notifications ||
           this.#agentMessages >= this.#limits.agentMessages
         ) {
-          const reason = this.#stopRequested ?? 'limit';
+          const reason = this.#stopReason() ?? 'limit';
           this.#pending.length = 0;
           await this.#emitStopped(reason);
           return;
@@ -825,7 +853,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         );
       }
       if (failure) throw new Error(failure);
-      if (this.#stopRequested) return;
+      if (this.#stopReason()) return;
       const replies =
         (this.#replyCounts.get(participant.name) ?? 0) - repliesBefore;
       await this.#emitActivity({
@@ -842,7 +870,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         state: 'seen',
       });
     } catch (error) {
-      if (!this.#stopRequested) {
+      if (!this.#stopReason()) {
         await this.#emitActivity({
           type: 'participant',
           notification,
@@ -865,7 +893,10 @@ export class WhatsAppGroup implements AsyncDisposable {
   }
 
   async #whenSettled() {
-    while (this.#pump) await this.#pump;
+    while (this.#pump.type === 'running') {
+      const outcome = await this.#pump.finished.wait();
+      if (outcome.type === 'failed') throw outcome.cause;
+    }
   }
 
   async #emitMessage(message: WhatsAppMessage) {
@@ -902,7 +933,7 @@ export class WhatsAppGroup implements AsyncDisposable {
     await Promise.all([...deliveries, this.#persist(event)]);
   }
 
-  async #emitStopped(reason: 'user' | 'limit' | 'interrupted') {
+  async #emitStopped(reason: StopReason) {
     if (
       this.#activity.phase === 'stopped' &&
       this.#activity.stopReason === reason
@@ -921,12 +952,10 @@ export class WhatsAppGroup implements AsyncDisposable {
     event: WhatsAppChatEvent,
     legacyCallback?: () => void | Promise<void>,
   ) {
-    const delivery = subscriber.delivery.then(async () => {
+    return subscriber.deliveries.add(async () => {
       await subscriber.onEvent?.(event);
       await legacyCallback?.();
     });
-    subscriber.delivery = delivery.catch(() => undefined);
-    return delivery;
   }
 
   #notification(messages: WhatsAppMessage[], reminder?: string) {
