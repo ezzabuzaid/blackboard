@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test, { type TestContext } from 'node:test';
@@ -95,22 +94,19 @@ function testGroupDependencies(resources: AsyncDisposableStack) {
   };
 }
 
-// Each PGlite queue is a full Postgres data directory (~39MB), so the root is
-// wiped once per run rather than accumulating across runs.
-const testQueueRoot = join(tmpdir(), 'zukhruf-test-queues');
-rmSync(testQueueRoot, { recursive: true, force: true });
-let testQueueSeq = 0;
-const testQueueDirectory = () =>
-  join(testQueueRoot, `runtime-${++testQueueSeq}`);
-
-function memoryRuntime(participants: WhatsAppParticipant[]) {
+// Only the stores are in memory. Each chat that opens under queueDirectory writes
+// a full PGlite data directory of about 39 MB (#1018), so a test owns the folder.
+function memoryRuntime(
+  participants: WhatsAppParticipant[],
+  queueDirectory: string,
+) {
   return new WhatsAppChatRuntime({
     loadParticipants: async () => participants,
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
     mailboxPath: ':memory:',
-    queueDirectory: testQueueDirectory(),
+    queueDirectory,
   });
 }
 
@@ -540,9 +536,11 @@ test('participant model sends high reasoning effort and retains application tool
         : groupTextResponse('Reply posted.'),
   });
   t.mock.method(codex, 'languageModel', () => model);
-  await using runtime = memoryRuntime([
-    { name: 'Maya', ...createParticipantDefaults() },
-  ]);
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
+  await using runtime = memoryRuntime(
+    [{ name: 'Maya', ...createParticipantDefaults() }],
+    queues.path,
+  );
   await runtime.post(testGroupConversation, {
     id: 'codex-reasoning',
     content: 'Reply to the group.',
@@ -1514,7 +1512,8 @@ test('OpenRouter transcription uses the dedicated speech-to-text endpoint', asyn
 });
 
 test('a user with no participants gets an empty group', async () => {
-  await using runtime = memoryRuntime([]);
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
+  await using runtime = memoryRuntime([], queues.path);
   const groupApp = testApp({ runtime });
 
   const stateResponse = await groupApp.request('/api/chat/chat-1/state');
@@ -1546,7 +1545,8 @@ test('a user with no participants gets an empty group', async () => {
 });
 
 test('chat messages retain multiple excerpt annotations', async () => {
-  await using runtime = memoryRuntime([]);
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
+  await using runtime = memoryRuntime([], queues.path);
   const groupApp = testApp({ runtime });
   const post = (body: object) =>
     groupApp.request('/api/chat/chat-1/messages', {
@@ -1585,7 +1585,8 @@ test('chat messages retain multiple excerpt annotations', async () => {
 });
 
 test('chat accepts annotation-only messages with per-selection comments', async () => {
-  await using runtime = memoryRuntime([]);
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
+  await using runtime = memoryRuntime([], queues.path);
   const groupApp = testApp({ runtime });
   const post = (body: object) =>
     groupApp.request('/api/chat/chat-1/messages', {
@@ -1628,6 +1629,7 @@ test('chat accepts annotation-only messages with per-selection comments', async 
 
 test('chat runtime reports new messages to the group summary sink', async () => {
   const seen: unknown[] = [];
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
   await using runtime = new WhatsAppChatRuntime({
     loadParticipants: async () => [],
     onMessage: (conversation, message, cursor) => {
@@ -1637,7 +1639,7 @@ test('chat runtime reports new messages to the group summary sink', async () => 
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
     mailboxPath: ':memory:',
-    queueDirectory: testQueueDirectory(),
+    queueDirectory: queues.path,
   });
 
   const message = await runtime.post(testGroupConversation, {
@@ -1651,14 +1653,18 @@ test('chat runtime reports new messages to the group summary sink', async () => 
 });
 
 test('chat runtime publishes owner-scoped status changes and closes aborted subscriptions', async () => {
-  await using runtime = memoryRuntime([
-    {
-      name: 'Maya',
-      model: new MockLanguageModelV4({
-        doStream: groupTextResponse('Nothing to add.'),
-      }),
-    },
-  ]);
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
+  await using runtime = memoryRuntime(
+    [
+      {
+        name: 'Maya',
+        model: new MockLanguageModelV4({
+          doStream: groupTextResponse('Nothing to add.'),
+        }),
+      },
+    ],
+    queues.path,
+  );
   const abort = new AbortController();
   const events = await runtime.subscribeConversationStatus(abort.signal);
   const iterator = events[Symbol.asyncIterator]();
@@ -1713,7 +1719,7 @@ test('chat runtime publishes owner-scoped status changes and closes aborted subs
   );
   assert.equal((await closed[Symbol.asyncIterator]().next()).done, true);
 
-  const disposable = memoryRuntime([]);
+  const disposable = memoryRuntime([], queues.path);
   const disposing = await disposable.subscribeConversationStatus(
     new AbortController().signal,
   );
@@ -1760,6 +1766,7 @@ test('chat runtime rebuilds message projections from the durable log', async (t)
 
 test('snapshots reuse the active chat roster', async () => {
   let loads = 0;
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
   await using runtime = new WhatsAppChatRuntime({
     loadParticipants: async () => {
       loads++;
@@ -1769,7 +1776,7 @@ test('snapshots reuse the active chat roster', async () => {
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
     mailboxPath: ':memory:',
-    queueDirectory: testQueueDirectory(),
+    queueDirectory: queues.path,
   });
 
   await runtime.snapshot({ userId: 'user-1', chatId: 'chat-1' });
@@ -1816,13 +1823,14 @@ test('new participants join an active chat, read its transcript, and greet once'
     }),
   });
 
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
   await using runtime = new WhatsAppChatRuntime({
     loadParticipants: async () => roster,
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
     mailboxPath: ':memory:',
-    queueDirectory: testQueueDirectory(),
+    queueDirectory: queues.path,
   });
 
   await runtime.post(conversation, {
@@ -1884,13 +1892,14 @@ test('a chat stops instead of freezing when the pump throws', async (t) => {
     }),
   });
 
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
   await using runtime = new WhatsAppChatRuntime({
     loadParticipants: async () => roster,
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
     mailboxPath: ':memory:',
-    queueDirectory: testQueueDirectory(),
+    queueDirectory: queues.path,
   });
 
   await runtime.post(conversation, { id: 'message-1', content: 'Hello.' });
@@ -2070,12 +2079,16 @@ test('chat message POST returns before active participants settle', async (t) =>
       return groupTextResponse('Nothing distinct to add.');
     },
   });
-  await using runtime = memoryRuntime([
-    {
-      name: 'Maya',
-      model: participant,
-    },
-  ]);
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
+  await using runtime = memoryRuntime(
+    [
+      {
+        name: 'Maya',
+        model: participant,
+      },
+    ],
+    queues.path,
+  );
 
   try {
     const groupApp = testApp({ runtime });
@@ -3492,12 +3505,16 @@ test('chat stop cancels active participant work', async () => {
       return groupTextResponse('Nothing distinct to add.');
     },
   });
-  await using runtime = memoryRuntime([
-    {
-      name: 'Maya',
-      model: participant,
-    },
-  ]);
+  await using queues = await new TemporaryFiles().directory('chat-queues-');
+  await using runtime = memoryRuntime(
+    [
+      {
+        name: 'Maya',
+        model: participant,
+      },
+    ],
+    queues.path,
+  );
 
   try {
     const groupApp = testApp({ runtime });
