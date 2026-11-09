@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 
 import { Declaration } from '@zukhruf/sqlite-drift';
+import { open } from '@zukhruf/sqlite-open';
+import { z } from 'zod';
 
 import type { GroupTemplate } from './group-template-catalog.js';
 
@@ -19,16 +21,17 @@ export interface MarketplaceGroupTemplate {
   published: boolean;
 }
 
-type MarketplaceGroupTemplateRow = {
-  id: string;
-  source_group_id: string | null;
-  publisher_name: string;
-  name: string;
-  category: string;
-  outcome: string;
-  agents: string;
-  published: number;
-};
+const templateRow = z.object({
+  id: z.string(),
+  source_group_id: z.string().nullable(),
+  publisher_name: z.string(),
+  name: z.string(),
+  category: z.string(),
+  outcome: z.string(),
+  agents: z.string(),
+  published: z.number(),
+});
+const publishedRow = z.object({ published: z.number() });
 
 export class MarketplaceGroupTemplateInputError extends Error {
   constructor(message: string) {
@@ -46,7 +49,7 @@ export class MarketplaceGroupTemplateStore implements Disposable {
     authDatabasePath: string,
     agentIds: Iterable<string>,
   ) {
-    this.#database = new DatabaseSync(databasePath);
+    this.#database = open(databasePath);
     this.#agentIds = new Set(agentIds);
     const templates = new Declaration(
       [
@@ -162,8 +165,10 @@ export class MarketplaceGroupTemplateStore implements Disposable {
          WHERE published = 1
          ORDER BY rowid`,
       )
-      .all() as MarketplaceGroupTemplateRow[];
-    return rows.map(toMarketplaceGroupTemplate);
+      .all();
+    return rows.map((row) =>
+      toMarketplaceGroupTemplate(templateRow.parse(row)),
+    );
   }
 
   owns(publisherId: string, id: string) {
@@ -185,8 +190,8 @@ export class MarketplaceGroupTemplateStore implements Disposable {
          FROM marketplace_group_templates
          WHERE id = ? AND published = 1`,
       )
-      .get(id) as MarketplaceGroupTemplateRow | undefined;
-    return row ? toMarketplaceGroupTemplate(row) : null;
+      .get(id);
+    return row ? toMarketplaceGroupTemplate(templateRow.parse(row)) : null;
   }
 
   findBySourceGroup(
@@ -199,9 +204,8 @@ export class MarketplaceGroupTemplateStore implements Disposable {
          FROM marketplace_group_templates
          WHERE publisher_id = ? AND source_group_id = ?`,
       )
-      .get(publisherId, sourceGroupId) as
-      MarketplaceGroupTemplateRow | undefined;
-    return row ? toMarketplaceGroupTemplate(row) : null;
+      .get(publisherId, sourceGroupId);
+    return row ? toMarketplaceGroupTemplate(templateRow.parse(row)) : null;
   }
 
   publish(publisherId: string, id: string): MarketplaceGroupTemplate | null {
@@ -219,10 +223,10 @@ export class MarketplaceGroupTemplateStore implements Disposable {
          FROM marketplace_group_templates
          WHERE publisher_id = ? AND source_group_id = ?`,
       )
-      .get(publisherId, sourceGroupId) as { published: number } | undefined;
+      .get(publisherId, sourceGroupId);
     if (!row) return false;
 
-    const statement = row.published
+    const statement = publishedRow.parse(row).published
       ? `UPDATE marketplace_group_templates
          SET source_group_id = NULL
          WHERE publisher_id = ? AND source_group_id = ?`
@@ -265,9 +269,9 @@ export class MarketplaceGroupTemplateStore implements Disposable {
          FROM marketplace_group_templates
          WHERE publisher_id = ? AND id = ?`,
       )
-      .get(publisherId, id) as MarketplaceGroupTemplateRow | undefined;
+      .get(publisherId, id);
 
-    return row ? toMarketplaceGroupTemplate(row) : null;
+    return row ? toMarketplaceGroupTemplate(templateRow.parse(row)) : null;
   }
 
   #normalize(
@@ -328,7 +332,7 @@ export class MarketplaceGroupTemplateStore implements Disposable {
 }
 
 function toMarketplaceGroupTemplate(
-  row: MarketplaceGroupTemplateRow,
+  row: z.infer<typeof templateRow>,
 ): MarketplaceGroupTemplate {
   return {
     id: row.id,

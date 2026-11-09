@@ -3,7 +3,6 @@ import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import test, { type TestContext } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -20,6 +19,7 @@ import {
   SqliteMailboxStore,
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
+import { open } from '@zukhruf/sqlite-open';
 import { settleWithin } from '@zukhruf/testing/async';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { simulateReadableStream } from 'ai';
@@ -104,7 +104,7 @@ function testGroupRecord(
 }
 
 function testGroupDependencies(resources: AsyncDisposableStack) {
-  const database = new DatabaseSync(':memory:');
+  const database = open(':memory:');
   resources.defer(() => database.close());
   const streamStore = new SqliteStreamStore(database);
   return {

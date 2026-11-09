@@ -1,7 +1,6 @@
 import { EventEmitter, on } from 'node:events';
 import { rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 
 import {
   PollingChangeSource,
@@ -20,6 +19,7 @@ import {
   SqliteMailboxStore,
   type TurnRequest,
 } from '@deepagents/experimental/zukhruf';
+import { open } from '@zukhruf/sqlite-open';
 
 import { readAgentExecutions } from './agent-executions.js';
 import {
@@ -92,9 +92,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     this.#sandboxForChat = options.sandboxForChat;
     this.#queueDirectory = options.queueDirectory;
 
-    const database = this.#resources.use(
-      new DatabaseSync(options.databasePath),
-    );
+    const database = this.#resources.use(open(options.databasePath));
     this.#store = new SqliteContextStore(database);
     this.#streamStore = new SqliteStreamStore(database);
     this.#streams = new StreamManager({

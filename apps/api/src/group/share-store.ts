@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 
 import { Declaration } from '@zukhruf/sqlite-drift';
+import { open } from '@zukhruf/sqlite-open';
+import { z } from 'zod';
 
 export interface GroupShareRecord {
   token: string;
@@ -13,16 +15,14 @@ export interface GroupShareTarget {
   groupId: string;
 }
 
-interface GroupShareRow {
-  token: string;
-  created_at: number;
-}
+const shareRow = z.object({ token: z.string(), created_at: z.number() });
+const targetRow = z.object({ user_id: z.string(), group_id: z.string() });
 
 export class GroupShareStore implements Disposable {
   readonly #database: DatabaseSync;
 
   constructor(databasePath: string) {
-    this.#database = new DatabaseSync(databasePath);
+    this.#database = open(databasePath);
     new Declaration(
       [
         `CREATE TABLE group_shares (
@@ -64,11 +64,11 @@ export class GroupShareStore implements Disposable {
          ORDER BY created_at DESC
          LIMIT 1`,
       )
-      .get(userId, groupId) as GroupShareRow | undefined;
+      .get(userId, groupId);
+    if (!row) return null;
 
-    return row
-      ? { token: row.token, createdAt: new Date(row.created_at).toISOString() }
-      : null;
+    const { token, created_at } = shareRow.parse(row);
+    return { token, createdAt: new Date(created_at).toISOString() };
   }
 
   revoke(userId: string, groupId: string) {
@@ -97,9 +97,11 @@ export class GroupShareStore implements Disposable {
          FROM group_shares
          WHERE token = ? AND revoked_at IS NULL`,
       )
-      .get(token) as { user_id: string; group_id: string } | undefined;
+      .get(token);
+    if (!row) return null;
 
-    return row ? { userId: row.user_id, groupId: row.group_id } : null;
+    const { user_id, group_id } = targetRow.parse(row);
+    return { userId: user_id, groupId: group_id };
   }
 
   [Symbol.dispose]() {

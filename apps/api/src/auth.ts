@@ -1,6 +1,5 @@
-import { DatabaseSync } from 'node:sqlite';
-
 import { passkey } from '@better-auth/passkey';
+import { open } from '@zukhruf/sqlite-open';
 import {
   type BetterAuthOptions,
   type BetterAuthPlugin,
@@ -45,7 +44,7 @@ export async function createAuthentication(options: {
   secret: string;
   trustedOrigins: string[];
 }) {
-  const database = new DatabaseSync(options.databasePath);
+  const database = open(options.databasePath);
   const authOptions = {
     appName: 'Baseera',
     database,

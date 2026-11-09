@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
+import { open } from '@zukhruf/sqlite-open';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 
 import { GroupStore } from './group-store.js';
@@ -174,7 +174,7 @@ test('a groups table from an earlier version keeps its rows and takes the curren
   const databasePath = join(directory.path, 'group.sqlite');
   {
     // The first GroupStore made the table without the sidebar columns.
-    using database = new DatabaseSync(databasePath);
+    using database = open(databasePath);
     database.exec(`
       CREATE TABLE groups (
         user_id TEXT NOT NULL,
@@ -211,7 +211,7 @@ test('a groups table from an earlier version keeps its rows and takes the curren
     },
   ]);
   const storedTable = (path: string) => {
-    using database = new DatabaseSync(path, { readOnly: true });
+    using database = open(path, { readOnly: true });
     return database
       .prepare("SELECT sql FROM sqlite_schema WHERE name = 'groups'")
       .get();

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 
 import { Declaration } from '@zukhruf/sqlite-drift';
+import { open } from '@zukhruf/sqlite-open';
+import { z } from 'zod';
 
 export interface GroupRecord {
   id: string;
@@ -17,17 +19,20 @@ export interface GroupRecord {
   pinned: boolean;
 }
 
-interface GroupRow {
-  id: string;
-  name: string;
-  agent_ids: string;
-  created_at: number;
-  last_message_author: string | null;
-  last_message_content: string | null;
-  last_message_at: number | null;
-  unread_count: number;
-  pinned_at: number | null;
-}
+const groupRow = z.object({
+  id: z.string(),
+  name: z.string(),
+  agent_ids: z.string(),
+  created_at: z.number(),
+  last_message_author: z.string().nullable(),
+  last_message_content: z.string().nullable(),
+  last_message_at: z.number().nullable(),
+  unread_count: z.number(),
+  pinned_at: z.number().nullable(),
+});
+type GroupRow = z.infer<typeof groupRow>;
+
+const ownerRow = z.object({ user_id: z.string() });
 
 export class GroupInputError extends Error {
   constructor(message: string) {
@@ -41,7 +46,7 @@ export class GroupStore implements Disposable {
   readonly #agentIds: ReadonlySet<string>;
 
   constructor(databasePath: string, agentIds: Iterable<string>) {
-    this.#database = new DatabaseSync(databasePath);
+    this.#database = open(databasePath);
     this.#agentIds = new Set(agentIds);
     new Declaration(
       [
@@ -112,17 +117,17 @@ export class GroupStore implements Disposable {
          FROM groups
          WHERE user_id = ? AND id = ?`,
       )
-      .get(userId, id) as GroupRow | undefined;
+      .get(userId, id);
 
-    return row ? groupRecord(row) : null;
+    return row ? groupRecord(groupRow.parse(row)) : null;
   }
 
   ownerOf(id: string): string | null {
     const row = this.#database
       .prepare(`SELECT user_id FROM groups WHERE id = ? LIMIT 1`)
-      .get(id) as { user_id: string } | undefined;
+      .get(id);
 
-    return row?.user_id ?? null;
+    return row ? ownerRow.parse(row).user_id : null;
   }
 
   list(
@@ -136,9 +141,9 @@ export class GroupStore implements Disposable {
          WHERE user_id = ?${options.includeArchived ? '' : ' AND archived_at IS NULL'}
          ORDER BY COALESCE(last_message_at, created_at) DESC, rowid DESC`,
       )
-      .all(userId) as unknown as GroupRow[];
+      .all(userId);
 
-    return rows.map(groupRecord);
+    return rows.map((row) => groupRecord(groupRow.parse(row)));
   }
 
   projectMessage(

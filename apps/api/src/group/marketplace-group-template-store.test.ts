@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
+import { open } from '@zukhruf/sqlite-open';
 import { TemporaryFiles } from '@zukhruf/testing/fs';
 
 import { createAuthentication } from '../auth.js';
@@ -82,7 +82,7 @@ test("templates made before attribution take their publisher's name, and templat
   });
   {
     // The first marketplace made the table without attribution.
-    using database = new DatabaseSync(databasePath);
+    using database = open(databasePath);
     database.exec(`
       CREATE TABLE marketplace_group_templates (
         id TEXT PRIMARY KEY,
@@ -152,7 +152,7 @@ test('attributed templates keep their stored names and the table refuses a templ
   {
     // The layout that earlier versions gave a first-marketplace table: they
     // added attribution with ALTER TABLE, so publisher_name accepts NULL.
-    using database = new DatabaseSync(databasePath);
+    using database = open(databasePath);
     database.exec(`
       CREATE TABLE marketplace_group_templates (
         id TEXT PRIMARY KEY,
@@ -206,7 +206,7 @@ test('attributed templates keep their stored names and the table refuses a templ
       { id: 'removed-publisher-template', publisherName: 'Gone Publisher' },
     ],
   );
-  using database = new DatabaseSync(databasePath);
+  using database = open(databasePath);
   assert.throws(
     () =>
       database
