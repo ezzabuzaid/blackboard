@@ -254,10 +254,12 @@ function tokens(value: unknown) {
   return number(value) ?? number(record(value)?.total) ?? 0;
 }
 
-function record(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null
-    ? (value as Record<string, unknown>)
-    : null;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function record(value: unknown) {
+  return isRecord(value) ? value : null;
 }
 
 function string(value: unknown) {

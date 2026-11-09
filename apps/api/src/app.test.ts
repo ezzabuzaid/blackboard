@@ -16,6 +16,7 @@ import {
 } from '@deepagents/context';
 import { codex } from '@deepagents/experimental/providers/codex';
 import {
+  type ConversationStatusEvent,
   SqliteMailboxStore,
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
@@ -25,19 +26,16 @@ import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import type { DrainContext } from 'evlog';
 import { InMemoryFs } from 'just-bash';
+import { z } from 'zod';
 
 import { type AppDependencies, createApp } from './app.js';
 import { createAuthentication } from './auth.js';
 import { WhatsAppChatRuntime } from './group/chat-runtime.js';
 import type { GroupRecord } from './group/group-store.js';
 import { groupTemplates } from './group/group-template-catalog.js';
-import {
-  type MarketplaceGroupTemplate,
-  MarketplaceGroupTemplateStore,
-} from './group/marketplace-group-template-store.js';
+import { MarketplaceGroupTemplateStore } from './group/marketplace-group-template-store.js';
 import { ParticipantDirectory } from './group/participants/index.js';
 import {
-  type WhatsAppChatEvent,
   WhatsAppGroup,
   WhatsAppGroupLimitError,
   type WhatsAppParticipant,
@@ -60,6 +58,34 @@ const testGroupLimits = {
   transcriptMessages: 500,
 };
 const testCreatedAt = '2026-08-04T00:00:00.000Z';
+
+// Loose objects keep every key, so a deepEqual on a parsed body still sees all
+// that the route sent.
+const templateBody = z.looseObject({
+  id: z.string(),
+  publisherName: z.string(),
+  published: z.boolean(),
+});
+const templateListing = z.looseObject({
+  templates: z.array(
+    z.looseObject({
+      id: z.string(),
+      owned: z.boolean().optional(),
+      detached: z.boolean().optional(),
+    }),
+  ),
+});
+const postedMessage = z.looseObject({
+  message: z.looseObject({ sentAt: z.string() }),
+});
+const streamedChatEvent = z.discriminatedUnion('type', [
+  z.looseObject({ type: z.literal('message'), cursor: z.number() }),
+  z.looseObject({
+    type: z.literal('activity'),
+    cursor: z.number(),
+    activity: z.looseObject({ type: z.string() }),
+  }),
+]);
 
 function testGroupRecord(
   id: string,
@@ -424,8 +450,8 @@ test('Zukhruf events do not expose another owner conversation status', async () 
   const response = await app.request('/api/zukhruf/v1/events');
   assert.equal(response.status, 200);
   const events = await response.text();
-  assert.match(events, /\"type\":\"ready\"/);
-  assert.match(events, /\"id\":\"local-chat\"/);
+  assert.match(events, /"type":"ready"/);
+  assert.match(events, /"id":"local-chat"/);
   assert.doesNotMatch(events, /other-chat|other-user/);
 });
 
@@ -480,13 +506,15 @@ test('passkey registration requires only a name', async () => {
   );
   assert.equal(registration.status, 200);
 
-  const body = (await registration.json()) as {
-    user?: { id?: unknown; name?: unknown; displayName?: unknown };
-    authenticatorSelection?: {
-      residentKey?: unknown;
-      userVerification?: unknown;
-    };
-  };
+  const body = z
+    .looseObject({
+      user: z.looseObject({ id: z.string() }),
+      authenticatorSelection: z.looseObject({
+        residentKey: z.string(),
+        userVerification: z.string(),
+      }),
+    })
+    .parse(await registration.json());
   assert.equal(typeof body.user?.id, 'string');
   assert.deepEqual(body.user, {
     id: body.user?.id,
@@ -631,9 +659,11 @@ test('group template catalog resolves agent names', async () => {
   }).request('/api/group-templates');
 
   assert.equal(response.status, 200);
-  const body = (await response.json()) as {
-    templates: { agents: unknown[] }[];
-  };
+  const body = z
+    .looseObject({
+      templates: z.array(z.looseObject({ agents: z.array(z.unknown()) })),
+    })
+    .parse(await response.json());
   assert.equal(body.templates.length, groupTemplates.length);
   assert.deepEqual(body.templates[0]?.agents[0], {
     id: 'rob-fitzpatrick',
@@ -676,7 +706,7 @@ test('a publisher owns the marketplace template lifecycle', async () => {
     body: JSON.stringify(input),
   });
   assert.equal(createResponse.status, 201);
-  const created = (await createResponse.json()) as MarketplaceGroupTemplate;
+  const created = templateBody.parse(await createResponse.json());
   assert.equal(created.publisherName, 'Publisher One');
   assert.equal(created.published, false);
 
@@ -696,14 +726,12 @@ test('a publisher owns the marketplace template lifecycle', async () => {
   );
   assert.equal(publishResponse.status, 200);
   assert.equal(
-    ((await publishResponse.json()) as MarketplaceGroupTemplate).published,
+    templateBody.parse(await publishResponse.json()).published,
     true,
   );
-  let listing = (await (
-    await application.request('/api/group-templates')
-  ).json()) as {
-    templates: Array<{ id: string; owned: boolean; detached: boolean }>;
-  };
+  let listing = templateListing.parse(
+    await (await application.request('/api/group-templates')).json(),
+  );
   let listed = listing.templates.find(({ id }) => id === created.id);
   assert.equal(listed?.owned, true);
   assert.equal(listed?.detached, true);
@@ -727,9 +755,9 @@ test('a publisher owns the marketplace template lifecycle', async () => {
   });
 
   userId = 'publisher-2';
-  listing = (await (
-    await application.request('/api/group-templates')
-  ).json()) as typeof listing;
+  listing = templateListing.parse(
+    await (await application.request('/api/group-templates')).json(),
+  );
   listed = listing.templates.find(({ id }) => id === created.id);
   assert.equal(listed?.owned, false);
   const foreignResponse = await application.request(
@@ -848,7 +876,7 @@ test('an owned group saves one marketplace template from its roster', async () =
     },
   );
   assert.equal(createdResponse.status, 201);
-  const created = (await createdResponse.json()) as MarketplaceGroupTemplate;
+  const created = templateBody.parse(await createdResponse.json());
   assert.deepEqual(created, {
     id: created.id,
     sourceGroupId: 'group-1',
@@ -867,10 +895,7 @@ test('an owned group saves one marketplace template from its roster', async () =
     },
   );
   assert.equal(updatedResponse.status, 200);
-  assert.equal(
-    ((await updatedResponse.json()) as MarketplaceGroupTemplate).id,
-    created.id,
-  );
+  assert.equal(templateBody.parse(await updatedResponse.json()).id, created.id);
 
   const wrongRoster = await application.request(
     '/api/groups/group-1/marketplace-template',
@@ -928,9 +953,9 @@ test('published marketplace templates create ordinary groups', async () => {
   });
 
   const listResponse = await application.request('/api/group-templates');
-  const list = (await listResponse.json()) as {
-    templates: Array<{ id: string } & Record<string, unknown>>;
-  };
+  const list = z
+    .looseObject({ templates: z.array(z.looseObject({ id: z.string() })) })
+    .parse(await listResponse.json());
   assert.deepEqual(
     list.templates.find(({ id }) => id === template.id),
     {
@@ -1538,9 +1563,9 @@ test('a user with no participants gets an empty group', async () => {
     body: JSON.stringify({ id: 'message-1', content: 'Anyone here?' }),
   });
   assert.equal(messageResponse.status, 201);
-  const body = (await messageResponse.json()) as {
-    message?: { content?: unknown };
-  };
+  const body = z
+    .looseObject({ message: z.looseObject({ content: z.string() }) })
+    .parse(await messageResponse.json());
   assert.equal(body.message?.content, 'Anyone here?');
 });
 
@@ -1568,7 +1593,7 @@ test('chat messages retain multiple excerpt annotations', async () => {
   });
 
   assert.equal(response.status, 201);
-  const body = (await response.json()) as { message: { sentAt: string } };
+  const body = postedMessage.parse(await response.json());
   assert.match(body.message.sentAt, /^\d{4}-\d{2}-\d{2}T/u);
   assert.deepEqual(body.message, {
     id: 'message-3',
@@ -1609,7 +1634,7 @@ test('chat accepts annotation-only messages with per-selection comments', async 
   });
 
   assert.equal(response.status, 201);
-  const body = (await response.json()) as { message: { sentAt: string } };
+  const body = postedMessage.parse(await response.json());
   assert.deepEqual(body.message, {
     id: 'message-2',
     sequence: 2,
@@ -1692,12 +1717,12 @@ test('chat runtime publishes owner-scoped status changes and closes aborted subs
   );
   const stoppedIterator = stoppedEvents[Symbol.asyncIterator]();
   await runtime.stop(testGroupConversation);
-  let stopped: IteratorResult<unknown>;
+  let stopped: IteratorResult<ConversationStatusEvent>;
   do {
     stopped = await stoppedIterator.next();
   } while (
     !stopped.done &&
-    (stopped.value as { status: { type: string } }).status.type !== 'idle'
+    (stopped.value.type !== 'change' || stopped.value.status.type !== 'idle')
   );
   assert.deepEqual(stopped, {
     done: false,
@@ -2108,9 +2133,7 @@ test('chat message POST returns before active participants settle', async (t) =>
     );
 
     assert.equal(response.status, 201);
-    const posted = (await response.json()) as {
-      message: ReturnType<WhatsAppGroup['snapshot']>['messages'][number];
-    };
+    const posted = postedMessage.parse(await response.json());
     assert.match(posted.message.sentAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.deepEqual(posted, {
       message: {
@@ -2136,9 +2159,9 @@ test('chat message POST returns before active participants settle', async (t) =>
     });
     await participantStarted.promise;
 
-    const state = (await (
+    const state: unknown = await (
       await groupApp.request(`/api/chat/${chatId}/state`)
-    ).json()) as ReturnType<WhatsAppGroup['snapshot']>;
+    ).json();
     assert.deepEqual(state, {
       messages: [
         {
@@ -3270,7 +3293,7 @@ test('the previous responder answers an ambiguous short follow-up', async () => 
 test('a chat survives a runtime restart and replays persisted events', async (t) => {
   await using directory = await new TemporaryFiles().directory('zukhruf-chat-');
   const conversation = { chatId: 'durable-chat', userId: 'local-user' };
-  const liveEvents: WhatsAppChatEvent[] = [];
+  const liveEvents: z.infer<typeof streamedChatEvent>[] = [];
   const participants = [
     {
       name: 'Maya',
@@ -3300,7 +3323,7 @@ test('a chat survives a runtime restart and replays persisted events', async (t)
       const { done, value } = await reader.read();
       if (done) break;
       if (value.type === 'data-whatsapp-chat-event') {
-        liveEvents.push(value.data as WhatsAppChatEvent);
+        liveEvents.push(streamedChatEvent.parse(value.data));
       }
     }
     await reader.cancel();
@@ -3336,7 +3359,7 @@ test('a chat survives a runtime restart and replays persisted events', async (t)
   const stream = await runtime.observe(conversation).resume();
   assert.ok(stream);
   const reader = stream.getReader();
-  const replayed: WhatsAppChatEvent[] = [];
+  const replayed: z.infer<typeof streamedChatEvent>[] = [];
   while (
     !replayed.some(
       (event) => event.type === 'activity' && event.activity.type === 'settled',
@@ -3345,7 +3368,7 @@ test('a chat survives a runtime restart and replays persisted events', async (t)
     const { done, value } = await reader.read();
     if (done) break;
     if (value.type === 'data-whatsapp-chat-event') {
-      replayed.push(value.data as WhatsAppChatEvent);
+      replayed.push(streamedChatEvent.parse(value.data));
     }
   }
   await reader.cancel();
@@ -3529,9 +3552,14 @@ test('chat stop cancels active participant work', async () => {
       method: 'POST',
     });
     assert.equal(response.status, 200);
-    const state = (await response.json()) as ReturnType<
-      WhatsAppGroup['snapshot']
-    >;
+    const state = z
+      .looseObject({
+        activity: z.looseObject({
+          phase: z.string(),
+          stopReason: z.string(),
+        }),
+      })
+      .parse(await response.json());
     assert.equal(state.activity.phase, 'stopped');
     assert.equal(state.activity.stopReason, 'user');
     assert.equal(aborted, true);

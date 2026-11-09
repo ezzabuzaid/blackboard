@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 
 import { type AgentModel, fragment } from '@deepagents/context';
 import { createFileTelemetry } from '@deepagents/context/telemetry/file';
+import { isErrno } from '@zukhruf/fs';
 import type { ToolSet } from 'ai';
 
 import type { WhatsAppParticipant } from '../whatsapp.js';
@@ -157,7 +158,7 @@ export class ParticipantDirectory {
         await readFile(resolve(source.hostPath, IDENTITY_FILE), 'utf8'),
       );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (isErrno(error, 'ENOENT')) {
         throw new Error(
           `Participant "${source.directory}" requires ${IDENTITY_FILE}`,
           { cause: error },

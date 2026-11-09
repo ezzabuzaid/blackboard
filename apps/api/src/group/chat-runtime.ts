@@ -164,9 +164,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
     ]);
     if (subscriptionAbort.aborted) {
       return {
-        async *[Symbol.asyncIterator](): AsyncGenerator<ConversationStatusEvent> {
-          return;
-        },
+        async *[Symbol.asyncIterator](): AsyncGenerator<ConversationStatusEvent> {},
       };
     }
     const events = on(this.#statusEvents, 'event', {
@@ -176,7 +174,7 @@ export class WhatsAppChatRuntime implements AsyncDisposable {
       async *[Symbol.asyncIterator](): AsyncGenerator<ConversationStatusEvent> {
         try {
           for await (const [event] of events) {
-            yield event as ConversationStatusEvent;
+            yield event;
           }
         } catch (error) {
           if (!subscriptionAbort.aborted) throw error;
@@ -489,17 +487,23 @@ function participantConversation(
   };
 }
 
+function isChatEvent(
+  value: unknown,
+  sequence: number,
+): value is WhatsAppChatEvent {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'cursor' in value &&
+    value.cursor === sequence
+  );
+}
+
 function chatEvent(part: StreamPart, sequence: number, createdAt: number) {
-  if (
-    part.type !== CHAT_EVENT_TYPE ||
-    typeof part.data !== 'object' ||
-    part.data === null ||
-    !('cursor' in part.data) ||
-    part.data.cursor !== sequence
-  ) {
+  if (part.type !== CHAT_EVENT_TYPE || !isChatEvent(part.data, sequence)) {
     throw new Error(`Invalid WhatsApp chat event at sequence ${sequence}`);
   }
-  const event = part.data as WhatsAppChatEvent;
+  const event = part.data;
   if (event.type !== 'message') return event;
 
   return {

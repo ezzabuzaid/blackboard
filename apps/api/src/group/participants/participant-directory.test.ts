@@ -32,7 +32,9 @@ async function writeBuiltinFactory(directory: string) {
 function createDirectory(
   root: string,
   builtinsDirectory: string,
-  loadDefaults: (userId: string) => Promise<{ model: typeof model; tools: {} }>,
+  loadDefaults: (
+    userId: string,
+  ) => Promise<{ model: typeof model; tools: Record<string, never> }>,
 ) {
   return new ParticipantDirectory({
     directory: resolve(root, 'participants'),

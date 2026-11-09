@@ -1,12 +1,20 @@
 import { validate } from '@sdk-it/hono/runtime';
 import type { User } from 'better-auth';
 import type { Context, Hono } from 'hono';
+import { z } from 'zod';
 
 import type { AppEnv } from '../app.js';
 
 interface AuthSession {
   user: Pick<User, 'id' | 'name'>;
 }
+
+// Loose: the route forwards all that Better Auth sent.
+const authSession = z
+  .looseObject({
+    user: z.looseObject({ id: z.string(), name: z.string() }),
+  })
+  .nullable();
 
 export default function (router: Hono<AppEnv>) {
   /**
@@ -21,7 +29,9 @@ export default function (router: Hono<AppEnv>) {
       const { auth } = context.var.dependencies;
       const response = await auth.getSessionResponse(context.req.raw);
       if (!response.ok) return response;
-      const session = (await response.json()) as AuthSession | null;
+      const session: AuthSession | null = authSession.parse(
+        await response.json(),
+      );
       copyAuthHeaders(context, response.headers);
       return context.json(session);
     },

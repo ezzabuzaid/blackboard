@@ -1043,7 +1043,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         !participant.name.trim() ||
         participant.name !== participant.name.trim() ||
         participant.name.length > 100 ||
-        /[\u0000-\u001f\u007f]/u.test(participant.name)
+        /\p{Cc}/u.test(participant.name)
       ) {
         throw new Error(
           'WhatsAppGroup participant names must be valid, unpadded text',

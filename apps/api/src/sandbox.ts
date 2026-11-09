@@ -11,6 +11,7 @@ import {
   type ConversationId,
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
+import { isErrno } from '@zukhruf/fs';
 
 import type { ParticipantMount } from './group/participants/index.js';
 
@@ -60,7 +61,7 @@ export class GroupSandboxes implements AsyncDisposable {
       if (!metadata.isFile()) return null;
       return { body: await readFile(file), size: metadata.size };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      if (isErrno(error, 'ENOENT')) return null;
       throw error;
     }
   }
@@ -75,7 +76,7 @@ export class GroupSandboxes implements AsyncDisposable {
       try {
         await stat(root);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+        if (isErrno(error, 'ENOENT')) return;
         throw error;
       }
     }
