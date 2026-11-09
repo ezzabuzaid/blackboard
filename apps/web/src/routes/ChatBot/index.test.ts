@@ -4,7 +4,7 @@ import test from 'node:test';
 import { serializeMentionPromptLink } from '@genui/input';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { LoaderFunctionArgs } from 'react-router';
+import { type LoaderFunctionArgs, RouterContextProvider } from 'react-router';
 import { Streamdown } from 'streamdown';
 
 import { artifactRemarkPlugins, sandboxArtifactUrl } from './artifactLinks.ts';
@@ -42,6 +42,16 @@ const groupSummary = {
   unreadCount: 0,
   pinned: false,
 };
+
+function loaderArgs(request: Request): LoaderFunctionArgs {
+  return {
+    request,
+    url: new URL(request.url),
+    pattern: '',
+    params: {},
+    context: new RouterContextProvider(),
+  };
+}
 
 test('extracts group events from the Zukhruf stream', () => {
   const event = {
@@ -89,16 +99,13 @@ test('loader sends users without groups to group creation', async () => {
   const request = new Request('http://localhost/?source=test');
 
   try {
-    await assert.rejects(
-      loader({ request } as LoaderFunctionArgs),
-      (error: unknown) => {
-        assert.ok(error instanceof Response);
-        assert.equal(error.status, 302);
+    await assert.rejects(loader(loaderArgs(request)), (error: unknown) => {
+      assert.ok(error instanceof Response);
+      assert.equal(error.status, 302);
 
-        assert.equal(error.headers.get('location'), '/groups/new');
-        return true;
-      },
-    );
+      assert.equal(error.headers.get('location'), '/groups/new');
+      return true;
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -119,19 +126,16 @@ test('loader selects the most recent group', async () => {
 
   const request = new Request('http://localhost/?source=test');
   try {
-    await assert.rejects(
-      loader({ request } as LoaderFunctionArgs),
-      (error: unknown) => {
-        assert.ok(error instanceof Response);
-        const location = new URL(
-          error.headers.get('location') ?? '',
-          request.url,
-        );
-        assert.equal(location.searchParams.get('source'), 'test');
-        assert.equal(location.searchParams.get('chatId'), 'test-chat');
-        return true;
-      },
-    );
+    await assert.rejects(loader(loaderArgs(request)), (error: unknown) => {
+      assert.ok(error instanceof Response);
+      const location = new URL(
+        error.headers.get('location') ?? '',
+        request.url,
+      );
+      assert.equal(location.searchParams.get('source'), 'test');
+      assert.equal(location.searchParams.get('chatId'), 'test-chat');
+      return true;
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -149,19 +153,16 @@ test('loader sends unauthenticated users to login', async () => {
 
   const request = new Request('http://localhost/?source=test');
   try {
-    await assert.rejects(
-      loader({ request } as LoaderFunctionArgs),
-      (error: unknown) => {
-        assert.ok(error instanceof Response);
-        const location = new URL(
-          error.headers.get('location') ?? '',
-          request.url,
-        );
-        assert.equal(location.pathname, '/login');
-        assert.equal(location.searchParams.get('redirect'), '/?source=test');
-        return true;
-      },
-    );
+    await assert.rejects(loader(loaderArgs(request)), (error: unknown) => {
+      assert.ok(error instanceof Response);
+      const location = new URL(
+        error.headers.get('location') ?? '',
+        request.url,
+      );
+      assert.equal(location.pathname, '/login');
+      assert.equal(location.searchParams.get('redirect'), '/?source=test');
+      return true;
+    });
     assert.deepEqual(requests, ['http://localhost:3001/api/auth/get-session']);
   } finally {
     globalThis.fetch = originalFetch;
@@ -218,9 +219,7 @@ test('loader hydrates the selected chat and reports API state', async () => {
   };
 
   try {
-    const args = {
-      request: new Request('http://localhost/?chatId=test-chat'),
-    } as LoaderFunctionArgs;
+    const args = loaderArgs(new Request('http://localhost/?chatId=test-chat'));
 
     assert.deepEqual(await loader(args), {
       apiStatus: 'ready',

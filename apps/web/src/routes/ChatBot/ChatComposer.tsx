@@ -9,19 +9,19 @@ import {
 import { VoiceRecordButton } from '@genui/voice';
 import { Field, FieldError, InputGroupButton } from '@zukhruf/shadcn';
 import { CircleStop, SendIcon, X } from 'lucide-react';
-import {
-  type CSSProperties,
-  type ReactNode,
-  useEffect,
-  useMemo,
-  useState,
-} from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { useGroupChat } from './GroupChat.tsx';
 import { api } from './api.ts';
 import type { GroupActivityState } from './groupActivity.ts';
 import type { GroupParticipant } from './groupMessages.ts';
 import { messageDisplayText } from './mentions.ts';
+
+declare module 'react' {
+  interface CSSProperties {
+    [customProperty: `--${string}`]: string;
+  }
+}
 
 export function ChatComposer() {
   const {
@@ -196,15 +196,13 @@ function MessageEditor() {
             ? 'Add an agent to start chatting'
             : 'Message the group…'
       }
-      style={
-        {
-          '--composer-min-height': '2.5rem',
-          '--composer-max-height': '10rem',
-          '--composer-font-size': '15px',
-          '--composer-line-height': '22px',
-          '--composer-padding': '9px 16px',
-        } as CSSProperties
-      }
+      style={{
+        '--composer-min-height': '2.5rem',
+        '--composer-max-height': '10rem',
+        '--composer-font-size': '15px',
+        '--composer-line-height': '22px',
+        '--composer-padding': '9px 16px',
+      }}
       className="min-w-0 flex-1 rounded-none! border-0! bg-transparent! text-start focus-within:shadow-none!"
     />
   );

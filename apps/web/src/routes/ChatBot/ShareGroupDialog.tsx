@@ -93,9 +93,10 @@ export function ShareGroupDialog({ groupId }: { groupId: string }) {
               type="button"
               variant="outline"
               disabled={pending}
-              onClick={async () => {
-                await globalThis.navigator.clipboard.writeText(shareUrl);
-                setCopied(true);
+              onClick={() => {
+                void globalThis.navigator.clipboard
+                  .writeText(shareUrl)
+                  .then(() => setCopied(true));
               }}
             >
               {copied ? (

@@ -154,8 +154,7 @@ export function isGroupChatState(value: unknown): value is GroupChatState {
     messages.every(isGroupMessage) &&
     messages.every(
       (message, index) =>
-        index === 0 ||
-        message.sequence > (messages[index - 1] as GroupMessage).sequence,
+        index === 0 || message.sequence > messages[index - 1].sequence,
     ) &&
     Array.isArray(value.participants) &&
     value.participants.every(isGroupParticipant) &&

@@ -1680,9 +1680,9 @@ describe('Composer editing shortcuts', () => {
         <Composer.Editor />
       </Composer.Root>,
     );
-    const comment = screen.getByRole('textbox', {
+    const comment = screen.getByRole<HTMLInputElement>('textbox', {
       name: /annotation comment/i,
-    }) as HTMLInputElement;
+    });
 
     await user.click(comment);
     comment.setSelectionRange(comment.value.length, comment.value.length);

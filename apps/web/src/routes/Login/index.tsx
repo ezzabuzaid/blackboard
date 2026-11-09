@@ -1,6 +1,6 @@
 import { Button, Input, Label } from '@zukhruf/shadcn';
 import { KeyRound, LoaderCircle, MessageCircle } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import { type SubmitEvent, useState } from 'react';
 import {
   Link,
   type LoaderFunctionArgs,
@@ -34,7 +34,7 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
 
     setSubmitting(true);
@@ -124,7 +124,10 @@ export default function Login() {
                 : 'Use your device passkey to continue to Baseera.'}
             </p>
 
-            <form className="mt-9 max-w-sm space-y-4" onSubmit={submit}>
+            <form
+              className="mt-9 max-w-sm space-y-4"
+              onSubmit={(event) => void submit(event)}
+            >
               {creating && (
                 <div className="space-y-2">
                   <Label htmlFor="name" className="text-[#d9eee6]">

@@ -50,10 +50,9 @@ export async function loader(args: LoaderFunctionArgs) {
   const [session, { templates }, catalog] = await Promise.all([
     api.request('GET /auth/get-session', {}, { signal: args.request.signal }),
     api.request('GET /group-templates', {}, { signal: args.request.signal }),
-    api.request('GET /agents', {}, { signal: args.request.signal }) as Promise<{
-      agents: readonly CatalogAgent[];
-    }>,
+    api.request('GET /agents', {}, { signal: args.request.signal }),
   ]);
+  const catalogAgents: readonly CatalogAgent[] = catalog.agents;
   const groupTemplates: readonly GroupTemplate[] = [
     ...templates,
     buildOwnTemplate,
@@ -68,7 +67,7 @@ export async function loader(args: LoaderFunctionArgs) {
     )
       ? requestedTemplateId
       : null,
-    catalogAgents: catalog.agents,
+    catalogAgents,
     groupTemplates,
   };
 }

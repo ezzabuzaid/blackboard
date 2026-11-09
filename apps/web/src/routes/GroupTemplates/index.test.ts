@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import type { LoaderFunctionArgs } from 'react-router';
+import { type LoaderFunctionArgs, RouterContextProvider } from 'react-router';
 
 import { loader } from './loader.ts';
 import {
@@ -9,6 +9,16 @@ import {
   matchesTemplateFilter,
   toggleAgentSelection,
 } from './selection.ts';
+
+function loaderArgs(request: Request): LoaderFunctionArgs {
+  return {
+    request,
+    url: new URL(request.url),
+    pattern: '',
+    params: {},
+    context: new RouterContextProvider(),
+  };
+}
 
 test('character selection toggles without exceeding the group limit', () => {
   assert.deepEqual(toggleAgentSelection(['annie-duke'], 'paul-graham'), [
@@ -49,11 +59,11 @@ test('anonymous visitors can load the public marketplace catalog', async () => {
   };
 
   try {
-    const result = await loader({
-      request: new Request(
-        'http://localhost/groups/new?template=founder-board',
+    const result = await loader(
+      loaderArgs(
+        new Request('http://localhost/groups/new?template=founder-board'),
       ),
-    } as LoaderFunctionArgs);
+    );
     assert.equal(result.signedIn, false);
     assert.equal(result.initialSelectedId, 'founder-board');
     const marketplace = result.groupTemplates.find(

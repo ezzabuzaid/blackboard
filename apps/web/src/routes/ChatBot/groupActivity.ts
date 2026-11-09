@@ -332,13 +332,13 @@ function stringArray(value: unknown): value is string[] {
 function isParticipantPresenceState(
   value: unknown,
 ): value is ParticipantPresenceState {
-  return participantPresenceStates.includes(value as ParticipantPresenceState);
+  return participantPresenceStates.some((state) => state === value);
 }
 
 function isToolPresenceState(
   value: ParticipantPresenceState,
 ): value is ParticipantToolPresenceState {
-  return toolPresenceStates.includes(value as ParticipantToolPresenceState);
+  return toolPresenceStates.some((state) => state === value);
 }
 
 function positiveInteger(value: unknown): value is number {

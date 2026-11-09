@@ -177,18 +177,15 @@ function useMicPermission(enabled: boolean): MicPermissionState {
     if (typeof navigator === 'undefined' || !navigator.permissions?.query) {
       return;
     }
-    let cancelled = false;
-    let status: PermissionStatus | undefined;
-    const onChange = () => {
-      if (!cancelled && status) setState(status.state);
-    };
+    const unmount = new AbortController();
     navigator.permissions
-      .query({ name: 'microphone' as PermissionName })
-      .then((nextStatus) => {
-        if (cancelled) return;
-        status = nextStatus;
-        setState(nextStatus.state);
-        nextStatus.addEventListener('change', onChange);
+      .query({ name: 'microphone' })
+      .then((status) => {
+        if (unmount.signal.aborted) return;
+        setState(status.state);
+        status.addEventListener('change', () => setState(status.state), {
+          signal: unmount.signal,
+        });
       })
       .catch((cause) => {
         console.warn(
@@ -197,8 +194,7 @@ function useMicPermission(enabled: boolean): MicPermissionState {
         );
       });
     return () => {
-      cancelled = true;
-      status?.removeEventListener('change', onChange);
+      unmount.abort();
       setState('unknown');
     };
   }, [enabled]);

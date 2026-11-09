@@ -54,7 +54,7 @@ export function messageComponents(
 export function ParticipantMention({
   children,
   persistedSource,
-}: Record<string, unknown> & ExtraProps) {
+}: { children?: ReactNode; persistedSource?: unknown } & ExtraProps) {
   return (
     <span
       data-token="mention"
@@ -63,7 +63,7 @@ export function ParticipantMention({
       }
       className="bg-foreground/10 rounded-sm px-0.5 font-medium"
     >
-      {children as ReactNode}
+      {children}
     </span>
   );
 }
