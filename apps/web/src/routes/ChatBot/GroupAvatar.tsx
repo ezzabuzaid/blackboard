@@ -1,41 +1,41 @@
-import { cn } from "cn"
-import { Avatar, AvatarFallback, AvatarGroup, Button } from "@zukhruf/shadcn"
+import { Avatar, AvatarFallback, AvatarGroup, Button } from '@zukhruf/shadcn';
+import { cn } from 'cn';
 
-import { useOptionalAgentTraceSelection } from "./traces/AgentTraceSidebar"
+import { useOptionalAgentTraceSelection } from './traces/AgentTraceSidebar';
 
-const groupMemberAvatarClass = "bg-muted text-foreground"
-export const groupMemberNameClass = "text-foreground"
+const groupMemberAvatarClass = 'bg-muted text-foreground';
+export const groupMemberNameClass = 'text-foreground';
 
 export function GroupAvatar({
   name,
-  size = "default",
+  size = 'default',
   className,
 }: {
-  name: string
-  size?: "default" | "sm"
-  className?: string
+  name: string;
+  size?: 'default' | 'sm';
+  className?: string;
 }) {
-  const traces = useOptionalAgentTraceSelection()
-  const parts = name.split(/\s+/u)
-  const monogram = `${parts[0]?.at(0) ?? ""}${
-    (parts.length === 1 ? parts[0]?.at(-1) : parts.at(-1)?.at(0)) ?? ""
-  }`.toUpperCase()
+  const traces = useOptionalAgentTraceSelection();
+  const parts = name.split(/\s+/u);
+  const monogram = `${parts[0]?.at(0) ?? ''}${
+    (parts.length === 1 ? parts[0]?.at(-1) : parts.at(-1)?.at(0)) ?? ''
+  }`.toUpperCase();
 
   const avatar = (
     <Avatar
       size={size}
-      className={cn("relative z-10 bg-background", className)}
+      className={cn('bg-background relative z-10', className)}
       title={name}
     >
       <AvatarFallback
-        className={cn("font-medium uppercase", groupMemberAvatarClass)}
+        className={cn('font-medium uppercase', groupMemberAvatarClass)}
       >
         {monogram}
       </AvatarFallback>
     </Avatar>
-  )
+  );
 
-  if (!traces) return avatar
+  if (!traces) return avatar;
 
   return (
     <Button
@@ -48,15 +48,15 @@ export function GroupAvatar({
     >
       {avatar}
     </Button>
-  )
+  );
 }
 
 export function GroupAvatarStack({
   members,
   className,
 }: {
-  members: readonly string[]
-  className?: string
+  members: readonly string[];
+  className?: string;
 }) {
   return (
     <AvatarGroup
@@ -67,5 +67,5 @@ export function GroupAvatarStack({
         <GroupAvatar key={name} name={name} size="sm" />
       ))}
     </AvatarGroup>
-  )
+  );
 }

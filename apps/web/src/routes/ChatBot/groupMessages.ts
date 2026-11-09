@@ -1,168 +1,168 @@
 import {
+  type GroupActivityEvent,
+  type GroupActivityState,
   isGroupActivityEvent,
   isGroupActivityState,
   reduceGroupActivity,
-  type GroupActivityEvent,
-  type GroupActivityState,
-} from "./groupActivity"
+} from './groupActivity';
 
 export interface GroupMessage {
-  id: string
-  sequence: number
-  author: string
-  content: string
-  sentAt: string
-  replyToMessageId: string | null
-  annotations: GroupMessageAnnotation[]
-  responseAnnotations?: GroupMessageAnnotation[]
+  id: string;
+  sequence: number;
+  author: string;
+  content: string;
+  sentAt: string;
+  replyToMessageId: string | null;
+  annotations: GroupMessageAnnotation[];
+  responseAnnotations?: GroupMessageAnnotation[];
 }
 
 export interface GroupMessageAnnotation {
-  messageId: string
-  excerpt: string
-  comment?: string
+  messageId: string;
+  excerpt: string;
+  comment?: string;
 }
 
 export interface GroupParticipant {
-  name: string
+  name: string;
 }
 
 export interface GroupChatState {
-  messages: GroupMessage[]
-  participants: GroupParticipant[]
-  activity: GroupActivityState
-  cursor: number
+  messages: GroupMessage[];
+  participants: GroupParticipant[];
+  activity: GroupActivityState;
+  cursor: number;
 }
 
 export type GroupChatEvent =
-  | { cursor: number; type: "message"; message: GroupMessage }
-  | { cursor: number; type: "activity"; activity: GroupActivityEvent }
+  | { cursor: number; type: 'message'; message: GroupMessage }
+  | { cursor: number; type: 'activity'; activity: GroupActivityEvent };
 
 export interface GroupMessageCluster {
-  author: string
-  messages: GroupMessage[]
+  author: string;
+  messages: GroupMessage[];
 }
 
 export function groupMessageClusters(messages: readonly GroupMessage[]) {
   return messages.reduce<GroupMessageCluster[]>((clusters, message) => {
-    const current = clusters.at(-1)
+    const current = clusters.at(-1);
     if (current?.author === message.author) {
-      current.messages.push(message)
+      current.messages.push(message);
     } else {
-      clusters.push({ author: message.author, messages: [message] })
+      clusters.push({ author: message.author, messages: [message] });
     }
-    return clusters
-  }, [])
+    return clusters;
+  }, []);
 }
 
 export function reduceGroupChat(
   state: GroupChatState,
-  event: GroupChatEvent
+  event: GroupChatEvent,
 ): GroupChatState {
-  if (event.cursor <= state.cursor) return state
+  if (event.cursor <= state.cursor) return state;
 
-  if (event.type === "activity") {
+  if (event.type === 'activity') {
     return {
       ...state,
       activity: reduceGroupActivity(state.activity, event.activity),
       cursor: event.cursor,
-    }
+    };
   }
 
   return {
     ...state,
     messages: addGroupMessage(state.messages, event.message),
     cursor: event.cursor,
-  }
+  };
 }
 
 export function addGroupMessage(
   messages: readonly GroupMessage[],
-  message: GroupMessage
+  message: GroupMessage,
 ) {
-  if (messages.some(({ id }) => id === message.id)) return [...messages]
+  if (messages.some(({ id }) => id === message.id)) return [...messages];
   return [...messages, message].sort((left, right) => {
-    return left.sequence - right.sequence
-  })
+    return left.sequence - right.sequence;
+  });
 }
 
 export function addGroupMessageAnnotation(
   annotations: readonly GroupMessageAnnotation[],
-  annotation: GroupMessageAnnotation
+  annotation: GroupMessageAnnotation,
 ) {
-  const normalized = { ...annotation, excerpt: annotation.excerpt.trim() }
+  const normalized = { ...annotation, excerpt: annotation.excerpt.trim() };
   return annotations.some(
     ({ messageId, excerpt }) =>
-      messageId === normalized.messageId && excerpt === normalized.excerpt
+      messageId === normalized.messageId && excerpt === normalized.excerpt,
   )
     ? annotations
-    : [...annotations, normalized]
+    : [...annotations, normalized];
 }
 
 export function updateGroupMessageAnnotationComment(
   annotations: readonly GroupMessageAnnotation[],
   target: GroupMessageAnnotation,
-  comment: string
+  comment: string,
 ) {
   return annotations.map((annotation) =>
     annotation.messageId === target.messageId &&
     annotation.excerpt === target.excerpt
       ? { ...annotation, comment }
-      : annotation
-  )
+      : annotation,
+  );
 }
 
 export function isGroupMessage(value: unknown): value is GroupMessage {
   return (
     isRecord(value) &&
-    typeof value.id === "string" &&
+    typeof value.id === 'string' &&
     Number.isSafeInteger(value.sequence) &&
     Number(value.sequence) > 0 &&
-    typeof value.author === "string" &&
-    typeof value.content === "string" &&
-    typeof value.sentAt === "string" &&
+    typeof value.author === 'string' &&
+    typeof value.content === 'string' &&
+    typeof value.sentAt === 'string' &&
     !Number.isNaN(Date.parse(value.sentAt)) &&
     (value.replyToMessageId === null ||
-      typeof value.replyToMessageId === "string") &&
+      typeof value.replyToMessageId === 'string') &&
     Array.isArray(value.annotations) &&
     value.annotations.every(
       (annotation) =>
         isRecord(annotation) &&
-        typeof annotation.messageId === "string" &&
-        typeof annotation.excerpt === "string" &&
+        typeof annotation.messageId === 'string' &&
+        typeof annotation.excerpt === 'string' &&
         (annotation.comment === undefined ||
-          typeof annotation.comment === "string")
+          typeof annotation.comment === 'string'),
     ) &&
     (value.responseAnnotations === undefined ||
       (Array.isArray(value.responseAnnotations) &&
         value.responseAnnotations.every(
           (annotation) =>
             isRecord(annotation) &&
-            typeof annotation.messageId === "string" &&
-            typeof annotation.excerpt === "string" &&
+            typeof annotation.messageId === 'string' &&
+            typeof annotation.excerpt === 'string' &&
             (annotation.comment === undefined ||
-              typeof annotation.comment === "string")
+              typeof annotation.comment === 'string'),
         )))
-  )
+  );
 }
 
 export function isGroupChatState(value: unknown): value is GroupChatState {
-  if (!isRecord(value) || !Array.isArray(value.messages)) return false
-  const messages = value.messages
+  if (!isRecord(value) || !Array.isArray(value.messages)) return false;
+  const messages = value.messages;
 
   return (
     messages.every(isGroupMessage) &&
     messages.every(
       (message, index) =>
         index === 0 ||
-        message.sequence > (messages[index - 1] as GroupMessage).sequence
+        message.sequence > (messages[index - 1] as GroupMessage).sequence,
     ) &&
     Array.isArray(value.participants) &&
     value.participants.every(isGroupParticipant) &&
     isGroupActivityState(value.activity) &&
     Number.isSafeInteger(value.cursor) &&
     Number(value.cursor) >= 0
-  )
+  );
 }
 
 export function isGroupChatEvent(value: unknown): value is GroupChatEvent {
@@ -171,24 +171,24 @@ export function isGroupChatEvent(value: unknown): value is GroupChatEvent {
     !Number.isSafeInteger(value.cursor) ||
     Number(value.cursor) <= 0
   ) {
-    return false
+    return false;
   }
-  if (value.type === "message") return isGroupMessage(value.message)
-  return value.type === "activity" && isGroupActivityEvent(value.activity)
+  if (value.type === 'message') return isGroupMessage(value.message);
+  return value.type === 'activity' && isGroupActivityEvent(value.activity);
 }
 
 export function groupChatEventFromStreamPart(value: unknown) {
   return isRecord(value) &&
-    value.type === "data-whatsapp-chat-event" &&
+    value.type === 'data-whatsapp-chat-event' &&
     isGroupChatEvent(value.data)
     ? value.data
-    : null
+    : null;
 }
 
 function isGroupParticipant(value: unknown): value is GroupParticipant {
-  return isRecord(value) && typeof value.name === "string" && !!value.name
+  return isRecord(value) && typeof value.name === 'string' && !!value.name;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
+  return typeof value === 'object' && value !== null;
 }

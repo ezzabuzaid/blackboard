@@ -11,42 +11,42 @@ import {
   FieldLabel,
   Input,
   Textarea,
-} from "@zukhruf/shadcn"
-import { ArrowLeft, Store } from "lucide-react"
-import { useEffect, useState } from "react"
+} from '@zukhruf/shadcn';
+import { ArrowLeft, Store } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
-import { api } from "./api"
+import { api } from './api';
 
 interface MarketplaceTemplate {
-  id: string
-  sourceGroupId: string | null
-  publisherName: string
-  name: string
-  category: string
-  outcome: string
-  agents: readonly { agentId: string; responsibility: string }[]
-  published: boolean
+  id: string;
+  sourceGroupId: string | null;
+  publisherName: string;
+  name: string;
+  category: string;
+  outcome: string;
+  agents: readonly { agentId: string; responsibility: string }[];
+  published: boolean;
 }
 
 interface MarketplaceEditorAgent {
-  id: string
-  name: string
-  headline: string
-  responsibility: string
+  id: string;
+  name: string;
+  headline: string;
+  responsibility: string;
 }
 
 export interface MarketplaceEditor {
-  template: MarketplaceTemplate | null
-  group: { id: string; name: string }
-  agents: readonly MarketplaceEditorAgent[]
+  template: MarketplaceTemplate | null;
+  group: { id: string; name: string };
+  agents: readonly MarketplaceEditorAgent[];
 }
 
 export async function loadMarketplaceEditor(groupId: string) {
   const response: unknown = await api.request(
-    "GET /groups/{groupId}/marketplace-template",
-    { groupId }
-  )
-  return readMarketplaceEditor(response)
+    'GET /groups/{groupId}/marketplace-template',
+    { groupId },
+  );
+  return readMarketplaceEditor(response);
 }
 
 export function MarketplaceTemplateDialog({
@@ -58,74 +58,74 @@ export function MarketplaceTemplateDialog({
   onEditorChange,
   onRetry,
 }: {
-  open: boolean
-  editor: MarketplaceEditor | null
-  loading: boolean
-  error: string | null
-  onOpenChange(open: boolean): void
-  onEditorChange(editor: MarketplaceEditor | null): void
-  onRetry(): void
+  open: boolean;
+  editor: MarketplaceEditor | null;
+  loading: boolean;
+  error: string | null;
+  onOpenChange(open: boolean): void;
+  onEditorChange(editor: MarketplaceEditor | null): void;
+  onRetry(): void;
 }) {
-  const [name, setName] = useState("")
-  const [category, setCategory] = useState("")
-  const [outcome, setOutcome] = useState("")
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('');
+  const [outcome, setOutcome] = useState('');
   const [responsibilities, setResponsibilities] = useState<
     Record<string, string>
-  >({})
-  const [previewing, setPreviewing] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
+  >({});
+  const [previewing, setPreviewing] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!open || !editor) return
-    setName(editor.template?.name ?? editor.group.name)
-    setCategory(editor.template?.category ?? "")
-    setOutcome(editor.template?.outcome ?? "")
+    if (!open || !editor) return;
+    setName(editor.template?.name ?? editor.group.name);
+    setCategory(editor.template?.category ?? '');
+    setOutcome(editor.template?.outcome ?? '');
     setResponsibilities(
       Object.fromEntries(
-        editor.agents.map(({ id, responsibility }) => [id, responsibility])
-      )
-    )
-    setPreviewing(false)
-    setSubmitError(null)
-  }, [editor, open])
+        editor.agents.map(({ id, responsibility }) => [id, responsibility]),
+      ),
+    );
+    setPreviewing(false);
+    setSubmitError(null);
+  }, [editor, open]);
 
   async function save() {
-    if (!editor) return
-    setPending(true)
-    setSubmitError(null)
+    if (!editor) return;
+    setPending(true);
+    setSubmitError(null);
     try {
       const agents = editor.agents.map(({ id }) => ({
         agentId: id,
         responsibility: responsibilities[id],
-      }))
-      let template: MarketplaceTemplate
+      }));
+      let template: MarketplaceTemplate;
       if (editor.template?.sourceGroupId === null) {
         template = readMarketplaceTemplate(
-          await api.request("PUT /group-templates/{templateId}", {
+          await api.request('PUT /group-templates/{templateId}', {
             templateId: editor.template.id,
             name,
             category,
             outcome,
             agents,
-          })
-        )
+          }),
+        );
       } else {
         const saved = readMarketplaceTemplate(
-          await api.request("PUT /groups/{groupId}/marketplace-template", {
+          await api.request('PUT /groups/{groupId}/marketplace-template', {
             groupId: editor.group.id,
             category,
             outcome,
             agents,
-          })
-        )
+          }),
+        );
         template = saved.published
           ? saved
           : readMarketplaceTemplate(
-              await api.request("POST /group-templates/{templateId}/publish", {
+              await api.request('POST /group-templates/{templateId}/publish', {
                 templateId: saved.id,
-              })
-            )
+              }),
+            );
       }
       onEditorChange({
         ...editor,
@@ -135,64 +135,64 @@ export function MarketplaceTemplateDialog({
           ...agent,
           responsibility: responsibilities[agent.id],
         })),
-      })
-      onOpenChange(false)
+      });
+      onOpenChange(false);
     } catch {
-      setSubmitError("Could not save this template. Try again.")
+      setSubmitError('Could not save this template. Try again.');
     } finally {
-      setPending(false)
+      setPending(false);
     }
   }
 
   async function withdraw() {
-    if (!editor?.template) return
-    setPending(true)
-    setSubmitError(null)
+    if (!editor?.template) return;
+    setPending(true);
+    setSubmitError(null);
     try {
       if (editor.template.sourceGroupId === null) {
-        await api.request("DELETE /group-templates/{templateId}", {
+        await api.request('DELETE /group-templates/{templateId}', {
           templateId: editor.template.id,
-        })
-        onEditorChange(null)
+        });
+        onEditorChange(null);
       } else {
         const template = readMarketplaceTemplate(
-          await api.request("POST /group-templates/{templateId}/unpublish", {
+          await api.request('POST /group-templates/{templateId}/unpublish', {
             templateId: editor.template.id,
-          })
-        )
-        onEditorChange({ ...editor, template })
+          }),
+        );
+        onEditorChange({ ...editor, template });
       }
-      onOpenChange(false)
+      onOpenChange(false);
     } catch {
       setSubmitError(
         editor.template.sourceGroupId === null
-          ? "Could not delete this template. Try again."
-          : "Could not withdraw this template. Try again."
-      )
+          ? 'Could not delete this template. Try again.'
+          : 'Could not withdraw this template. Try again.',
+      );
     } finally {
-      setPending(false)
+      setPending(false);
     }
   }
 
-  const published = editor?.template?.published === true
-  const detached = editor?.template?.sourceGroupId === null
+  const published = editor?.template?.published === true;
+  const detached = editor?.template?.sourceGroupId === null;
 
   return (
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (!next && pending) return
-        onOpenChange(next)
+        if (!next && pending) return;
+        onOpenChange(next);
       }}
     >
       <DialogContent className="sm:max-w-lg">
         {loading && !editor ? (
-          <div className="py-10 text-center text-sm text-muted-foreground">
+          <div className="text-muted-foreground py-10 text-center text-sm">
             Loading template…
           </div>
         ) : error && !editor ? (
           <div className="py-6 text-center">
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-destructive text-sm">
               {error}
             </p>
             <Button className="mt-4" variant="outline" onClick={onRetry}>
@@ -211,29 +211,27 @@ export function MarketplaceTemplateDialog({
 
             <div className="space-y-5">
               <div>
-                <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
                   {category}
                 </p>
-                <h2 className="mt-1 text-lg font-semibold">
-                  {name}
-                </h2>
-                <p className="mt-2 text-sm text-muted-foreground">{outcome}</p>
+                <h2 className="mt-1 text-lg font-semibold">{name}</h2>
+                <p className="text-muted-foreground mt-2 text-sm">{outcome}</p>
               </div>
               <div>
-                <p className="mb-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
+                <p className="text-muted-foreground mb-2 text-xs font-medium tracking-wide uppercase">
                   Team
                 </p>
                 {editor.agents.map((agent) => (
                   <div key={agent.id} className="border-t py-3">
                     <p className="text-sm font-medium">{agent.name}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">
+                    <p className="text-muted-foreground mt-1 text-sm">
                       {responsibilities[agent.id]}
                     </p>
                   </div>
                 ))}
               </div>
               {submitError && (
-                <p role="alert" className="text-sm text-destructive">
+                <p role="alert" className="text-destructive text-sm">
                   {submitError}
                 </p>
               )}
@@ -256,50 +254,50 @@ export function MarketplaceTemplateDialog({
               >
                 <Store aria-hidden="true" />
                 {pending
-                  ? "Saving…"
+                  ? 'Saving…'
                   : published
-                    ? "Save changes"
-                    : "Publish template"}
+                    ? 'Save changes'
+                    : 'Publish template'}
               </Button>
             </DialogFooter>
           </>
         ) : editor ? (
           <form
             onSubmit={(event) => {
-              event.preventDefault()
-              const nextCategory = category.trim()
-              const nextOutcome = outcome.trim()
-              const nextName = name.trim()
+              event.preventDefault();
+              const nextCategory = category.trim();
+              const nextOutcome = outcome.trim();
+              const nextName = name.trim();
               const nextResponsibilities = Object.fromEntries(
                 editor.agents.map(({ id }) => [
                   id,
-                  (responsibilities[id] ?? "").trim(),
-                ])
-              )
+                  (responsibilities[id] ?? '').trim(),
+                ]),
+              );
               if (
                 !nextName ||
                 !nextCategory ||
                 !nextOutcome ||
                 Object.values(nextResponsibilities).some(
-                  (responsibility) => !responsibility
+                  (responsibility) => !responsibility,
                 )
               ) {
-                setSubmitError("Complete every marketplace field.")
-                return
+                setSubmitError('Complete every marketplace field.');
+                return;
               }
-              setName(nextName)
-              setCategory(nextCategory)
-              setOutcome(nextOutcome)
-              setResponsibilities(nextResponsibilities)
-              setPreviewing(true)
-              setSubmitError(null)
+              setName(nextName);
+              setCategory(nextCategory);
+              setOutcome(nextOutcome);
+              setResponsibilities(nextResponsibilities);
+              setPreviewing(true);
+              setSubmitError(null);
             }}
           >
             <DialogHeader>
               <DialogTitle>
                 {published
-                  ? "Manage marketplace template"
-                  : "Publish as template"}
+                  ? 'Manage marketplace template'
+                  : 'Publish as template'}
               </DialogTitle>
               <DialogDescription>
                 Describe the reusable team. The conversation and workspace are
@@ -354,7 +352,7 @@ export function MarketplaceTemplateDialog({
                 <legend className="text-sm font-medium">
                   Agent responsibilities
                 </legend>
-                <p className="mt-1 text-sm text-muted-foreground">
+                <p className="text-muted-foreground mt-1 text-sm">
                   Explain the distinct job each agent performs.
                 </p>
                 <div className="mt-3 space-y-4">
@@ -365,7 +363,7 @@ export function MarketplaceTemplateDialog({
                       </FieldLabel>
                       <Input
                         id={`marketplace-agent-${agent.id}`}
-                        value={responsibilities[agent.id] ?? ""}
+                        value={responsibilities[agent.id] ?? ''}
                         onChange={(event) =>
                           setResponsibilities((current) => ({
                             ...current,
@@ -380,7 +378,7 @@ export function MarketplaceTemplateDialog({
                 </div>
               </fieldset>
               {submitError && (
-                <p role="alert" className="text-sm text-destructive">
+                <p role="alert" className="text-destructive text-sm">
                   {submitError}
                 </p>
               )}
@@ -397,11 +395,11 @@ export function MarketplaceTemplateDialog({
                 >
                   {pending
                     ? detached
-                      ? "Deleting…"
-                      : "Withdrawing…"
+                      ? 'Deleting…'
+                      : 'Withdrawing…'
                     : detached
-                      ? "Delete template"
-                      : "Withdraw template"}
+                      ? 'Delete template'
+                      : 'Withdraw template'}
                 </Button>
               )}
               <Button
@@ -420,7 +418,7 @@ export function MarketplaceTemplateDialog({
         ) : null}
       </DialogContent>
     </Dialog>
-  )
+  );
 }
 
 function readMarketplaceEditor(value: unknown): MarketplaceEditor {
@@ -429,65 +427,65 @@ function readMarketplaceEditor(value: unknown): MarketplaceEditor {
     !isRecord(value.group) ||
     !Array.isArray(value.agents)
   ) {
-    throw new Error("Invalid marketplace editor")
+    throw new Error('Invalid marketplace editor');
   }
   const agents = value.agents.map((agent) => {
     if (
       !isRecord(agent) ||
-      typeof agent.id !== "string" ||
-      typeof agent.name !== "string" ||
-      typeof agent.headline !== "string" ||
-      typeof agent.responsibility !== "string"
+      typeof agent.id !== 'string' ||
+      typeof agent.name !== 'string' ||
+      typeof agent.headline !== 'string' ||
+      typeof agent.responsibility !== 'string'
     ) {
-      throw new Error("Invalid marketplace editor agent")
+      throw new Error('Invalid marketplace editor agent');
     }
     return {
       id: agent.id,
       name: agent.name,
       headline: agent.headline,
       responsibility: agent.responsibility,
-    }
-  })
+    };
+  });
   if (
-    typeof value.group.id !== "string" ||
-    typeof value.group.name !== "string"
+    typeof value.group.id !== 'string' ||
+    typeof value.group.name !== 'string'
   ) {
-    throw new Error("Invalid marketplace editor group")
+    throw new Error('Invalid marketplace editor group');
   }
   return {
     group: { id: value.group.id, name: value.group.name },
     agents,
     template:
       value.template === null ? null : readMarketplaceTemplate(value.template),
-  }
+  };
 }
 
 function readMarketplaceTemplate(value: unknown): MarketplaceTemplate {
   if (
     !isRecord(value) ||
-    typeof value.id !== "string" ||
+    typeof value.id !== 'string' ||
     !(
-      value.sourceGroupId === null || typeof value.sourceGroupId === "string"
+      value.sourceGroupId === null || typeof value.sourceGroupId === 'string'
     ) ||
-    typeof value.publisherName !== "string" ||
-    typeof value.name !== "string" ||
-    typeof value.category !== "string" ||
-    typeof value.outcome !== "string" ||
+    typeof value.publisherName !== 'string' ||
+    typeof value.name !== 'string' ||
+    typeof value.category !== 'string' ||
+    typeof value.outcome !== 'string' ||
     !Array.isArray(value.agents) ||
-    typeof value.published !== "boolean"
+    typeof value.published !== 'boolean'
   ) {
-    throw new Error("Invalid marketplace template")
+    throw new Error('Invalid marketplace template');
   }
   const agents = value.agents.map((agent) => {
     if (
       !isRecord(agent) ||
-      typeof agent.agentId !== "string" ||
-      typeof agent.responsibility !== "string"
+      typeof agent.agentId !== 'string' ||
+      typeof agent.responsibility !== 'string'
     ) {
-      throw new Error("Invalid marketplace template agent")
+      throw new Error('Invalid marketplace template agent');
     }
-    return { agentId: agent.agentId, responsibility: agent.responsibility }
-  })
+    return { agentId: agent.agentId, responsibility: agent.responsibility };
+  });
   return {
     id: value.id,
     sourceGroupId: value.sourceGroupId,
@@ -497,9 +495,9 @@ function readMarketplaceTemplate(value: unknown): MarketplaceTemplate {
     outcome: value.outcome,
     agents,
     published: value.published,
-  }
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
+  return typeof value === 'object' && value !== null;
 }

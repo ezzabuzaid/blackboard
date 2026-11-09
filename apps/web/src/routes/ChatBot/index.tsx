@@ -2,34 +2,34 @@ import {
   Avatar,
   AvatarFallback,
   Button,
-  buttonVariants,
   Input,
   ScrollArea,
-} from "@zukhruf/shadcn"
-import { BellRing, MessageSquarePlus, Pin, Search, Square } from "lucide-react"
-import { useEffect, useState } from "react"
-import { cn } from "cn"
-import { Link, useLoaderData } from "react-router"
+  buttonVariants,
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { BellRing, MessageSquarePlus, Pin, Search, Square } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useLoaderData } from 'react-router';
 
-import { api } from "./api"
-import { ChatComposer } from "./ChatComposer"
-import { Conversation } from "./Conversation"
-import { GroupAvatarStack } from "./GroupAvatar"
-import { GroupChatProvider, useGroupChat } from "./GroupChat"
-import { GroupRowMenu } from "./GroupRowMenu"
-import { loader } from "./loader"
-import { messageDisplayText } from "./mentions"
-import { ShareGroupDialog } from "./ShareGroupDialog"
+import { ChatComposer } from './ChatComposer';
+import { Conversation } from './Conversation';
+import { GroupAvatarStack } from './GroupAvatar';
+import { GroupChatProvider, useGroupChat } from './GroupChat';
+import { GroupRowMenu } from './GroupRowMenu';
+import { ShareGroupDialog } from './ShareGroupDialog';
+import { api } from './api';
+import { loader } from './loader';
+import { messageDisplayText } from './mentions';
 import {
   AgentTraceProvider,
   AgentTraceSidebar,
-} from "./traces/AgentTraceSidebar"
+} from './traces/AgentTraceSidebar';
 
-export { loader }
+export { loader };
 
 export default function ChatBot() {
   const { apiStatus, chatId, initialState, streamPath } =
-    useLoaderData<typeof loader>()
+    useLoaderData<typeof loader>();
 
   return (
     <GroupChatProvider
@@ -40,7 +40,7 @@ export default function ChatBot() {
       streamPath={streamPath}
     >
       <AgentTraceProvider>
-        <main className="relative flex h-svh bg-background">
+        <main className="bg-background relative flex h-svh">
           <GroupReadReceipt />
           <GroupSidebar />
           <section className="relative flex min-w-0 flex-1 flex-col">
@@ -52,16 +52,16 @@ export default function ChatBot() {
         </main>
       </AgentTraceProvider>
     </GroupChatProvider>
-  )
+  );
 }
 
 function GroupSidebar() {
   return (
-    <aside className="hidden w-[clamp(20rem,30vw,27rem)] shrink-0 flex-col border-r bg-card md:flex">
+    <aside className="bg-card hidden w-[clamp(20rem,30vw,27rem)] shrink-0 flex-col border-r md:flex">
       <SidebarHeader />
       <GroupList />
     </aside>
-  )
+  );
 }
 
 function SidebarHeader() {
@@ -71,18 +71,18 @@ function SidebarHeader() {
       <Link
         to="/groups/new"
         aria-label="New group"
-        className={cn(buttonVariants({ variant: "ghost", size: "icon" }))}
+        className={cn(buttonVariants({ variant: 'ghost', size: 'icon' }))}
       >
         <MessageSquarePlus aria-hidden="true" />
       </Link>
     </header>
-  )
+  );
 }
 
 function NotificationBanner() {
   return (
-    <div className="mx-3 mb-2 flex items-center gap-3 rounded-xl bg-primary/10 px-3 py-3">
-      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-background text-primary">
+    <div className="bg-primary/10 mx-3 mb-2 flex items-center gap-3 rounded-xl px-3 py-3">
+      <span className="bg-background text-primary grid size-10 shrink-0 place-items-center rounded-full">
         <BellRing aria-hidden="true" className="size-5" />
       </span>
       <div className="min-w-0 flex-1">
@@ -91,37 +91,37 @@ function NotificationBanner() {
           type="button"
           variant="link"
           size="sm"
-          className="h-auto justify-start p-0 text-xs text-muted-foreground"
+          className="text-muted-foreground h-auto justify-start p-0 text-xs"
           onClick={() => void Notification.requestPermission()}
         >
           Turn on desktop notifications
         </Button>
       </div>
     </div>
-  )
+  );
 }
 
 interface GroupPreview {
-  id: string
-  name: string
-  agentIds: readonly string[]
-  preview: string
-  time: string
-  initials: string
-  unread: number
-  active: boolean
-  pinned: boolean
-  sortAt: number
+  id: string;
+  name: string;
+  agentIds: readonly string[];
+  preview: string;
+  time: string;
+  initials: string;
+  unread: number;
+  active: boolean;
+  pinned: boolean;
+  sortAt: number;
 }
 
 const groupTime = new Intl.DateTimeFormat(undefined, {
-  hour: "numeric",
-  minute: "2-digit",
-})
+  hour: 'numeric',
+  minute: '2-digit',
+});
 
 function GroupList() {
-  const [query, setQuery] = useState("")
-  const groups = useData(query)
+  const [query, setQuery] = useState('');
+  const groups = useData(query);
 
   return (
     <>
@@ -129,7 +129,7 @@ function GroupList() {
         <div className="relative">
           <Search
             aria-hidden="true"
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
           />
           <Input
             type="search"
@@ -137,7 +137,7 @@ function GroupList() {
             placeholder="Search groups"
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
-            className="h-10 rounded-full border-transparent bg-muted pr-4 pl-10 shadow-none"
+            className="bg-muted h-10 rounded-full border-transparent pr-4 pl-10 shadow-none"
           />
         </div>
       </div>
@@ -152,34 +152,34 @@ function GroupList() {
             <GroupListItem key={group.id} group={group} />
           ))}
           {groups.length === 0 && (
-            <p className="px-3 py-8 text-center text-sm text-muted-foreground">
+            <p className="text-muted-foreground px-3 py-8 text-center text-sm">
               No groups found
             </p>
           )}
         </div>
       </ScrollArea>
     </>
-  )
+  );
 }
 
 function useData(query: string): readonly GroupPreview[] {
-  const { chatId, groups } = useLoaderData<typeof loader>()
-  const { activity, messages, participants } = useGroupChat()
-  const latestMessage = messages.at(-1)
+  const { chatId, groups } = useLoaderData<typeof loader>();
+  const { activity, messages, participants } = useGroupChat();
+  const latestMessage = messages.at(-1);
   const activePreview = latestMessage
-    ? `${latestMessage.author === "user" ? "You" : latestMessage.author}: ${messageDisplayText(latestMessage.content)}`
-    : activity.phase === "active"
-      ? "Agents are working…"
+    ? `${latestMessage.author === 'user' ? 'You' : latestMessage.author}: ${messageDisplayText(latestMessage.content)}`
+    : activity.phase === 'active'
+      ? 'Agents are working…'
       : participants.length > 0
-        ? participants.map(({ name }) => name).join(", ")
-        : "No agents yet"
-  const activeGroup = groups.find(({ id }) => id === chatId)
+        ? participants.map(({ name }) => name).join(', ')
+        : 'No agents yet';
+  const activeGroup = groups.find(({ id }) => id === chatId);
   const records = activeGroup
     ? groups
     : [
         {
           id: chatId,
-          name: "New group",
+          name: 'New group',
           agentIds: [],
           createdAt: new Date(0).toISOString(),
           lastMessage: null,
@@ -187,14 +187,14 @@ function useData(query: string): readonly GroupPreview[] {
           pinned: false,
         },
         ...groups,
-      ]
-  const normalizedQuery = query.trim().toLocaleLowerCase()
+      ];
+  const normalizedQuery = query.trim().toLocaleLowerCase();
 
   return records
     .map((group): GroupPreview => {
-      const active = group.id === chatId
+      const active = group.id === chatId;
       const message =
-        active && latestMessage ? latestMessage : group.lastMessage
+        active && latestMessage ? latestMessage : group.lastMessage;
       return {
         id: group.id,
         name: group.name,
@@ -202,23 +202,24 @@ function useData(query: string): readonly GroupPreview[] {
         preview: active
           ? activePreview
           : message
-            ? `${message.author === "user" ? "You" : message.author}: ${messageDisplayText(message.content)}`
+            ? `${message.author === 'user' ? 'You' : message.author}: ${messageDisplayText(message.content)}`
             : group.agentIds.length > 0
               ? `${group.agentIds.length} agents`
-              : "No messages yet",
-        time: message ? groupTime.format(new Date(message.sentAt)) : "",
+              : 'No messages yet',
+        time: message ? groupTime.format(new Date(message.sentAt)) : '',
         initials: groupInitials(group.name),
         unread: active ? 0 : group.unreadCount,
         active,
         pinned: group.pinned,
         sortAt: Date.parse(message?.sentAt ?? group.createdAt),
-      }
+      };
     })
     .filter(({ name }) => name.toLocaleLowerCase().includes(normalizedQuery))
     .toSorted(
       (left, right) =>
-        Number(right.pinned) - Number(left.pinned) || right.sortAt - left.sortAt
-    )
+        Number(right.pinned) - Number(left.pinned) ||
+        right.sortAt - left.sortAt,
+    );
 }
 
 function GroupListItem({ group }: { group: GroupPreview }) {
@@ -226,9 +227,9 @@ function GroupListItem({ group }: { group: GroupPreview }) {
     <div role="listitem" className="group/row relative">
       <Link
         to={`/?${new URLSearchParams({ chatId: group.id })}`}
-        aria-current={group.active ? "page" : undefined}
-        className={`flex min-h-18 items-center gap-3 rounded-lg px-2 py-2.5 transition-colors hover:bg-accent/70 focus-visible:outline-2 focus-visible:outline-primary ${
-          group.active ? "bg-accent" : ""
+        aria-current={group.active ? 'page' : undefined}
+        className={`hover:bg-accent/70 focus-visible:outline-primary flex min-h-18 items-center gap-3 rounded-lg px-2 py-2.5 transition-colors focus-visible:outline-2 ${
+          group.active ? 'bg-accent' : ''
         }`}
       >
         <Avatar size="lg" className="shrink-0">
@@ -236,29 +237,29 @@ function GroupListItem({ group }: { group: GroupPreview }) {
             {group.initials}
           </AvatarFallback>
         </Avatar>
-        <div className="min-w-0 flex-1 border-b border-border/60 py-1.5">
+        <div className="border-border/60 min-w-0 flex-1 border-b py-1.5">
           <div className="flex items-baseline gap-2">
             <h2 className="min-w-0 flex-1 truncate text-sm font-medium">
               {group.name}
             </h2>
-            <time className="shrink-0 text-[11px] text-muted-foreground">
+            <time className="text-muted-foreground shrink-0 text-[11px]">
               {group.time}
             </time>
           </div>
           <div className="mt-0.5 flex items-center gap-2">
-            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+            <p className="text-muted-foreground min-w-0 flex-1 truncate text-xs">
               {group.preview}
             </p>
             {group.pinned && (
               <Pin
                 aria-label="Pinned"
-                className="size-3 shrink-0 text-muted-foreground"
+                className="text-muted-foreground size-3 shrink-0"
               />
             )}
             {group.unread > 0 && (
               <span
                 aria-label={`${group.unread} unread messages`}
-                className="grid min-w-5 shrink-0 place-items-center rounded-full bg-primary px-1.5 text-[10px] leading-5 font-semibold text-primary-foreground"
+                className="bg-primary text-primary-foreground grid min-w-5 shrink-0 place-items-center rounded-full px-1.5 text-[10px] leading-5 font-semibold"
               >
                 {group.unread}
               </span>
@@ -277,22 +278,22 @@ function GroupListItem({ group }: { group: GroupPreview }) {
         />
       </div>
     </div>
-  )
+  );
 }
 
 function GroupReadReceipt() {
-  const { chatId, messages } = useGroupChat()
-  const { groups } = useLoaderData<typeof loader>()
-  const latestMessageId = messages.at(-1)?.id
+  const { chatId, messages } = useGroupChat();
+  const { groups } = useLoaderData<typeof loader>();
+  const latestMessageId = messages.at(-1)?.id;
 
   useEffect(() => {
-    if (!groups.some(({ id }) => id === chatId)) return
+    if (!groups.some(({ id }) => id === chatId)) return;
     void api
-      .request("POST /groups/{groupId}/read", { groupId: chatId })
-      .catch(() => undefined)
-  }, [chatId, groups, latestMessageId])
+      .request('POST /groups/{groupId}/read', { groupId: chatId })
+      .catch(() => undefined);
+  }, [chatId, groups, latestMessageId]);
 
-  return null
+  return null;
 }
 
 function groupInitials(name: string) {
@@ -300,28 +301,28 @@ function groupInitials(name: string) {
     .split(/\s+/u)
     .slice(0, 2)
     .map((part) => part.charAt(0))
-    .join("")
-    .toLocaleUpperCase()
+    .join('')
+    .toLocaleUpperCase();
 }
 
 function GroupHeader() {
-  const { apiStatus, activity, participants, stop, stopping } = useGroupChat()
-  const { chatId, groups } = useLoaderData<typeof loader>()
-  const name = groups.find(({ id }) => id === chatId)?.name ?? "New group"
+  const { apiStatus, activity, participants, stop, stopping } = useGroupChat();
+  const { chatId, groups } = useLoaderData<typeof loader>();
+  const name = groups.find(({ id }) => id === chatId)?.name ?? 'New group';
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-card px-3 sm:px-5">
+    <header className="bg-card flex h-14 shrink-0 items-center gap-3 border-b px-3 sm:px-5">
       <GroupAvatarStack members={participants.map(({ name }) => name)} />
       <div className="min-w-0 flex-1">
         <h1 className="truncate text-sm font-semibold">{name}</h1>
-        <p className="truncate text-xs text-muted-foreground">
-          {apiStatus === "offline"
-            ? "Group unavailable"
-            : participants.map(({ name }) => name).join(", ") ||
-              "No agents yet"}
+        <p className="text-muted-foreground truncate text-xs">
+          {apiStatus === 'offline'
+            ? 'Group unavailable'
+            : participants.map(({ name }) => name).join(', ') ||
+              'No agents yet'}
         </p>
       </div>
-      {activity.phase === "active" && (
+      {activity.phase === 'active' && (
         <Button
           type="button"
           variant="destructive"
@@ -330,10 +331,10 @@ function GroupHeader() {
           onClick={() => void stop()}
         >
           <Square aria-hidden="true" />
-          {stopping ? "Stopping…" : "Stop"}
+          {stopping ? 'Stopping…' : 'Stop'}
         </Button>
       )}
       <ShareGroupDialog groupId={chatId} />
     </header>
-  )
+  );
 }

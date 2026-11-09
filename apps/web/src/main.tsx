@@ -1,18 +1,16 @@
-import { StrictMode } from "react"
-import { createRoot } from "react-dom/client"
-import { RouterProvider } from "react-router"
+import '@genui/annotation/styles.css';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import { RouterProvider } from 'react-router';
 
-import "@genui/annotation/styles.css"
+import { router } from './router';
+import './styles.css';
 
-import "./styles.css"
-
-import { router } from "./router"
-
-const root = document.getElementById("root")
-if (!root) throw new Error("Root element is missing")
+const root = document.getElementById('root');
+if (!root) throw new Error('Root element is missing');
 
 createRoot(root).render(
   <StrictMode>
     <RouterProvider router={router} />
-  </StrictMode>
-)
+  </StrictMode>,
+);

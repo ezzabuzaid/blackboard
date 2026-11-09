@@ -1,10 +1,10 @@
-import { createBrowserRouter } from "react-router"
+import { createBrowserRouter } from 'react-router';
 
-import { ErrorBoundary, Root } from "./root"
+import { ErrorBoundary, Root } from './root';
 
 export const router = createBrowserRouter([
   {
-    path: "/",
+    path: '/',
     Component: Root,
     ErrorBoundary,
     HydrateFallback: BootFallback,
@@ -12,45 +12,45 @@ export const router = createBrowserRouter([
       {
         index: true,
         lazy: async () => {
-          const route = await import("./routes/ChatBot")
-          return { Component: route.default, loader: route.loader }
+          const route = await import('./routes/ChatBot');
+          return { Component: route.default, loader: route.loader };
         },
       },
       {
-        path: "login",
+        path: 'login',
         lazy: async () => {
-          const route = await import("./routes/Login")
-          return { Component: route.default, loader: route.loader }
+          const route = await import('./routes/Login');
+          return { Component: route.default, loader: route.loader };
         },
       },
       {
-        path: "groups/new",
+        path: 'groups/new',
         lazy: async () => {
-          const route = await import("./routes/GroupTemplates")
-          return { Component: route.default, loader: route.loader }
+          const route = await import('./routes/GroupTemplates');
+          return { Component: route.default, loader: route.loader };
         },
       },
       {
-        path: "share/:token",
+        path: 'share/:token',
         lazy: async () => {
-          const route = await import("./routes/Share")
-          return { Component: route.default, loader: route.loader }
+          const route = await import('./routes/Share');
+          return { Component: route.default, loader: route.loader };
         },
       },
       {
-        path: "*",
+        path: '*',
         loader: () => {
-          throw new Response("Not Found", { status: 404 })
+          throw new Response('Not Found', { status: 404 });
         },
       },
     ],
   },
-])
+]);
 
 function BootFallback() {
   return (
-    <main className="grid min-h-svh place-items-center bg-background text-sm text-muted-foreground">
+    <main className="bg-background text-muted-foreground grid min-h-svh place-items-center text-sm">
       Loading group…
     </main>
-  )
+  );
 }

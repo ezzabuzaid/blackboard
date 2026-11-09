@@ -1,61 +1,61 @@
-import { act, render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
-import { StrictMode } from "react"
-import { type Mock, describe, expect, it, vi } from "vitest"
+import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { StrictMode } from 'react';
+import { type Mock, describe, expect, it, vi } from 'vitest';
 
-import { VoiceRecordButton } from "./VoiceRecordButton"
+import { VoiceRecordButton } from './VoiceRecordButton';
 
 const recorderMock = vi.hoisted(() => {
   const recorder: {
-    onStop: ((url: string, blob: Blob) => void) | undefined
-    startRecording: Mock
-    stopRecording: Mock
-    status: string
-    error: string
+    onStop: ((url: string, blob: Blob) => void) | undefined;
+    startRecording: Mock;
+    stopRecording: Mock;
+    status: string;
+    error: string;
   } = {
     onStop: undefined,
     startRecording: vi.fn(),
     stopRecording: vi.fn(),
-    status: "idle",
-    error: "",
-  }
-  return recorder
-})
+    status: 'idle',
+    error: '',
+  };
+  return recorder;
+});
 
-vi.mock("react-media-recorder", () => ({
+vi.mock('react-media-recorder', () => ({
   useReactMediaRecorder: (options: {
-    onStop: (url: string, blob: Blob) => void
+    onStop: (url: string, blob: Blob) => void;
   }) => {
-    recorderMock.onStop = options.onStop
+    recorderMock.onStop = options.onStop;
     return {
       error: recorderMock.error,
       startRecording: recorderMock.startRecording,
       status: recorderMock.status,
       stopRecording: recorderMock.stopRecording,
-    }
+    };
   },
-}))
+}));
 
 function arrangeRecorderEnv() {
-  recorderMock.onStop = undefined
-  recorderMock.startRecording.mockClear()
-  recorderMock.stopRecording.mockClear()
-  Object.defineProperty(window, "MediaRecorder", {
+  recorderMock.onStop = undefined;
+  recorderMock.startRecording.mockClear();
+  recorderMock.stopRecording.mockClear();
+  Object.defineProperty(window, 'MediaRecorder', {
     configurable: true,
     value: class MediaRecorder {},
-  })
-  Object.defineProperty(URL, "revokeObjectURL", {
+  });
+  Object.defineProperty(URL, 'revokeObjectURL', {
     configurable: true,
     value: vi.fn(),
-  })
+  });
 }
 
 function VoiceButton({
-  transcribe = vi.fn().mockResolvedValue({ text: "hello world" }),
+  transcribe = vi.fn().mockResolvedValue({ text: 'hello world' }),
   disabled = false,
 }: {
-  transcribe?: (audio: Blob) => Promise<{ text: string }>
-  disabled?: boolean
+  transcribe?: (audio: Blob) => Promise<{ text: string }>;
+  disabled?: boolean;
 }) {
   return (
     <VoiceRecordButton
@@ -75,70 +75,70 @@ function VoiceButton({
         </button>
       )}
     />
-  )
+  );
 }
 
-describe("VoiceRecordButton", () => {
-  it("calls transcribe when the recorder produces a blob after stop", async () => {
-    arrangeRecorderEnv()
-    const user = userEvent.setup()
-    const transcribe = vi.fn().mockResolvedValue({ text: "hello world" })
+describe('VoiceRecordButton', () => {
+  it('calls transcribe when the recorder produces a blob after stop', async () => {
+    arrangeRecorderEnv();
+    const user = userEvent.setup();
+    const transcribe = vi.fn().mockResolvedValue({ text: 'hello world' });
 
-    render(<VoiceButton transcribe={transcribe} />)
+    render(<VoiceButton transcribe={transcribe} />);
 
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: "Start voice input" })
-      ).not.toBeDisabled()
-    })
+        screen.getByRole('button', { name: 'Start voice input' }),
+      ).not.toBeDisabled();
+    });
 
-    await user.click(screen.getByRole("button", { name: "Start voice input" }))
-    expect(recorderMock.startRecording).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Start voice input' }));
+    expect(recorderMock.startRecording).toHaveBeenCalled();
 
     act(() => {
       recorderMock.onStop?.(
-        "blob:test",
-        new Blob(["voice"], { type: "audio/webm" })
-      )
-    })
+        'blob:test',
+        new Blob(['voice'], { type: 'audio/webm' }),
+      );
+    });
 
     await waitFor(() => {
-      expect(transcribe).toHaveBeenCalledWith(expect.any(Blob))
-    })
-  })
+      expect(transcribe).toHaveBeenCalledWith(expect.any(Blob));
+    });
+  });
 
-  it("survives React Strict Mode remount and still transcribes", async () => {
-    arrangeRecorderEnv()
-    const user = userEvent.setup()
-    const transcribe = vi.fn().mockResolvedValue({ text: "after strict mode" })
+  it('survives React Strict Mode remount and still transcribes', async () => {
+    arrangeRecorderEnv();
+    const user = userEvent.setup();
+    const transcribe = vi.fn().mockResolvedValue({ text: 'after strict mode' });
 
     render(
       <StrictMode>
         <VoiceButton transcribe={transcribe} />
-      </StrictMode>
-    )
+      </StrictMode>,
+    );
 
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: "Start voice input" })
-      ).not.toBeDisabled()
-    })
+        screen.getByRole('button', { name: 'Start voice input' }),
+      ).not.toBeDisabled();
+    });
 
-    await user.click(screen.getByRole("button", { name: "Start voice input" }))
+    await user.click(screen.getByRole('button', { name: 'Start voice input' }));
     act(() => {
       recorderMock.onStop?.(
-        "blob:strict",
-        new Blob(["after-strict"], { type: "audio/webm" })
-      )
-    })
+        'blob:strict',
+        new Blob(['after-strict'], { type: 'audio/webm' }),
+      );
+    });
 
     await waitFor(() => {
-      expect(transcribe).toHaveBeenCalledWith(expect.any(Blob))
-    })
-  })
+      expect(transcribe).toHaveBeenCalledWith(expect.any(Blob));
+    });
+  });
 
-  it("renders nothing when disabled at the feature boundary", () => {
-    arrangeRecorderEnv()
+  it('renders nothing when disabled at the feature boundary', () => {
+    arrangeRecorderEnv();
     render(
       <VoiceRecordButton
         enabled={false}
@@ -150,18 +150,18 @@ describe("VoiceRecordButton", () => {
             mic
           </button>
         )}
-      />
-    )
+      />,
+    );
 
-    expect(screen.queryByTestId("mic")).not.toBeInTheDocument()
-  })
+    expect(screen.queryByTestId('mic')).not.toBeInTheDocument();
+  });
 
-  it("honors caller state before starting a recording", async () => {
-    arrangeRecorderEnv()
-    render(<VoiceButton disabled={true} />)
+  it('honors caller state before starting a recording', async () => {
+    arrangeRecorderEnv();
+    render(<VoiceButton disabled={true} />);
 
     expect(
-      await screen.findByRole("button", { name: "Start voice input" })
-    ).toBeDisabled()
-  })
-})
+      await screen.findByRole('button', { name: 'Start voice input' }),
+    ).toBeDisabled();
+  });
+});

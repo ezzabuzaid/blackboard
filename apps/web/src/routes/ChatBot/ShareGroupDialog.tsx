@@ -9,37 +9,37 @@ import {
   DialogTitle,
   DialogTrigger,
   Input,
-} from "@zukhruf/shadcn"
-import { Check, Copy, Share2 } from "lucide-react"
-import { useState } from "react"
+} from '@zukhruf/shadcn';
+import { Check, Copy, Share2 } from 'lucide-react';
+import { useState } from 'react';
 
-import { api } from "./api"
+import { api } from './api';
 
 interface GroupShare {
-  token: string
-  createdAt: string
+  token: string;
+  createdAt: string;
 }
 
 export function ShareGroupDialog({ groupId }: { groupId: string }) {
-  const [open, setOpen] = useState(false)
-  const [share, setShare] = useState<GroupShare | null>(null)
-  const [pending, setPending] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [open, setOpen] = useState(false);
+  const [share, setShare] = useState<GroupShare | null>(null);
+  const [pending, setPending] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const shareUrl = share
     ? `${globalThis.location.origin}/share/${share.token}`
-    : null
+    : null;
 
   async function run(action: () => Promise<GroupShare | null>) {
-    setPending(true)
-    setError(null)
+    setPending(true);
+    setError(null);
     try {
-      setShare(await action())
+      setShare(await action());
     } catch {
-      setError("Something went wrong. Try again.")
+      setError('Something went wrong. Try again.');
     } finally {
-      setPending(false)
+      setPending(false);
     }
   }
 
@@ -47,19 +47,17 @@ export function ShareGroupDialog({ groupId }: { groupId: string }) {
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        setOpen(next)
-        setCopied(false)
-        setError(null)
+        setOpen(next);
+        setCopied(false);
+        setError(null);
         if (next) {
           void run(async () => {
             const response: unknown = await api.request(
-              "GET /groups/{groupId}/share",
-              { groupId }
-            )
-            return readShare(
-              isRecord(response) ? response.share : null
-            )
-          })
+              'GET /groups/{groupId}/share',
+              { groupId },
+            );
+            return readShare(isRecord(response) ? response.share : null);
+          });
         }
       }}
     >
@@ -85,14 +83,19 @@ export function ShareGroupDialog({ groupId }: { groupId: string }) {
 
         {shareUrl ? (
           <div className="flex items-center gap-2">
-            <Input readOnly value={shareUrl} aria-label="Share link" dir="ltr" />
+            <Input
+              readOnly
+              value={shareUrl}
+              aria-label="Share link"
+              dir="ltr"
+            />
             <Button
               type="button"
               variant="outline"
               disabled={pending}
               onClick={async () => {
-                await globalThis.navigator.clipboard.writeText(shareUrl)
-                setCopied(true)
+                await globalThis.navigator.clipboard.writeText(shareUrl);
+                setCopied(true);
               }}
             >
               {copied ? (
@@ -100,7 +103,7 @@ export function ShareGroupDialog({ groupId }: { groupId: string }) {
               ) : (
                 <Copy aria-hidden="true" />
               )}
-              {copied ? "Copied" : "Copy"}
+              {copied ? 'Copied' : 'Copy'}
             </Button>
           </div>
         ) : (
@@ -110,17 +113,19 @@ export function ShareGroupDialog({ groupId }: { groupId: string }) {
             onClick={() =>
               void run(async () =>
                 readShare(
-                  await api.request("POST /groups/{groupId}/share", { groupId })
-                )
+                  await api.request('POST /groups/{groupId}/share', {
+                    groupId,
+                  }),
+                ),
               )
             }
           >
-            {pending ? "Creating…" : "Create share link"}
+            {pending ? 'Creating…' : 'Create share link'}
           </Button>
         )}
 
         {error && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" className="text-destructive text-sm">
             {error}
           </p>
         )}
@@ -133,11 +138,11 @@ export function ShareGroupDialog({ groupId }: { groupId: string }) {
               disabled={pending}
               onClick={() =>
                 void run(async () => {
-                  await api.request("DELETE /groups/{groupId}/share", {
+                  await api.request('DELETE /groups/{groupId}/share', {
                     groupId,
-                  })
-                  setCopied(false)
-                  return null
+                  });
+                  setCopied(false);
+                  return null;
                 })
               }
             >
@@ -150,17 +155,17 @@ export function ShareGroupDialog({ groupId }: { groupId: string }) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
+  );
 }
 
 function readShare(value: unknown): GroupShare | null {
   return isRecord(value) &&
-    typeof value.token === "string" &&
-    typeof value.createdAt === "string"
+    typeof value.token === 'string' &&
+    typeof value.createdAt === 'string'
     ? { token: value.token, createdAt: value.createdAt }
-    : null
+    : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
+  return typeof value === 'object' && value !== null;
 }

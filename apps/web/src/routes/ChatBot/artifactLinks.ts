@@ -1,62 +1,62 @@
-import { defaultRemarkPlugins } from "streamdown"
+import { defaultRemarkPlugins } from 'streamdown';
 
-import { apiUrl } from "./api"
+import { apiUrl } from './api';
 
 interface MarkdownNode {
-  children?: MarkdownNode[]
-  type: string
-  url?: string
+  children?: MarkdownNode[];
+  type: string;
+  url?: string;
 }
 
 const sandboxArtifactPrefixes = [
-  "sandbox:/workspace/output/",
-  "file:///workspace/output/",
-]
+  'sandbox:/workspace/output/',
+  'file:///workspace/output/',
+];
 
 export const artifactBaseUrl = (chatId: string) =>
-  `${apiUrl}/chat/${encodeURIComponent(chatId)}/artifacts/`
+  `${apiUrl}/chat/${encodeURIComponent(chatId)}/artifacts/`;
 
 export const artifactRemarkPlugins = (chatId: string) => [
   ...Object.values(defaultRemarkPlugins),
   () => (tree: MarkdownNode) => {
     const visit = (node: MarkdownNode) => {
-      if (node.type === "link" && node.url) {
-        node.url = sandboxArtifactUrl(node.url, chatId) ?? node.url
+      if (node.type === 'link' && node.url) {
+        node.url = sandboxArtifactUrl(node.url, chatId) ?? node.url;
       }
-      node.children?.forEach(visit)
-    }
+      node.children?.forEach(visit);
+    };
 
-    visit(tree)
+    visit(tree);
   },
-]
+];
 
 export function sandboxArtifactUrl(url: string, chatId: string) {
   const prefix = sandboxArtifactPrefixes.find((prefix) =>
-    url.startsWith(prefix)
-  )
-  if (!prefix) return null
+    url.startsWith(prefix),
+  );
+  if (!prefix) return null;
 
   try {
-    const segments = url.slice(prefix.length).split("/")
+    const segments = url.slice(prefix.length).split('/');
     const encodedPath = segments
       .map((segment) => {
-        const decoded = decodeURIComponent(segment)
+        const decoded = decodeURIComponent(segment);
         if (
           !decoded ||
-          decoded === "." ||
-          decoded === ".." ||
-          decoded.includes("/") ||
-          decoded.includes("\\") ||
-          decoded.includes("\0")
+          decoded === '.' ||
+          decoded === '..' ||
+          decoded.includes('/') ||
+          decoded.includes('\\') ||
+          decoded.includes('\0')
         ) {
-          throw new URIError("Invalid artifact path")
+          throw new URIError('Invalid artifact path');
         }
-        return encodeURIComponent(decoded)
+        return encodeURIComponent(decoded);
       })
-      .join("/")
+      .join('/');
 
-    return `${artifactBaseUrl(chatId)}${encodedPath}`
+    return `${artifactBaseUrl(chatId)}${encodedPath}`;
   } catch {
-    return null
+    return null;
   }
 }

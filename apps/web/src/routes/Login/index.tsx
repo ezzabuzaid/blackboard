@@ -1,77 +1,77 @@
-import { Button, Input, Label } from "@zukhruf/shadcn"
-import { KeyRound, LoaderCircle, MessageCircle } from "lucide-react"
-import { type FormEvent, useState } from "react"
+import { Button, Input, Label } from '@zukhruf/shadcn';
+import { KeyRound, LoaderCircle, MessageCircle } from 'lucide-react';
+import { type FormEvent, useState } from 'react';
 import {
   Link,
-  replace,
   type LoaderFunctionArgs,
+  replace,
   useLocation,
   useNavigate,
-} from "react-router"
+} from 'react-router';
 
-import { hasIdentity, redirectDestination } from "../../auth"
-import { authClient } from "../../auth-client"
-import { api } from "../ChatBot/api"
+import { hasIdentity, redirectDestination } from '../../auth';
+import { authClient } from '../../auth-client';
+import { api } from '../ChatBot/api';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
     const session: unknown = await api.request(
-      "GET /auth/get-session",
+      'GET /auth/get-session',
       {},
-      { signal: request.signal }
-    )
-    if (hasIdentity(session)) throw replace(redirectDestination(request.url))
+      { signal: request.signal },
+    );
+    if (hasIdentity(session)) throw replace(redirectDestination(request.url));
   } catch (error) {
-    if (error instanceof Response || request.signal.aborted) throw error
+    if (error instanceof Response || request.signal.aborted) throw error;
   }
-  return null
+  return null;
 }
 
 export default function Login() {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const [creating, setCreating] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [creating, setCreating] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+    event.preventDefault();
 
-    setSubmitting(true)
-    setError(null)
+    setSubmitting(true);
+    setError(null);
     try {
       if (!globalThis.PublicKeyCredential) {
-        throw new Error("This browser does not support passkeys.")
+        throw new Error('This browser does not support passkeys.');
       }
 
       const result = creating
         ? await authClient.passkey.addPasskey({
             context: String(
-              new FormData(event.currentTarget).get("name") ?? ""
+              new FormData(event.currentTarget).get('name') ?? '',
             ).trim(),
           })
-        : await authClient.signIn.passkey()
+        : await authClient.signIn.passkey();
       if (result.error) {
         throw new Error(
-          result.error.message ?? "Passkey authentication failed."
-        )
+          result.error.message ?? 'Passkey authentication failed.',
+        );
       }
 
-      await navigate(redirectDestination(location.search), { replace: true })
+      await navigate(redirectDestination(location.search), { replace: true });
     } catch (cause) {
       setError(
         cause instanceof Error
           ? cause.message
-          : "Passkey authentication could not be completed."
-      )
+          : 'Passkey authentication could not be completed.',
+      );
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
   }
 
   function switchMode() {
-    setCreating((current) => !current)
-    setError(null)
+    setCreating((current) => !current);
+    setError(null);
   }
 
   return (
@@ -80,7 +80,7 @@ export default function Login() {
         src="/images/baseera-login-insight-v2.webp"
         alt=""
         aria-hidden="true"
-        className="absolute inset-0 size-full animate-in object-cover object-[72%_center] opacity-45 duration-1000 zoom-in-95 fade-in sm:opacity-70 lg:opacity-100"
+        className="animate-in zoom-in-95 fade-in absolute inset-0 size-full object-cover object-[72%_center] opacity-45 duration-1000 sm:opacity-70 lg:opacity-100"
         width="1717"
         height="916"
         fetchPriority="high"
@@ -108,20 +108,20 @@ export default function Login() {
         <div className="flex flex-1 items-center py-14 sm:py-20">
           <section
             aria-labelledby="login-heading"
-            className="w-full max-w-md animate-in duration-700 fade-in slide-in-from-bottom-3"
+            className="animate-in fade-in slide-in-from-bottom-3 w-full max-w-md duration-700"
           >
             <div className="mb-6 h-px w-10 bg-[#eef771]" aria-hidden="true" />
             <h1
               id="login-heading"
               className="max-w-sm text-4xl leading-[1.02] font-medium tracking-[-0.04em] text-balance sm:text-5xl"
             >
-              {creating ? "Create your passkey" : "Welcome back"}
+              {creating ? 'Create your passkey' : 'Welcome back'}
             </h1>
 
             <p className="mt-4 max-w-sm text-base leading-7 text-[#c7e6da]/75">
               {creating
-                ? "Enter your name, then use your device to secure your account."
-                : "Use your device passkey to continue to Baseera."}
+                ? 'Enter your name, then use your device to secure your account.'
+                : 'Use your device passkey to continue to Baseera.'}
             </p>
 
             <form className="mt-9 max-w-sm space-y-4" onSubmit={submit}>
@@ -156,22 +156,22 @@ export default function Login() {
                 {!submitting && <KeyRound aria-hidden="true" />}
                 {submitting
                   ? creating
-                    ? "Creating passkey…"
-                    : "Signing in…"
+                    ? 'Creating passkey…'
+                    : 'Signing in…'
                   : creating
-                    ? "Create passkey"
-                    : "Sign in with passkey"}
+                    ? 'Create passkey'
+                    : 'Sign in with passkey'}
               </Button>
 
               <p className="text-center text-sm text-[#c7e6da]/75">
-                {creating ? "Already have a passkey?" : "New to Baseera?"}{" "}
+                {creating ? 'Already have a passkey?' : 'New to Baseera?'}{' '}
                 <button
                   type="button"
                   className="font-medium text-[#eef771] underline-offset-4 hover:underline"
                   disabled={submitting}
                   onClick={switchMode}
                 >
-                  {creating ? "Sign in" : "Create a passkey"}
+                  {creating ? 'Sign in' : 'Create a passkey'}
                 </button>
               </p>
 
@@ -185,5 +185,5 @@ export default function Login() {
         </div>
       </div>
     </main>
-  )
+  );
 }

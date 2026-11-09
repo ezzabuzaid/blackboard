@@ -1,10 +1,8 @@
-import { cn } from "cn"
 import {
   Avatar,
   AvatarFallback,
   AvatarGroup,
   Button,
-  buttonVariants,
   FieldError,
   Input,
   ScrollArea,
@@ -13,139 +11,143 @@ import {
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@zukhruf/shadcn"
-import { ArrowLeft, ArrowRight, Check, Plus, Search, Store } from "lucide-react"
-import { useId, useRef, useState } from "react"
+  buttonVariants,
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
 import {
-  Link,
-  useLoaderData,
-  useNavigate,
-  useRevalidator,
-} from "react-router"
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Plus,
+  Search,
+  Store,
+} from 'lucide-react';
+import { useId, useRef, useState } from 'react';
+import { Link, useLoaderData, useNavigate, useRevalidator } from 'react-router';
 
-import { api } from "../ChatBot/api"
 import {
-  MarketplaceTemplateDialog,
   type MarketplaceEditor,
-} from "../ChatBot/MarketplaceTemplateDialog"
+  MarketplaceTemplateDialog,
+} from '../ChatBot/MarketplaceTemplateDialog';
+import { api } from '../ChatBot/api';
 import {
-  loader,
   type CatalogAgent,
   type GroupAgent,
   type GroupTemplate,
-} from "./loader"
+  loader,
+} from './loader';
 import {
   loginPathForTemplate,
   matchesTemplateFilter,
   toggleAgentSelection,
-} from "./selection"
+} from './selection';
 
-export { loader }
+export { loader };
 
 export default function GroupTemplates() {
   const { signedIn, initialSelectedId, catalogAgents, groupTemplates } =
-    useLoaderData<typeof loader>()
-  const [activeFilter, setActiveFilter] = useState("all")
-  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId)
-  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
-  const [customName, setCustomName] = useState("")
-  const [startingId, setStartingId] = useState<string | null>(null)
-  const [startError, setStartError] = useState<string | null>(null)
-  const [reviewOpen, setReviewOpen] = useState(false)
-  const [marketplaceOpen, setMarketplaceOpen] = useState(false)
+    useLoaderData<typeof loader>();
+  const [activeFilter, setActiveFilter] = useState('all');
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialSelectedId,
+  );
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
+  const [customName, setCustomName] = useState('');
+  const [startingId, setStartingId] = useState<string | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
   const [marketplaceEditor, setMarketplaceEditor] =
-    useState<MarketplaceEditor | null>(null)
-  const navigate = useNavigate()
-  const { revalidate } = useRevalidator()
+    useState<MarketplaceEditor | null>(null);
+  const navigate = useNavigate();
+  const { revalidate } = useRevalidator();
   const selectedAgents = selectedAgentIds.flatMap((id) => {
-    const agent = catalogAgents.find((candidate) => candidate.id === id)
+    const agent = catalogAgents.find((candidate) => candidate.id === id);
     return agent
       ? [{ id: agent.id, name: agent.name, responsibility: agent.headline }]
-      : []
-  })
+      : [];
+  });
   const templates = groupTemplates.map((template) =>
-    template.source === "custom"
+    template.source === 'custom'
       ? { ...template, agents: selectedAgents }
-      : template
-  )
+      : template,
+  );
   const filters = [
-    { id: "all", label: "All" },
-    { id: "source:prebuilt", label: "Prebuilt" },
-    { id: "source:marketplace", label: "Marketplace" },
+    { id: 'all', label: 'All' },
+    { id: 'source:prebuilt', label: 'Prebuilt' },
+    { id: 'source:marketplace', label: 'Marketplace' },
     ...[...new Set(templates.map(({ category }) => category))].map(
-      (category) => ({ id: `category:${category}`, label: category })
+      (category) => ({ id: `category:${category}`, label: category }),
     ),
-  ]
-  const selected = templates.find(({ id }) => id === selectedId) ?? null
+  ];
+  const selected = templates.find(({ id }) => id === selectedId) ?? null;
   const canManageSelected =
-    selected?.source === "marketplace" &&
-    selected.owned &&
-    selected.detached
+    selected?.source === 'marketplace' && selected.owned && selected.detached;
   const visibleTemplates = templates.filter((template) =>
-    matchesTemplateFilter(template, activeFilter)
-  )
+    matchesTemplateFilter(template, activeFilter),
+  );
 
   function signInFor(templateId: string) {
-    void navigate(loginPathForTemplate(templateId))
+    void navigate(loginPathForTemplate(templateId));
   }
 
   function selectTemplate(id: string) {
-    setSelectedId(id === selectedId ? null : id)
-    setStartError(null)
+    setSelectedId(id === selectedId ? null : id);
+    setStartError(null);
   }
 
   async function createGroup(
     input: { templateId?: string; name?: string; agentIds?: string[] },
-    startingId: string
+    startingId: string,
   ) {
-    setStartingId(startingId)
-    setStartError(null)
+    setStartingId(startingId);
+    setStartError(null);
     try {
-      const group = await api.request("POST /groups", input)
-      await navigate(`/?${new URLSearchParams({ chatId: group.id })}`)
+      const group = await api.request('POST /groups', input);
+      await navigate(`/?${new URLSearchParams({ chatId: group.id })}`);
     } catch {
-      setStartError("Could not create this group. Try again.")
-      setStartingId(null)
+      setStartError('Could not create this group. Try again.');
+      setStartingId(null);
     }
   }
 
   function toggleAgent(id: string) {
-    setSelectedAgentIds((selected) => toggleAgentSelection(selected, id))
-    setStartError(null)
+    setSelectedAgentIds((selected) => toggleAgentSelection(selected, id));
+    setStartError(null);
   }
 
   function startSelectedGroup() {
-    if (!selected) return
+    if (!selected) return;
     if (!signedIn) {
-      signInFor(selected.id)
-      return
+      signInFor(selected.id);
+      return;
     }
     void createGroup(
-      selected.source === "custom"
+      selected.source === 'custom'
         ? {
             name: customName,
             agentIds: [...selectedAgentIds],
           }
         : { templateId: selected.id },
-      selected.id
-    )
+      selected.id,
+    );
   }
 
   function startFactory() {
     if (!signedIn) {
-      signInFor("custom")
-      return
+      signInFor('custom');
+      return;
     }
-    void createGroup({ templateId: "scratch" }, "factory")
+    void createGroup({ templateId: 'scratch' }, 'factory');
   }
 
   function manageSelectedTemplate() {
     if (
-      selected?.source !== "marketplace" ||
+      selected?.source !== 'marketplace' ||
       !selected.owned ||
       !selected.detached
     ) {
-      return
+      return;
     }
     setMarketplaceEditor({
       template: {
@@ -161,33 +163,33 @@ export default function GroupTemplates() {
         })),
         published: true,
       },
-      group: { id: "", name: selected.name },
+      group: { id: '', name: selected.name },
       agents: selected.agents.map(({ id, name, responsibility }) => ({
         id,
         name,
         headline: responsibility,
         responsibility,
       })),
-    })
-    setMarketplaceOpen(true)
+    });
+    setMarketplaceOpen(true);
   }
 
   return (
-    <main className="flex h-svh flex-col bg-background">
+    <main className="bg-background flex h-svh flex-col">
       <div className="flex min-h-0 w-full flex-1">
         <section
           aria-labelledby="templates-heading"
           className="min-w-0 flex-1 overflow-y-auto px-4 pt-6 pb-32 sm:px-6 md:px-8 md:pb-12"
         >
-          <div className="mb-8 animate-in duration-300 ease-out fade-in slide-in-from-bottom-2">
+          <div className="animate-in fade-in slide-in-from-bottom-2 mb-8 duration-300 ease-out">
             <Link
               to="/"
               className={cn(
                 buttonVariants({
-                  variant: "ghost",
-                  size: "sm",
-                  className: "-ms-2 mb-3",
-                })
+                  variant: 'ghost',
+                  size: 'sm',
+                  className: '-ms-2 mb-3',
+                }),
               )}
             >
               <ArrowLeft aria-hidden="true" />
@@ -199,14 +201,14 @@ export default function GroupTemplates() {
             >
               Build your group.
             </h1>
-            <p className="mt-2 max-w-xl text-sm text-muted-foreground">
+            <p className="text-muted-foreground mt-2 max-w-xl text-sm">
               Choose a ready-made team or select the exact characters you want.
             </p>
           </div>
 
           <div className="mb-4 flex items-center gap-2 overflow-x-auto pb-1">
             {filters.map((filter) => {
-              const active = activeFilter === filter.id
+              const active = activeFilter === filter.id;
 
               return (
                 <button
@@ -214,19 +216,19 @@ export default function GroupTemplates() {
                   type="button"
                   onClick={() => setActiveFilter(filter.id)}
                   className={cn(
-                    "shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+                    'focus-visible:outline-primary shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline-2',
                     active
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                   )}
                 >
                   {filter.label}
                 </button>
-              )
+              );
             })}
-            <span className="ms-auto hidden shrink-0 text-xs text-muted-foreground sm:block">
-              {visibleTemplates.length}{" "}
-              {visibleTemplates.length === 1 ? "group" : "groups"}
+            <span className="text-muted-foreground ms-auto hidden shrink-0 text-xs sm:block">
+              {visibleTemplates.length}{' '}
+              {visibleTemplates.length === 1 ? 'group' : 'groups'}
             </span>
           </div>
 
@@ -242,13 +244,13 @@ export default function GroupTemplates() {
           </div>
         </section>
 
-        <aside className="hidden w-[clamp(18rem,22vw,22rem)] shrink-0 flex-col border-s bg-card md:flex">
+        <aside className="bg-card hidden w-[clamp(18rem,22vw,22rem)] shrink-0 flex-col border-s md:flex">
           <ScrollArea className="min-h-0 flex-1 [&>[data-slot=scroll-area-viewport]>div]:h-full">
             <div className="flex min-h-full flex-col px-6 pt-6 pb-6">
               <SelectedGroupPanel
                 template={selected}
                 starting={startingId === selected?.id}
-                startingFactory={startingId === "factory"}
+                startingFactory={startingId === 'factory'}
                 error={startError}
                 catalogAgents={catalogAgents}
                 selectedAgentIds={selectedAgentIds}
@@ -270,9 +272,9 @@ export default function GroupTemplates() {
         <button
           type="button"
           onClick={() => setReviewOpen(true)}
-          className="fixed inset-x-0 bottom-0 z-30 flex animate-in items-center gap-3 border-t bg-card px-4 py-3 text-left transition-colors duration-200 ease-out slide-in-from-bottom focus-visible:outline-2 focus-visible:outline-primary md:hidden"
+          className="animate-in bg-card slide-in-from-bottom focus-visible:outline-primary fixed inset-x-0 bottom-0 z-30 flex items-center gap-3 border-t px-4 py-3 text-left transition-colors duration-200 ease-out focus-visible:outline-2 md:hidden"
           style={{
-            paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 12px)",
+            paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)',
           }}
         >
           <AgentAvatarGroup agents={selected.agents} />
@@ -282,7 +284,7 @@ export default function GroupTemplates() {
           >
             {selected.name}
           </span>
-          <span className="flex shrink-0 items-center gap-1 text-xs font-semibold text-primary">
+          <span className="text-primary flex shrink-0 items-center gap-1 text-xs font-semibold">
             Review
             <ArrowRight aria-hidden="true" className="size-4" />
           </span>
@@ -303,7 +305,7 @@ export default function GroupTemplates() {
           <SelectedGroupPanel
             template={selected}
             starting={startingId === selected?.id}
-            startingFactory={startingId === "factory"}
+            startingFactory={startingId === 'factory'}
             error={startError}
             catalogAgents={catalogAgents}
             selectedAgentIds={selectedAgentIds}
@@ -324,14 +326,14 @@ export default function GroupTemplates() {
         error={null}
         onOpenChange={setMarketplaceOpen}
         onEditorChange={(editor) => {
-          setMarketplaceEditor(editor)
-          if (!editor) setSelectedId(null)
-          void revalidate()
+          setMarketplaceEditor(editor);
+          if (!editor) setSelectedId(null);
+          void revalidate();
         }}
         onRetry={() => void revalidate()}
       />
     </main>
-  )
+  );
 }
 
 function TemplateCard({
@@ -339,30 +341,30 @@ function TemplateCard({
   selected,
   onSelect,
 }: {
-  template: GroupTemplate
-  selected: boolean
-  onSelect(): void
+  template: GroupTemplate;
+  selected: boolean;
+  onSelect(): void;
 }) {
   return (
     <button
       type="button"
       aria-pressed={selected}
-      aria-label={`${template.name} — ${selected ? "selected" : "select"}`}
+      aria-label={`${template.name} — ${selected ? 'selected' : 'select'}`}
       onClick={onSelect}
       className={cn(
-        "group relative flex h-full animate-in flex-col overflow-hidden rounded-lg border bg-card text-left transition-colors duration-200 ease-out fade-in slide-in-from-bottom-2 focus-visible:outline-2 focus-visible:outline-primary",
+        'group animate-in bg-card fade-in slide-in-from-bottom-2 focus-visible:outline-primary relative flex h-full flex-col overflow-hidden rounded-lg border text-left transition-colors duration-200 ease-out focus-visible:outline-2',
         selected
-          ? "border-primary/30 bg-primary/5"
-          : "border-border hover:border-ring"
+          ? 'border-primary/30 bg-primary/5'
+          : 'border-border hover:border-ring',
       )}
     >
       <span
         aria-hidden="true"
         className={cn(
-          "absolute top-3 right-3 z-10 grid size-5 place-items-center rounded-full border transition-colors",
+          'absolute top-3 right-3 z-10 grid size-5 place-items-center rounded-full border transition-colors',
           selected
-            ? "border-primary bg-primary text-primary-foreground"
-            : "border-border bg-background/70"
+            ? 'border-primary bg-primary text-primary-foreground'
+            : 'border-border bg-background/70',
         )}
       >
         {selected && <Check className="size-3" />}
@@ -376,33 +378,33 @@ function TemplateCard({
         >
           {template.name}
         </h2>
-        <span className="mt-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-          {template.source === "marketplace"
+        <span className="text-muted-foreground mt-1 text-[10px] font-medium tracking-wide uppercase">
+          {template.source === 'marketplace'
             ? `Marketplace · ${template.category}`
             : template.category}
         </span>
-        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+        <p className="text-muted-foreground mt-2 text-xs leading-5">
           {template.outcome}
         </p>
-        {template.source === "marketplace" && (
-          <p className="mt-2 text-xs text-muted-foreground">
+        {template.source === 'marketplace' && (
+          <p className="text-muted-foreground mt-2 text-xs">
             By {template.publisherName}
           </p>
         )}
 
         <div className="mt-auto flex items-center gap-2 pt-4">
           <AgentAvatarGroup agents={template.agents} />
-          <span className="text-[11px] text-muted-foreground">
-            {template.source === "custom" && template.agents.length === 0
-              ? "Choose characters"
+          <span className="text-muted-foreground text-[11px]">
+            {template.source === 'custom' && template.agents.length === 0
+              ? 'Choose characters'
               : `${template.agents.length} ${
-                  template.agents.length === 1 ? "agent" : "agents"
+                  template.agents.length === 1 ? 'agent' : 'agents'
                 }`}
           </span>
         </div>
       </div>
     </button>
-  )
+  );
 }
 
 function SelectedGroupPanel({
@@ -419,20 +421,20 @@ function SelectedGroupPanel({
   onStartFactory,
   onManage,
 }: {
-  template: GroupTemplate | null
-  starting: boolean
-  startingFactory: boolean
-  error: string | null
-  catalogAgents: readonly CatalogAgent[]
-  selectedAgentIds: readonly string[]
-  customName: string
-  onCustomNameChange(name: string): void
-  onToggleAgent(id: string): void
-  onStart(): void
-  onStartFactory(): void
-  onManage?(): void
+  template: GroupTemplate | null;
+  starting: boolean;
+  startingFactory: boolean;
+  error: string | null;
+  catalogAgents: readonly CatalogAgent[];
+  selectedAgentIds: readonly string[];
+  customName: string;
+  onCustomNameChange(name: string): void;
+  onToggleAgent(id: string): void;
+  onStart(): void;
+  onStartFactory(): void;
+  onManage?(): void;
 }) {
-  if (template?.source === "custom") {
+  if (template?.source === 'custom') {
     return (
       <CustomGroupPanel
         agents={catalogAgents}
@@ -446,7 +448,7 @@ function SelectedGroupPanel({
         onStart={onStart}
         onStartFactory={onStartFactory}
       />
-    )
+    );
   }
 
   return (
@@ -454,11 +456,11 @@ function SelectedGroupPanel({
       {!template ? (
         <div className="grid flex-1 place-items-center py-16 text-center">
           <div>
-            <span className="mx-auto grid size-10 place-items-center rounded-full border border-dashed text-muted-foreground">
+            <span className="text-muted-foreground mx-auto grid size-10 place-items-center rounded-full border border-dashed">
               <Plus aria-hidden="true" className="size-4" />
             </span>
             <p className="mt-4 text-sm font-medium">Pick a group</p>
-            <p className="mt-2 max-w-48 text-xs leading-5 text-muted-foreground">
+            <p className="text-muted-foreground mt-2 max-w-48 text-xs leading-5">
               Select a template to review its agents and responsibilities.
             </p>
           </div>
@@ -472,15 +474,15 @@ function SelectedGroupPanel({
             >
               {template.name}
             </h2>
-            <p className="mt-3 text-sm text-muted-foreground">
+            <p className="text-muted-foreground mt-3 text-sm">
               {template.outcome}
             </p>
           </div>
 
           <div className="mt-8 flex-1">
-            <p className="mb-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-              {template.agents.length}{" "}
-              {template.agents.length === 1 ? "agent" : "agents"}
+            <p className="text-muted-foreground mb-1 text-[10px] font-medium tracking-wide uppercase">
+              {template.agents.length}{' '}
+              {template.agents.length === 1 ? 'agent' : 'agents'}
             </p>
             {template.agents.map((agent) => (
               <div key={agent.name} className="flex gap-3 border-t py-4">
@@ -489,7 +491,7 @@ function SelectedGroupPanel({
                   <h3 dir="auto" className="text-sm font-semibold">
                     {agent.name}
                   </h3>
-                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  <p className="text-muted-foreground mt-1 text-xs leading-5">
                     {agent.responsibility}
                   </p>
                 </div>
@@ -511,17 +513,17 @@ function SelectedGroupPanel({
           <Button
             type="button"
             size="lg"
-            className={cn(onManage ? "mt-2" : "mt-6", "w-full")}
+            className={cn(onManage ? 'mt-2' : 'mt-6', 'w-full')}
             onClick={onStart}
             disabled={starting}
           >
-            {starting ? "Starting…" : "Start with this group"}
+            {starting ? 'Starting…' : 'Start with this group'}
             {!starting && <ArrowRight aria-hidden="true" />}
           </Button>
           {error && (
             <p
               role="alert"
-              className="mt-3 animate-in text-xs text-destructive duration-150 ease-out fade-in slide-in-from-top-1"
+              className="animate-in text-destructive fade-in slide-in-from-top-1 mt-3 text-xs duration-150 ease-out"
             >
               {error}
             </p>
@@ -529,7 +531,7 @@ function SelectedGroupPanel({
         </>
       )}
     </div>
-  )
+  );
 }
 
 function CustomGroupPanel({
@@ -544,49 +546,49 @@ function CustomGroupPanel({
   onStart,
   onStartFactory,
 }: {
-  agents: readonly CatalogAgent[]
-  selectedAgentIds: readonly string[]
-  name: string
-  starting: boolean
-  startingFactory: boolean
-  error: string | null
-  onNameChange(name: string): void
-  onToggleAgent(id: string): void
-  onStart(): void
-  onStartFactory(): void
+  agents: readonly CatalogAgent[];
+  selectedAgentIds: readonly string[];
+  name: string;
+  starting: boolean;
+  startingFactory: boolean;
+  error: string | null;
+  onNameChange(name: string): void;
+  onToggleAgent(id: string): void;
+  onStart(): void;
+  onStartFactory(): void;
 }) {
-  const [query, setQuery] = useState("")
-  const normalizedQuery = query.trim().toLowerCase()
+  const [query, setQuery] = useState('');
+  const normalizedQuery = query.trim().toLowerCase();
   const visibleAgents = normalizedQuery
     ? agents.filter((agent) =>
         [agent.name, agent.category, agent.headline, ...agent.tags]
-          .join(" ")
+          .join(' ')
           .toLowerCase()
-          .includes(normalizedQuery)
+          .includes(normalizedQuery),
       )
-    : agents
-  const selectionFull = selectedAgentIds.length >= 8
-  const nameInputRef = useRef<HTMLInputElement>(null)
-  const nameErrorId = useId()
-  const [nameError, setNameError] = useState<string | null>(null)
-  const [agentsError, setAgentsError] = useState<string | null>(null)
+    : agents;
+  const selectionFull = selectedAgentIds.length >= 8;
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const nameErrorId = useId();
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [agentsError, setAgentsError] = useState<string | null>(null);
 
   function startGroup() {
-    const missingName = !name.trim()
-    const missingAgents = selectedAgentIds.length === 0
-    setNameError(missingName ? "Name your group to continue." : null)
-    setAgentsError(missingAgents ? "Pick at least one character." : null)
+    const missingName = !name.trim();
+    const missingAgents = selectedAgentIds.length === 0;
+    setNameError(missingName ? 'Name your group to continue.' : null);
+    setAgentsError(missingAgents ? 'Pick at least one character.' : null);
     if (missingName) {
-      nameInputRef.current?.focus({ preventScroll: true })
+      nameInputRef.current?.focus({ preventScroll: true });
       nameInputRef.current?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "auto"
-          : "smooth",
-        block: "center",
-      })
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth',
+        block: 'center',
+      });
     }
-    if (missingName || missingAgents) return
-    onStart()
+    if (missingName || missingAgents) return;
+    onStart();
   }
 
   return (
@@ -594,11 +596,11 @@ function CustomGroupPanel({
       <h2 className="text-xl font-semibold tracking-tight">
         Choose your characters.
       </h2>
-      <p className="mt-2 text-sm text-muted-foreground">
+      <p className="text-muted-foreground mt-2 text-sm">
         Select up to eight people for this group.
       </p>
 
-      <label className="mt-6 block text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+      <label className="text-muted-foreground mt-6 block text-[10px] font-medium tracking-wide uppercase">
         Group name
         <Input
           ref={nameInputRef}
@@ -607,35 +609,35 @@ function CustomGroupPanel({
           aria-describedby={nameError ? nameErrorId : undefined}
           value={name}
           onChange={(event) => {
-            setNameError(null)
-            onNameChange(event.target.value)
+            setNameError(null);
+            onNameChange(event.target.value);
           }}
           maxLength={100}
           placeholder="e.g. Product council"
-          className="mt-2 h-10 border-transparent bg-muted tracking-normal normal-case shadow-none"
+          className="bg-muted mt-2 h-10 border-transparent tracking-normal normal-case shadow-none"
         />
       </label>
       {nameError && (
         <FieldError
           id={nameErrorId}
-          className="mt-2 animate-in text-xs duration-150 ease-out fade-in slide-in-from-top-1"
+          className="animate-in fade-in slide-in-from-top-1 mt-2 text-xs duration-150 ease-out"
         >
           {nameError}
         </FieldError>
       )}
 
       <div className="mt-6 flex items-center justify-between">
-        <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+        <p className="text-muted-foreground text-[10px] font-medium tracking-wide uppercase">
           Characters
         </p>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-muted-foreground text-xs">
           {selectedAgentIds.length}/8 selected
         </span>
       </div>
       <div className="relative mt-3">
         <Search
           aria-hidden="true"
-          className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+          className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
         />
         <Input
           type="search"
@@ -643,13 +645,13 @@ function CustomGroupPanel({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search characters"
-          className="h-10 rounded-full border-transparent bg-muted pr-4 pl-10 shadow-none"
+          className="bg-muted h-10 rounded-full border-transparent pr-4 pl-10 shadow-none"
         />
       </div>
 
       <div className="mt-3">
         {visibleAgents.map((agent) => {
-          const selected = selectedAgentIds.includes(agent.id)
+          const selected = selectedAgentIds.includes(agent.id);
           return (
             <button
               key={agent.id}
@@ -657,10 +659,10 @@ function CustomGroupPanel({
               aria-pressed={selected}
               disabled={!selected && selectionFull}
               onClick={() => {
-                setAgentsError(null)
-                onToggleAgent(agent.id)
+                setAgentsError(null);
+                onToggleAgent(agent.id);
               }}
-              className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left transition-colors hover:bg-accent/70 focus-visible:outline-2 focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50"
+              className="hover:bg-accent/70 focus-visible:outline-primary flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left transition-colors focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <AgentAvatar
                 agent={{
@@ -673,26 +675,26 @@ function CustomGroupPanel({
                 <span dir="auto" className="block truncate text-sm font-medium">
                   {agent.name}
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                <span className="text-muted-foreground mt-0.5 block truncate text-xs">
                   {agent.category} · {agent.headline}
                 </span>
               </span>
               <span
                 aria-hidden="true"
                 className={cn(
-                  "grid size-5 shrink-0 place-items-center rounded-full border",
+                  'grid size-5 shrink-0 place-items-center rounded-full border',
                   selected
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border"
+                    ? 'border-primary bg-primary text-primary-foreground'
+                    : 'border-border',
                 )}
               >
                 {selected && <Check className="size-3" />}
               </span>
             </button>
-          )
+          );
         })}
         {visibleAgents.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">
+          <p className="text-muted-foreground py-8 text-center text-sm">
             No characters match that search.
           </p>
         )}
@@ -705,17 +707,17 @@ function CustomGroupPanel({
         onClick={startGroup}
         disabled={starting}
       >
-        {starting ? "Creating…" : "Create group"}
+        {starting ? 'Creating…' : 'Create group'}
         {!starting && <ArrowRight aria-hidden="true" />}
       </Button>
       {agentsError && (
-        <FieldError className="mt-3 animate-in text-xs duration-150 ease-out fade-in slide-in-from-top-1">
+        <FieldError className="animate-in fade-in slide-in-from-top-1 mt-3 text-xs duration-150 ease-out">
           {agentsError}
         </FieldError>
       )}
 
       <div className="mt-5 border-t pt-5">
-        <p className="text-xs leading-5 text-muted-foreground">
+        <p className="text-muted-foreground text-xs leading-5">
           Need a character that is not in the catalog?
         </p>
         <Button
@@ -726,49 +728,49 @@ function CustomGroupPanel({
           onClick={onStartFactory}
           disabled={startingFactory}
         >
-          {startingFactory ? "Opening Factory…" : "Create one with Factory"}
+          {startingFactory ? 'Opening Factory…' : 'Create one with Factory'}
         </Button>
       </div>
 
       {error && (
         <p
           role="alert"
-          className="mt-3 animate-in text-xs text-destructive duration-150 ease-out fade-in slide-in-from-top-1"
+          className="animate-in text-destructive fade-in slide-in-from-top-1 mt-3 text-xs duration-150 ease-out"
         >
           {error}
         </p>
       )}
     </div>
-  )
+  );
 }
 
 function TemplateArtwork({
   id,
   source,
 }: {
-  id: string
-  source: GroupTemplate["source"]
+  id: string;
+  source: GroupTemplate['source'];
 }) {
   return (
-    <div className="relative h-24 w-full shrink-0 overflow-hidden bg-muted/60">
+    <div className="bg-muted/60 relative h-24 w-full shrink-0 overflow-hidden">
       <svg
         aria-hidden="true"
         viewBox="0 0 400 144"
         preserveAspectRatio="none"
-        className="absolute inset-0 size-full text-muted-foreground/30 transition-colors duration-300 group-hover:text-muted-foreground/45"
+        className="text-muted-foreground/30 group-hover:text-muted-foreground/45 absolute inset-0 size-full transition-colors duration-300"
       >
-        {id === "customer-discovery" && <DiscoveryArtwork />}
-        {(id === "market-intelligence" || source === "marketplace") && (
+        {id === 'customer-discovery' && <DiscoveryArtwork />}
+        {(id === 'market-intelligence' || source === 'marketplace') && (
           <MarketArtwork />
         )}
-        {id === "company-building" && <CompanyArtwork />}
-        {id === "content-studio" && <ContentArtwork />}
-        {id === "capital-strategy" && <CapitalArtwork />}
-        {id === "custom" && <CustomArtwork />}
+        {id === 'company-building' && <CompanyArtwork />}
+        {id === 'content-studio' && <ContentArtwork />}
+        {id === 'capital-strategy' && <CapitalArtwork />}
+        {id === 'custom' && <CustomArtwork />}
       </svg>
-      <span className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent via-card/60 to-card" />
+      <span className="via-card/60 to-card pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent" />
     </div>
-  )
+  );
 }
 
 function DiscoveryArtwork() {
@@ -780,7 +782,7 @@ function DiscoveryArtwork() {
       <path d="M-38 142 C47 54 120 46 194 108 S337 163 436 55" />
       <path d="M-44 150 C44 66 118 56 192 115 S337 168 438 67" />
     </g>
-  )
+  );
 }
 
 function MarketArtwork() {
@@ -799,7 +801,7 @@ function MarketArtwork() {
       <rect x="273" y="51" width="36" height="67" rx="3" fill="currentColor" />
       <rect x="341" y="34" width="36" height="84" rx="3" fill="currentColor" />
     </g>
-  )
+  );
 }
 
 function ContentArtwork() {
@@ -813,7 +815,7 @@ function ContentArtwork() {
       <rect x="227" y="96" width="145" height="10" rx="5" />
       <path d="M184 25 V119" fill="none" stroke="currentColor" />
     </g>
-  )
+  );
 }
 
 function CompanyArtwork() {
@@ -823,7 +825,7 @@ function CompanyArtwork() {
       <path d="M42 112 H386" />
       <path d="M89 78 V60 H183 V48 M265 68 V50 H337 V30" opacity=".65" />
     </g>
-  )
+  );
 }
 
 function CapitalArtwork() {
@@ -838,7 +840,7 @@ function CapitalArtwork() {
       <circle cx="267" cy="72" r="7" fill="currentColor" stroke="none" />
       <circle cx="385" cy="30" r="7" fill="currentColor" stroke="none" />
     </g>
-  )
+  );
 }
 
 function CustomArtwork() {
@@ -857,32 +859,32 @@ function CustomArtwork() {
       <circle cx="319" cy="51" r="7" fill="currentColor" />
       <circle cx="358" cy="36" r="6" fill="currentColor" />
     </g>
-  )
+  );
 }
 
 function AgentAvatarGroup({ agents }: { agents: readonly GroupAgent[] }) {
   return (
-    <AvatarGroup aria-label={agents.map(({ name }) => name).join(", ")}>
+    <AvatarGroup aria-label={agents.map(({ name }) => name).join(', ')}>
       {agents.map((agent) => (
         <AgentAvatar key={agent.name} agent={agent} />
       ))}
     </AvatarGroup>
-  )
+  );
 }
 
 function AgentAvatar({ agent }: { agent: GroupAgent }) {
   const initials = agent.name
     .split(/\s+/u)
     .map((part) => part[0])
-    .join("")
+    .join('')
     .slice(0, 2)
-    .toUpperCase()
+    .toUpperCase();
 
   return (
     <Avatar size="sm" title={agent.name} className="bg-background">
-      <AvatarFallback className="bg-muted font-medium text-foreground uppercase">
+      <AvatarFallback className="bg-muted text-foreground font-medium uppercase">
         {initials}
       </AvatarFallback>
     </Avatar>
-  )
+  );
 }

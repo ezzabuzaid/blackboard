@@ -13,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@zukhruf/shadcn"
+} from '@zukhruf/shadcn';
 import {
   Archive,
   ChevronDown,
@@ -22,16 +22,16 @@ import {
   PinOff,
   Store,
   Trash2,
-} from "lucide-react"
-import { useState } from "react"
-import { useNavigate, useRevalidator } from "react-router"
+} from 'lucide-react';
+import { useState } from 'react';
+import { useNavigate, useRevalidator } from 'react-router';
 
-import { api } from "./api"
 import {
-  loadMarketplaceEditor,
-  MarketplaceTemplateDialog,
   type MarketplaceEditor,
-} from "./MarketplaceTemplateDialog"
+  MarketplaceTemplateDialog,
+  loadMarketplaceEditor,
+} from './MarketplaceTemplateDialog';
+import { api } from './api';
 
 export function GroupRowMenu({
   groupId,
@@ -40,45 +40,45 @@ export function GroupRowMenu({
   pinned,
   active,
 }: {
-  groupId: string
-  name: string
-  agentIds: readonly string[]
-  pinned: boolean
-  active: boolean
+  groupId: string;
+  name: string;
+  agentIds: readonly string[];
+  pinned: boolean;
+  active: boolean;
 }) {
-  const { revalidate } = useRevalidator()
-  const navigate = useNavigate()
-  const [confirmingClear, setConfirmingClear] = useState(false)
-  const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [marketplaceOpen, setMarketplaceOpen] = useState(false)
+  const { revalidate } = useRevalidator();
+  const navigate = useNavigate();
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
   const [marketplaceEditor, setMarketplaceEditor] =
-    useState<MarketplaceEditor | null>(null)
-  const [marketplaceLoading, setMarketplaceLoading] = useState(false)
-  const [marketplaceError, setMarketplaceError] = useState<string | null>(null)
-  const [pending, setPending] = useState(false)
+    useState<MarketplaceEditor | null>(null);
+  const [marketplaceLoading, setMarketplaceLoading] = useState(false);
+  const [marketplaceError, setMarketplaceError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
 
   async function loadMarketplace() {
-    setMarketplaceLoading(true)
-    setMarketplaceError(null)
+    setMarketplaceLoading(true);
+    setMarketplaceError(null);
     try {
-      setMarketplaceEditor(await loadMarketplaceEditor(groupId))
+      setMarketplaceEditor(await loadMarketplaceEditor(groupId));
     } catch {
-      setMarketplaceError("Could not load this marketplace template.")
+      setMarketplaceError('Could not load this marketplace template.');
     } finally {
-      setMarketplaceLoading(false)
+      setMarketplaceLoading(false);
     }
   }
 
   async function run(action: () => Promise<unknown>) {
-    setPending(true)
+    setPending(true);
     try {
-      await action()
-      await revalidate()
+      await action();
+      await revalidate();
     } catch {
       // The list keeps its current state; the next revalidation reconciles it.
     } finally {
-      setPending(false)
+      setPending(false);
     }
   }
 
@@ -86,7 +86,7 @@ export function GroupRowMenu({
     <>
       <DropdownMenu
         onOpenChange={(open) => {
-          if (open && agentIds.length > 0) void loadMarketplace()
+          if (open && agentIds.length > 0) void loadMarketplace();
         }}
       >
         <DropdownMenuTrigger
@@ -96,7 +96,7 @@ export function GroupRowMenu({
               variant="ghost"
               size="icon-xs"
               aria-label={`Actions for ${name}`}
-              className="shrink-0 text-muted-foreground opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 data-popup-open:opacity-100 max-sm:opacity-60"
+              className="text-muted-foreground shrink-0 opacity-0 transition-opacity group-focus-within/row:opacity-100 group-hover/row:opacity-100 data-popup-open:opacity-100 max-sm:opacity-60"
             />
           }
         >
@@ -109,10 +109,10 @@ export function GroupRowMenu({
               void run(() =>
                 api.request(
                   pinned
-                    ? "DELETE /groups/{groupId}/pin"
-                    : "POST /groups/{groupId}/pin",
-                  { groupId }
-                )
+                    ? 'DELETE /groups/{groupId}/pin'
+                    : 'POST /groups/{groupId}/pin',
+                  { groupId },
+                ),
               )
             }
           >
@@ -121,29 +121,29 @@ export function GroupRowMenu({
             ) : (
               <Pin aria-hidden="true" />
             )}
-            {pinned ? "Unpin chat" : "Pin chat"}
+            {pinned ? 'Unpin chat' : 'Pin chat'}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={pending || agentIds.length === 0}
             title={
               agentIds.length === 0
-                ? "Add at least one agent before publishing"
+                ? 'Add at least one agent before publishing'
                 : undefined
             }
             onClick={() => setMarketplaceOpen(true)}
           >
             <Store aria-hidden="true" />
             {marketplaceLoading
-              ? "Loading template…"
+              ? 'Loading template…'
               : marketplaceEditor?.template?.published
-                ? "Manage marketplace template"
-                : "Publish as template"}
+                ? 'Manage marketplace template'
+                : 'Publish as template'}
           </DropdownMenuItem>
           <DropdownMenuItem
             disabled={pending}
             onClick={() =>
               void run(() =>
-                api.request("POST /groups/{groupId}/archive", { groupId })
+                api.request('POST /groups/{groupId}/archive', { groupId }),
               )
             }
           >
@@ -163,8 +163,8 @@ export function GroupRowMenu({
             variant="destructive"
             disabled={pending}
             onClick={() => {
-              setDeleteError(null)
-              setConfirmingDelete(true)
+              setDeleteError(null);
+              setConfirmingDelete(true);
             }}
           >
             <Trash2 aria-hidden="true" />
@@ -189,15 +189,17 @@ export function GroupRowMenu({
               disabled={pending}
               onClick={() => {
                 void run(async () => {
-                  await api.request("POST /groups/{groupId}/clear", { groupId })
-                  setConfirmingClear(false)
+                  await api.request('POST /groups/{groupId}/clear', {
+                    groupId,
+                  });
+                  setConfirmingClear(false);
                   // The open chat holds an SSE cursor past the deleted
                   // messages; only a reload gives it a fresh stream.
-                  if (active) globalThis.location.reload()
-                })
+                  if (active) globalThis.location.reload();
+                });
               }}
             >
-              {pending ? "Clearing…" : "Clear chat"}
+              {pending ? 'Clearing…' : 'Clear chat'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -206,8 +208,8 @@ export function GroupRowMenu({
       <AlertDialog
         open={confirmingDelete}
         onOpenChange={(open) => {
-          if (!open && pending) return
-          setConfirmingDelete(open)
+          if (!open && pending) return;
+          setConfirmingDelete(open);
         }}
       >
         <AlertDialogContent className="sm:max-w-md">
@@ -217,19 +219,17 @@ export function GroupRowMenu({
               <p>This cannot be undone.</p>
               <dl className="mt-5 space-y-4">
                 <div>
-                  <dt className="text-sm font-medium text-foreground">
+                  <dt className="text-foreground text-sm font-medium">
                     Deleted
                   </dt>
-                  <dd className="mt-1 text-pretty leading-6">
-                    Conversation, agent memory, group files and artifacts,
-                    every share link, and any unpublished marketplace draft.
+                  <dd className="mt-1 leading-6 text-pretty">
+                    Conversation, agent memory, group files and artifacts, every
+                    share link, and any unpublished marketplace draft.
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-sm font-medium text-foreground">
-                    Kept
-                  </dt>
-                  <dd className="mt-1 text-pretty leading-6">
+                  <dt className="text-foreground text-sm font-medium">Kept</dt>
+                  <dd className="mt-1 leading-6 text-pretty">
                     Published marketplace template, account-level participant
                     data, agent telemetry, and API request logs.
                   </dd>
@@ -238,7 +238,7 @@ export function GroupRowMenu({
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && (
-            <p role="alert" className="text-sm text-destructive">
+            <p role="alert" className="text-destructive text-sm">
               {deleteError}
             </p>
           )}
@@ -248,22 +248,22 @@ export function GroupRowMenu({
               variant="destructive"
               disabled={pending}
               onClick={() => {
-                setPending(true)
-                setDeleteError(null)
+                setPending(true);
+                setDeleteError(null);
                 void api
-                  .request("DELETE /groups/{groupId}", { groupId })
+                  .request('DELETE /groups/{groupId}', { groupId })
                   .then(async () => {
-                    setConfirmingDelete(false)
-                    if (active) await navigate("/")
-                    else await revalidate()
+                    setConfirmingDelete(false);
+                    if (active) await navigate('/');
+                    else await revalidate();
                   })
                   .catch(() => {
-                    setDeleteError("Could not delete this group. Try again.")
+                    setDeleteError('Could not delete this group. Try again.');
                   })
-                  .finally(() => setPending(false))
+                  .finally(() => setPending(false));
               }}
             >
-              {pending ? "Deleting…" : "Delete group"}
+              {pending ? 'Deleting…' : 'Delete group'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -281,5 +281,5 @@ export function GroupRowMenu({
         />
       )}
     </>
-  )
+  );
 }

@@ -1,17 +1,17 @@
-import { render, screen, waitFor } from "@testing-library/react"
-import userEvent from "@testing-library/user-event"
-import { useState } from "react"
-import { describe, expect, it, vi } from "vitest"
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
+import { describe, expect, it, vi } from 'vitest';
 
-import { Annotation, AnnotationReference } from "./index"
+import { Annotation, AnnotationReference } from './index';
 
-describe("annotation composition", () => {
-  it("composes an editable annotation card from independent parts", async () => {
-    const user = userEvent.setup()
-    const remove = vi.fn()
+describe('annotation composition', () => {
+  it('composes an editable annotation card from independent parts', async () => {
+    const user = userEvent.setup();
+    const remove = vi.fn();
 
     function Scenario() {
-      const [comment, setComment] = useState("")
+      const [comment, setComment] = useState('');
       return (
         <Annotation.Root>
           <Annotation.Content>
@@ -35,24 +35,24 @@ describe("annotation composition", () => {
             Remove
           </Annotation.Remove>
         </Annotation.Root>
-      )
+      );
     }
 
-    render(<Scenario />)
+    render(<Scenario />);
     await user.type(
-      screen.getByRole("textbox", { name: "Comment on annotation 1" }),
-      "Why only one?"
-    )
-    await user.click(screen.getByRole("button", { name: "Remove annotation" }))
+      screen.getByRole('textbox', { name: 'Comment on annotation 1' }),
+      'Why only one?',
+    );
+    await user.click(screen.getByRole('button', { name: 'Remove annotation' }));
 
     expect(
-      screen.getByRole("textbox", { name: "Comment on annotation 1" })
-    ).toHaveValue("Why only one?")
-    expect(remove).toHaveBeenCalledOnce()
-  })
+      screen.getByRole('textbox', { name: 'Comment on annotation 1' }),
+    ).toHaveValue('Why only one?');
+    expect(remove).toHaveBeenCalledOnce();
+  });
 
-  it("composes an accessible inline annotation reference", async () => {
-    const user = userEvent.setup()
+  it('composes an accessible inline annotation reference', async () => {
+    const user = userEvent.setup();
     render(
       <AnnotationReference.Root>
         <AnnotationReference.Trigger aria-label="Annotation 1: one market">
@@ -64,19 +64,19 @@ describe("annotation composition", () => {
             Why only one?
           </AnnotationReference.Comment>
         </AnnotationReference.Content>
-      </AnnotationReference.Root>
-    )
+      </AnnotationReference.Root>,
+    );
 
-    const trigger = screen.getByRole("button", {
-      name: "Annotation 1: one market",
-    })
-    await user.click(trigger)
+    const trigger = screen.getByRole('button', {
+      name: 'Annotation 1: one market',
+    });
+    await user.click(trigger);
 
-    expect(trigger).toHaveAttribute("aria-expanded", "true")
-    expect(await screen.findByText("one market")).toBeVisible()
-    expect(screen.getByText("Why only one?")).toBeVisible()
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByText('one market')).toBeVisible();
+    expect(screen.getByText('Why only one?')).toBeVisible();
 
-    await user.keyboard("{Escape}")
-    await waitFor(() => expect(screen.queryByText("one market")).toBeNull())
-  })
-})
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByText('one market')).toBeNull());
+  });
+});

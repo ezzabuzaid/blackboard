@@ -207,10 +207,10 @@ export class ParticipantDirectory {
       tracePath,
       plugins: [
         {
-          name: "baseera-file-telemetry",
+          name: 'baseera-file-telemetry',
           create() {
-            const telemetry = createFileTelemetry({ path: tracePath })
-            return { telemetry: () => telemetry }
+            const telemetry = createFileTelemetry({ path: tracePath });
+            return { telemetry: () => telemetry };
           },
         },
       ],

@@ -1,28 +1,27 @@
+import { Annotation } from '@genui/annotation';
 import {
+  Composer,
+  type ComposerItemEntry,
+  type ComposerSubmission,
+  serializeMentionPromptLink,
+  useComposer,
+} from '@genui/input/browser';
+import { VoiceRecordButton } from '@genui/voice';
+import { Field, FieldError, InputGroupButton } from '@zukhruf/shadcn';
+import { CircleStop, SendIcon, X } from 'lucide-react';
+import {
+  type CSSProperties,
+  type ReactNode,
   useEffect,
   useMemo,
   useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+} from 'react';
 
-import { Annotation } from "@genui/annotation";
-import {
-  Composer,
-  serializeMentionPromptLink,
-  useComposer,
-  type ComposerItemEntry,
-  type ComposerSubmission,
-} from "@genui/input/browser";
-import { VoiceRecordButton } from "@genui/voice";
-import { Field, FieldError, InputGroupButton } from "@zukhruf/shadcn";
-import { CircleStop, SendIcon, X } from "lucide-react";
-
-import { api } from "./api";
-import type { GroupActivityState } from "./groupActivity";
-import { useGroupChat } from "./GroupChat";
-import { messageDisplayText } from "./mentions";
-import type { GroupParticipant } from "./groupMessages";
+import { useGroupChat } from './GroupChat';
+import { api } from './api';
+import type { GroupActivityState } from './groupActivity';
+import type { GroupParticipant } from './groupMessages';
+import { messageDisplayText } from './mentions';
 
 export function ChatComposer() {
   const {
@@ -36,28 +35,28 @@ export function ChatComposer() {
     postMessage,
     posting,
     stop,
-  } = useGroupChat()
-  const disabled = apiStatus === "offline" || participants.length === 0
+  } = useGroupChat();
+  const disabled = apiStatus === 'offline' || participants.length === 0;
   const mentionCandidates = useMemo(
     () => chatMentionCandidates(participants),
-    [participants]
-  )
-  const slashCommands = useMemo(() => chatSlashCommands(activity), [activity])
+    [participants],
+  );
+  const slashCommands = useMemo(() => chatSlashCommands(activity), [activity]);
 
   function handleSubmit(event: ComposerSubmission) {
     if (isStopSubmission(event)) {
-      void stop().catch(() => undefined)
-      return
+      void stop().catch(() => undefined);
+      return;
     }
-    const text = event.prompt.trim()
-    if (!text && annotations.length === 0) return
+    const text = event.prompt.trim();
+    if (!text && annotations.length === 0) return;
 
-    clearError()
-    return postMessage(text)
+    clearError();
+    return postMessage(text);
   }
 
   return (
-    <footer className="shrink-0 bg-muted/60">
+    <footer className="bg-muted/60 shrink-0">
       <div className="mx-auto w-full max-w-3xl px-3 py-3 sm:px-5">
         <Field data-invalid={!!error}>
           <Composer.Root
@@ -79,7 +78,7 @@ export function ChatComposer() {
               ))}
             </Composer.Trigger>
             <Composer.Popup />
-            <div className="overflow-hidden rounded-[26px] bg-card">
+            <div className="bg-card overflow-hidden rounded-[26px]">
               <ReferenceChips />
               <div className="flex min-h-13 items-center">
                 <MessageEditor />
@@ -96,7 +95,7 @@ export function ChatComposer() {
         </Field>
       </div>
     </footer>
-  )
+  );
 }
 
 function ReferenceChips() {
@@ -107,23 +106,23 @@ function ReferenceChips() {
     removeAnnotation,
     replyingTo,
     updateAnnotationComment,
-  } = useGroupChat()
+  } = useGroupChat();
 
   return (
     <>
       {replyingTo && (
         <ReferenceChip
-          label={`Replying to ${replyingTo.author === "user" ? "yourself" : replyingTo.author}`}
+          label={`Replying to ${replyingTo.author === 'user' ? 'yourself' : replyingTo.author}`}
           text={messageDisplayText(replyingTo.content)}
           removeLabel="Cancel reply"
           onRemove={cancelReply}
         />
       )}
       {annotations.map((annotation, index) => {
-        const message = messages.find(({ id }) => id === annotation.messageId)
-        if (!message) return null
+        const message = messages.find(({ id }) => id === annotation.messageId);
+        if (!message) return null;
 
-        const label = `${index + 1} · Selected from ${message.author === "user" ? "yourself" : message.author}`
+        const label = `${index + 1} · Selected from ${message.author === 'user' ? 'yourself' : message.author}`;
         return (
           <ReferenceChip
             key={`${annotation.messageId}:${annotation.excerpt}`}
@@ -133,7 +132,7 @@ function ReferenceChips() {
             onRemove={() => removeAnnotation(annotation)}
           >
             <Annotation.Comment
-              value={annotation.comment ?? ""}
+              value={annotation.comment ?? ''}
               maxLength={8_000}
               aria-label={`Comment on ${label}`}
               placeholder="Add a comment"
@@ -143,10 +142,10 @@ function ReferenceChips() {
               }
             />
           </ReferenceChip>
-        )
+        );
       })}
     </>
-  )
+  );
 }
 
 function ReferenceChip({
@@ -156,11 +155,11 @@ function ReferenceChip({
   removeLabel,
   text,
 }: {
-  children?: ReactNode
-  label: string
-  onRemove: () => void
-  removeLabel: string
-  text: string
+  children?: ReactNode;
+  label: string;
+  onRemove: () => void;
+  removeLabel: string;
+  text: string;
 }) {
   return (
     <Annotation.Root>
@@ -182,66 +181,66 @@ function ReferenceChip({
         <X aria-hidden="true" />
       </Annotation.Remove>
     </Annotation.Root>
-  )
+  );
 }
 
 function MessageEditor() {
-  const { apiStatus, participants } = useGroupChat()
+  const { apiStatus, participants } = useGroupChat();
 
   return (
     <Composer.Editor
       placeholder={
-        apiStatus === "offline"
-          ? "Group unavailable"
+        apiStatus === 'offline'
+          ? 'Group unavailable'
           : participants.length === 0
-            ? "Add an agent to start chatting"
-            : "Message the group…"
+            ? 'Add an agent to start chatting'
+            : 'Message the group…'
       }
       style={
         {
-          "--composer-min-height": "2.5rem",
-          "--composer-max-height": "10rem",
-          "--composer-font-size": "15px",
-          "--composer-line-height": "22px",
-          "--composer-padding": "9px 16px",
+          '--composer-min-height': '2.5rem',
+          '--composer-max-height': '10rem',
+          '--composer-font-size': '15px',
+          '--composer-line-height': '22px',
+          '--composer-padding': '9px 16px',
         } as CSSProperties
       }
       className="min-w-0 flex-1 rounded-none! border-0! bg-transparent! text-start focus-within:shadow-none!"
     />
-  )
+  );
 }
 
 function ChatVoiceButton() {
-  const { apiStatus, chatId } = useGroupChat()
-  const { state, actions, meta } = useComposer("ChatVoiceButton")
-  const [transcribing, setTranscribing] = useState(false)
-  const [transcript, setTranscript] = useState<string | null>(null)
+  const { apiStatus, chatId } = useGroupChat();
+  const { state, actions, meta } = useComposer('ChatVoiceButton');
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcript, setTranscript] = useState<string | null>(null);
 
   // insertText is a no-op while the composer is disabled (e.g. during a send),
   // so hold the transcript until the composer can actually receive it.
   useEffect(() => {
-    if (transcript === null || meta.disabled) return
-    const beforeCursor = state.text.slice(0, state.cursor)
+    if (transcript === null || meta.disabled) return;
+    const beforeCursor = state.text.slice(0, state.cursor);
     actions.insertText(
-      beforeCursor && !/\s$/.test(beforeCursor) ? ` ${transcript}` : transcript
-    )
-    setTranscript(null)
-  }, [transcript, meta.disabled, state, actions])
+      beforeCursor && !/\s$/.test(beforeCursor) ? ` ${transcript}` : transcript,
+    );
+    setTranscript(null);
+  }, [transcript, meta.disabled, state, actions]);
 
   return (
     <VoiceRecordButton
-      enabled={apiStatus === "ready"}
+      enabled={apiStatus === 'ready'}
       disabled={meta.disabled}
       isTranscribing={transcribing}
       transcribe={async (audio) => {
-        setTranscribing(true)
+        setTranscribing(true);
         try {
-          return await api.request("POST /chat/{chatId}/transcription", {
+          return await api.request('POST /chat/{chatId}/transcription', {
             chatId,
             audio,
-          })
+          });
         } finally {
-          setTranscribing(false)
+          setTranscribing(false);
         }
       }}
       onTranscription={(text) =>
@@ -268,18 +267,18 @@ function ChatVoiceButton() {
         </InputGroupButton>
       )}
     />
-  )
+  );
 }
 
 function SendButton() {
-  const { annotations, posting } = useGroupChat()
-  const { state, meta } = useComposer("SendButton")
+  const { annotations, posting } = useGroupChat();
+  const { state, meta } = useComposer('SendButton');
   const empty =
     !state.text.trim() &&
     state.localImages.length === 0 &&
     state.remoteImages.length === 0 &&
-    state.pendingPastes.length === 0
-  const sendDisabled = meta.disabled || (empty && annotations.length === 0)
+    state.pendingPastes.length === 0;
+  const sendDisabled = meta.disabled || (empty && annotations.length === 0);
 
   return (
     <Composer.Submit
@@ -288,65 +287,65 @@ function SendButton() {
         <InputGroupButton
           variant="default"
           size="icon-sm"
-          aria-label={posting ? "Sending" : "Send"}
+          aria-label={posting ? 'Sending' : 'Send'}
           className="size-10 rounded-full"
         />
       }
     >
       <SendIcon aria-hidden="true" />
     </Composer.Submit>
-  )
+  );
 }
 
 function SendFailure() {
-  const { error } = useGroupChat()
-  if (!error) return null
+  const { error } = useGroupChat();
+  if (!error) return null;
 
   return (
     <FieldError className="min-h-5 px-1 text-xs">{error.message}</FieldError>
-  )
+  );
 }
 
-const STOP_COMMAND = "stop"
+const STOP_COMMAND = 'stop';
 
 function chatMentionCandidates(
-  participants: readonly GroupParticipant[]
+  participants: readonly GroupParticipant[],
 ): ComposerItemEntry[] {
   return participants.map(({ name }) => ({
     id: `agent:${name}`,
-    trigger: "@",
+    trigger: '@',
     value: name,
     label: name,
-    detail: "",
+    detail: '',
     atomic: true,
     persistsAs: serializeMentionPromptLink(name),
-  }))
+  }));
 }
 
 function chatSlashCommands(
-  activity: Pick<GroupActivityState, "phase">
+  activity: Pick<GroupActivityState, 'phase'>,
 ): ComposerItemEntry[] {
   return [
     {
       id: STOP_COMMAND,
-      trigger: "/",
+      trigger: '/',
       value: STOP_COMMAND,
-      label: "stop",
+      label: 'stop',
       detail: "Stop the agents' current run",
       icon: <CircleStop aria-hidden="true" />,
       atomic: false,
-      availability: activity.phase === "active" ? "enabled" : "disabled",
+      availability: activity.phase === 'active' ? 'enabled' : 'disabled',
     },
-  ]
+  ];
 }
 
 function isStopSubmission(submission: ComposerSubmission) {
-  return submission.command === STOP_COMMAND
+  return submission.command === STOP_COMMAND;
 }
 
 function validateSubmission(event: ComposerSubmission) {
   const hasImage = event.items.some(
-    ({ type }) => type === "local_image" || type === "remote_image"
-  )
-  return hasImage ? "Image attachments aren't supported yet." : null
+    ({ type }) => type === 'local_image' || type === 'remote_image',
+  );
+  return hasImage ? "Image attachments aren't supported yet." : null;
 }

@@ -1,4 +1,5 @@
-import { cn } from "cn"
+import { Annotation } from '@genui/annotation';
+import { reconstructPersistedPromptSelection } from '@genui/input/browser';
 import {
   Bubble,
   BubbleContent,
@@ -13,39 +14,37 @@ import {
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
-} from "@zukhruf/shadcn"
-import { Annotation } from "@genui/annotation"
-import { CornerUpLeft, MessageSquareQuote } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
-import { Streamdown } from "streamdown"
+} from '@zukhruf/shadcn';
+import { cn } from 'cn';
+import { CornerUpLeft, MessageSquareQuote } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Streamdown } from 'streamdown';
 
-import { artifactBaseUrl } from "./artifactLinks"
 import {
   GroupAvatar,
   GroupAvatarStack,
   groupMemberNameClass,
-} from "./GroupAvatar"
-import { useGroupChat } from "./GroupChat"
-import { groupActivityIndicator } from "./groupActivity"
+} from './GroupAvatar';
+import { useGroupChat } from './GroupChat';
+import { artifactBaseUrl } from './artifactLinks';
+import { groupActivityIndicator } from './groupActivity';
 import {
-  groupMessageClusters,
   type GroupMessage,
   type GroupMessageAnnotation,
   type GroupMessageCluster,
-} from "./groupMessages"
-import { reconstructPersistedPromptSelection } from "@genui/input/browser"
-
-import { messageDisplayText, messageSegments } from "./mentions"
+  groupMessageClusters,
+} from './groupMessages';
+import { messageDisplayText, messageSegments } from './mentions';
 import {
+  ParticipantMention,
   messageComponents,
   messageRemarkPlugins,
-  ParticipantMention,
-} from "./messageMarkdown"
+} from './messageMarkdown';
 
 const messageTime = new Intl.DateTimeFormat(undefined, {
-  hour: "numeric",
-  minute: "2-digit",
-})
+  hour: 'numeric',
+  minute: '2-digit',
+});
 
 export function Conversation() {
   const {
@@ -56,41 +55,41 @@ export function Conversation() {
     messages,
     participants,
     replyTo,
-  } = useGroupChat()
+  } = useGroupChat();
   const messagesById = useMemo(
     () => new Map(messages.map((message) => [message.id, message])),
-    [messages]
-  )
+    [messages],
+  );
   const participantNames = useMemo(
     () => participants.map(({ name }) => name),
-    [participants]
-  )
-  const activityIndicator = groupActivityIndicator(activity)
+    [participants],
+  );
+  const activityIndicator = groupActivityIndicator(activity);
   const [selection, setSelection] = useState<{
-    message: GroupMessage
-    excerpt: string
-    x: number
-    y: number
-    below: boolean
-  } | null>(null)
+    message: GroupMessage;
+    excerpt: string;
+    x: number;
+    y: number;
+    below: boolean;
+  } | null>(null);
 
   useEffect(() => {
-    const update = () => setSelection(selectedMessageText(messagesById))
-    document.addEventListener("selectionchange", update)
-    return () => document.removeEventListener("selectionchange", update)
-  }, [messagesById])
+    const update = () => setSelection(selectedMessageText(messagesById));
+    document.addEventListener('selectionchange', update);
+    return () => document.removeEventListener('selectionchange', update);
+  }, [messagesById]);
 
   return (
     <section
       aria-label="Conversation"
-      className="min-h-0 flex-1 bg-muted/60"
+      className="bg-muted/60 min-h-0 flex-1"
       onScrollCapture={() => setSelection(null)}
     >
       <MessageScrollerProvider autoScroll>
         <MessageScroller>
           <MessageScrollerViewport>
             <MessageScrollerContent
-              aria-busy={activity.phase === "active"}
+              aria-busy={activity.phase === 'active'}
               className="mx-auto w-full max-w-3xl justify-end gap-2 px-3 py-4 sm:px-5 sm:py-6"
             >
               {messages.length === 0 && (
@@ -106,9 +105,9 @@ export function Conversation() {
                 <MessageScrollerItem
                   key={cluster.messages[0].id}
                   messageId={cluster.messages[0].id}
-                  className="animate-in duration-300 fade-in slide-in-from-bottom-2"
+                  className="animate-in fade-in slide-in-from-bottom-2 duration-300"
                 >
-                  {cluster.author === "user" ? (
+                  {cluster.author === 'user' ? (
                     <UserMessageCluster
                       cluster={cluster}
                       messagesById={messagesById}
@@ -127,7 +126,7 @@ export function Conversation() {
               ))}
 
               {activityIndicator && (
-                <MessageScrollerItem className="animate-in duration-200 fade-in slide-in-from-bottom-1">
+                <MessageScrollerItem className="animate-in fade-in slide-in-from-bottom-1 duration-200">
                   <GroupActivityIndicator {...activityIndicator} />
                 </MessageScrollerItem>
               )}
@@ -152,9 +151,9 @@ export function Conversation() {
               }}
               onPointerDown={(event) => event.preventDefault()}
               onClick={() => {
-                addAnnotation(selection.message, selection.excerpt)
-                globalThis.getSelection()?.removeAllRanges()
-                setSelection(null)
+                addAnnotation(selection.message, selection.excerpt);
+                globalThis.getSelection()?.removeAllRanges();
+                setSelection(null);
               }}
             />
           }
@@ -164,44 +163,44 @@ export function Conversation() {
         </Annotation.Selection>
       )}
     </section>
-  )
+  );
 }
 
 function GroupActivityIndicator({
   label,
   participants,
 }: {
-  label: string
-  participants: readonly string[]
+  label: string;
+  participants: readonly string[];
 }) {
   return (
     <Message role="status" className="items-start gap-2">
       <GroupAvatarStack members={participants} className="mt-0.5" />
       <Bubble variant="outline" className="max-w-none">
-        <BubbleContent className="relative flex h-8 items-center gap-1 !overflow-visible rounded-[8px] rounded-tl-none !border-transparent !bg-card px-3 before:absolute before:top-0 before:-left-2 before:size-2 before:bg-inherit before:content-[''] before:[clip-path:polygon(100%_0,100%_100%,0_0)]">
-          <span className="mr-1 text-xs text-muted-foreground">{label}</span>
+        <BubbleContent className="!bg-card relative flex h-8 items-center gap-1 !overflow-visible rounded-[8px] rounded-tl-none !border-transparent px-3 before:absolute before:top-0 before:-left-2 before:size-2 before:bg-inherit before:content-[''] before:[clip-path:polygon(100%_0,100%_100%,0_0)]">
+          <span className="text-muted-foreground mr-1 text-xs">{label}</span>
           <span
             aria-hidden="true"
-            className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-300ms] motion-reduce:animate-none"
+            className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-300ms] motion-reduce:animate-none"
           />
           <span
             aria-hidden="true"
-            className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 [animation-delay:-150ms] motion-reduce:animate-none"
+            className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full [animation-delay:-150ms] motion-reduce:animate-none"
           />
           <span
             aria-hidden="true"
-            className="size-1.5 animate-bounce rounded-full bg-muted-foreground/70 motion-reduce:animate-none"
+            className="bg-muted-foreground/70 size-1.5 animate-bounce rounded-full motion-reduce:animate-none"
           />
         </BubbleContent>
       </Bubble>
     </Message>
-  )
+  );
 }
 
 interface MessageClusterProps {
-  cluster: GroupMessageCluster
-  messagesById: ReadonlyMap<string, GroupMessage>
-  onReply?: (message: GroupMessage) => void
+  cluster: GroupMessageCluster;
+  messagesById: ReadonlyMap<string, GroupMessage>;
+  onReply?: (message: GroupMessage) => void;
 }
 
 export function UserMessageCluster({
@@ -220,7 +219,7 @@ export function UserMessageCluster({
                 className={`relative max-w-[65ch] min-w-12 !overflow-visible rounded-[8px] px-[9px] py-1.5 text-sm leading-5 whitespace-pre-wrap ${
                   index === 0
                     ? "rounded-tr-none before:absolute before:top-0 before:-right-2 before:size-2 before:bg-inherit before:content-[''] before:[clip-path:polygon(0_0,100%_0,0_100%)]"
-                    : ""
+                    : ''
                 }`}
               >
                 <ReplyQuote
@@ -240,18 +239,17 @@ export function UserMessageCluster({
                 ))}
                 <p dir="auto" className="text-start [unicode-bidi:plaintext]">
                   <span data-annotation-message-id={message.id}>
-                    {messageSegments(message.content).map(
-                      (segment, index) =>
-                        segment.mention ? (
-                          <ParticipantMention
-                            key={index}
-                            persistedSource={segment.source}
-                          >
-                            {segment.text}
-                          </ParticipantMention>
-                        ) : (
-                          segment.text
-                        )
+                    {messageSegments(message.content).map((segment, index) =>
+                      segment.mention ? (
+                        <ParticipantMention
+                          key={index}
+                          persistedSource={segment.source}
+                        >
+                          {segment.text}
+                        </ParticipantMention>
+                      ) : (
+                        segment.text
+                      ),
                     )}
                   </span>
                   <MessageTimestamp sentAt={message.sentAt} />
@@ -262,7 +260,7 @@ export function UserMessageCluster({
         </BubbleGroup>
       </MessageContent>
     </Message>
-  )
+  );
 }
 
 export function GroupReplyCluster({
@@ -272,8 +270,8 @@ export function GroupReplyCluster({
   onReply,
   participantNames,
 }: MessageClusterProps & {
-  chatId?: string
-  participantNames: readonly string[]
+  chatId?: string;
+  participantNames: readonly string[];
 }) {
   return (
     <Message
@@ -286,10 +284,10 @@ export function GroupReplyCluster({
           <Bubble variant="outline" className="max-w-none" key={message.id}>
             <ReplyButton message={message} align="start" onReply={onReply} />
             <BubbleContent
-              className={`relative max-w-[65ch] !overflow-visible rounded-[8px] !border-transparent !bg-card px-[9px] py-1.5 text-sm leading-5 ${
+              className={`!bg-card relative max-w-[65ch] !overflow-visible rounded-[8px] !border-transparent px-[9px] py-1.5 text-sm leading-5 ${
                 index === 0
                   ? "rounded-tl-none before:absolute before:top-0 before:-left-2 before:size-2 before:bg-inherit before:content-[''] before:[clip-path:polygon(100%_0,100%_100%,0_0)]"
-                  : ""
+                  : ''
               }`}
             >
               {index === 0 && (
@@ -334,7 +332,7 @@ export function GroupReplyCluster({
         ))}
       </BubbleGroup>
     </Message>
-  )
+  );
 }
 
 function ReplyButton({
@@ -342,28 +340,28 @@ function ReplyButton({
   align,
   onReply,
 }: {
-  message: GroupMessage
-  align: "start" | "end"
-  onReply?: (message: GroupMessage) => void
+  message: GroupMessage;
+  align: 'start' | 'end';
+  onReply?: (message: GroupMessage) => void;
 }) {
-  if (!onReply) return null
+  if (!onReply) return null;
   return (
     <Button
       type="button"
       variant="ghost"
       size="icon-xs"
-      aria-label={`Reply to ${message.author === "user" ? "your message" : message.author}`}
+      aria-label={`Reply to ${message.author === 'user' ? 'your message' : message.author}`}
       className={cn(
-        "absolute z-10 text-muted-foreground opacity-60 sm:top-1/2 sm:-translate-y-1/2 sm:bg-transparent sm:opacity-0 sm:group-focus-within/bubble:opacity-100 sm:group-hover/bubble:opacity-100",
-        align === "end"
-          ? "top-1/2 -left-8 -translate-y-1/2"
-          : "top-2 right-2 bg-card/90 sm:-right-8"
+        'text-muted-foreground absolute z-10 opacity-60 sm:top-1/2 sm:-translate-y-1/2 sm:bg-transparent sm:opacity-0 sm:group-focus-within/bubble:opacity-100 sm:group-hover/bubble:opacity-100',
+        align === 'end'
+          ? 'top-1/2 -left-8 -translate-y-1/2'
+          : 'bg-card/90 top-2 right-2 sm:-right-8',
       )}
       onClick={() => onReply(message)}
     >
       <CornerUpLeft aria-hidden="true" />
     </Button>
-  )
+  );
 }
 
 function ReplyQuote({
@@ -371,91 +369,91 @@ function ReplyQuote({
   excerpt,
   comment,
 }: {
-  message?: GroupMessage
-  excerpt?: string
-  comment?: string
+  message?: GroupMessage;
+  excerpt?: string;
+  comment?: string;
 }) {
-  if (!message) return null
+  if (!message) return null;
   return (
-    <div className="mb-1.5 rounded-[6px] border-l-[3px] border-primary bg-muted/70 px-2 py-1">
+    <div className="border-primary bg-muted/70 mb-1.5 rounded-[6px] border-l-[3px] px-2 py-1">
       <p
         className={cn(
-          "text-xs font-medium",
-          message.author === "user" ? "text-primary" : groupMemberNameClass
+          'text-xs font-medium',
+          message.author === 'user' ? 'text-primary' : groupMemberNameClass,
         )}
       >
-        {message.author === "user" ? "You" : message.author}
+        {message.author === 'user' ? 'You' : message.author}
       </p>
       <p
         dir="auto"
-        className="line-clamp-2 text-start text-xs text-muted-foreground [unicode-bidi:plaintext]"
+        className="text-muted-foreground line-clamp-2 text-start text-xs [unicode-bidi:plaintext]"
       >
         {messageDisplayText(excerpt ?? message.content)}
       </p>
-      {comment && <p className="mt-1 text-xs text-foreground">{comment}</p>}
+      {comment && <p className="text-foreground mt-1 text-xs">{comment}</p>}
     </div>
-  )
+  );
 }
 
 function selectedMessageText(messagesById: ReadonlyMap<string, GroupMessage>) {
-  const selection = globalThis.getSelection?.()
+  const selection = globalThis.getSelection?.();
   if (!selection || selection.isCollapsed || selection.rangeCount !== 1) {
-    return null
+    return null;
   }
 
-  const range = selection.getRangeAt(0)
-  const start = annotationTarget(range.startContainer)
-  const end = annotationTarget(range.endContainer)
-  if (!start || start !== end) return null
+  const range = selection.getRangeAt(0);
+  const start = annotationTarget(range.startContainer);
+  const end = annotationTarget(range.endContainer);
+  if (!start || start !== end) return null;
 
-  const message = messagesById.get(start.dataset.annotationMessageId ?? "")
+  const message = messagesById.get(start.dataset.annotationMessageId ?? '');
   // Mentions display as "@Maya" but persist as a link, and the server checks
   // the excerpt against the stored content, so reconstruct the source.
   const excerpt = (
     reconstructPersistedPromptSelection(start, selection) ??
     selection.toString()
-  ).trim()
-  if (!message || !excerpt) return null
+  ).trim();
+  if (!message || !excerpt) return null;
 
-  const bounds = range.getBoundingClientRect()
-  const below = bounds.top < 48
+  const bounds = range.getBoundingClientRect();
+  const below = bounds.top < 48;
   return {
     message,
     excerpt,
     x: Math.max(
       64,
-      Math.min(globalThis.innerWidth - 64, bounds.left + bounds.width / 2)
+      Math.min(globalThis.innerWidth - 64, bounds.left + bounds.width / 2),
     ),
     y: below ? bounds.bottom + 8 : bounds.top - 8,
     below,
-  }
+  };
 }
 
 function annotationTarget(node: Node) {
-  const element = node instanceof Element ? node : node.parentElement
-  return element?.closest<HTMLElement>("[data-annotation-message-id]") ?? null
+  const element = node instanceof Element ? node : node.parentElement;
+  return element?.closest<HTMLElement>('[data-annotation-message-id]') ?? null;
 }
 
 function MessageTimestamp({ sentAt }: { sentAt: string }) {
-  const date = new Date(sentAt)
+  const date = new Date(sentAt);
   return (
     <time
       dir="ltr"
       dateTime={sentAt}
       title={date.toLocaleString()}
-      className="ms-2 inline-block align-baseline text-[10px] leading-none whitespace-nowrap text-muted-foreground"
+      className="text-muted-foreground ms-2 inline-block align-baseline text-[10px] leading-none whitespace-nowrap"
     >
       {messageTime.format(date)}
     </time>
-  )
+  );
 }
 
 interface AssistantMarkdownProps {
-  active: boolean
-  chatId?: string
-  participantNames: readonly string[]
-  text: string
-  responseAnnotations?: readonly GroupMessageAnnotation[]
+  active: boolean;
+  chatId?: string;
+  participantNames: readonly string[];
+  text: string;
+  responseAnnotations?: readonly GroupMessageAnnotation[];
 }
 
 export function AssistantMarkdown({
@@ -467,13 +465,13 @@ export function AssistantMarkdown({
 }: AssistantMarkdownProps) {
   const remarkPlugins = useMemo(
     () => messageRemarkPlugins(chatId, participantNames),
-    [chatId, participantNames]
-  )
+    [chatId, participantNames],
+  );
   const components = useMemo(
     () => messageComponents(responseAnnotations),
-    [responseAnnotations]
-  )
-  const trustedArtifactBaseUrl = chatId ? artifactBaseUrl(chatId) : null
+    [responseAnnotations],
+  );
+  const trustedArtifactBaseUrl = chatId ? artifactBaseUrl(chatId) : null;
   const linkSafety = useMemo(
     () => ({
       enabled: true,
@@ -481,32 +479,32 @@ export function AssistantMarkdown({
         trustedArtifactBaseUrl !== null &&
         url.startsWith(trustedArtifactBaseUrl),
     }),
-    [trustedArtifactBaseUrl]
-  )
+    [trustedArtifactBaseUrl],
+  );
 
   return (
     <Streamdown
       className="contents space-y-2 [&>p:last-child]:inline"
       allowedTags={{
-        "codex-annotation": ["index"],
-        "participant-mention": [],
+        'codex-annotation': ['index'],
+        'participant-mention': [],
       }}
       components={components}
       linkSafety={linkSafety}
-      mode={active ? "streaming" : "static"}
+      mode={active ? 'streaming' : 'static'}
       remarkPlugins={remarkPlugins}
     >
       {text}
     </Streamdown>
-  )
+  );
 }
 
 function WelcomeMessage({
   apiStatus,
   participants,
 }: {
-  apiStatus: "ready" | "offline"
-  participants: readonly string[]
+  apiStatus: 'ready' | 'offline';
+  participants: readonly string[];
 }) {
   return (
     <Message className="items-start gap-3 max-sm:flex-col">
@@ -515,14 +513,14 @@ function WelcomeMessage({
         <MessageHeader className="text-foreground">Baseera</MessageHeader>
         <Bubble variant="ghost">
           <BubbleContent className="max-w-[65ch] text-base leading-relaxed whitespace-pre-wrap">
-            {apiStatus === "offline"
-              ? "The group is unavailable. Try again when the API is online."
+            {apiStatus === 'offline'
+              ? 'The group is unavailable. Try again when the API is online.'
               : participants.length === 0
-                ? "No agents yet. Add an agent folder with identity.json, SOUL.md, AGENTS.md, and MEMORY.md to start."
-                : "Message the group. Specialists reply only when they have something useful to add."}
+                ? 'No agents yet. Add an agent folder with identity.json, SOUL.md, AGENTS.md, and MEMORY.md to start.'
+                : 'Message the group. Specialists reply only when they have something useful to add.'}
           </BubbleContent>
         </Bubble>
       </MessageContent>
     </Message>
-  )
+  );
 }

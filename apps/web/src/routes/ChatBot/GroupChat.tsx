@@ -1,63 +1,63 @@
 import {
-  createContext,
   type PropsWithChildren,
+  createContext,
   useContext,
   useEffect,
   useState,
-} from "react"
+} from 'react';
 
-import { api, apiUrl } from "./api"
+import { api, apiUrl } from './api';
 import {
   readChatReferenceDraft,
   writeChatReferenceDraft,
-} from "./chatReferenceDraft"
+} from './chatReferenceDraft';
 import {
+  type GroupChatState,
+  type GroupMessage,
+  type GroupMessageAnnotation,
   addGroupMessage,
   addGroupMessageAnnotation,
   groupChatEventFromStreamPart,
   isGroupChatState,
   isGroupMessage,
   reduceGroupChat,
-  type GroupChatState,
-  type GroupMessage,
-  type GroupMessageAnnotation,
   updateGroupMessageAnnotationComment,
-} from "./groupMessages"
+} from './groupMessages';
 
 interface GroupChat extends GroupChatState {
-  chatId: string
-  apiStatus: "ready" | "offline"
-  posting: boolean
-  stopping: boolean
-  replyingTo: GroupMessage | null
-  annotations: readonly GroupMessageAnnotation[]
-  error: Error | null
-  clearError(): void
-  replyTo(message: GroupMessage): void
-  addAnnotation(message: GroupMessage, excerpt: string): void
+  chatId: string;
+  apiStatus: 'ready' | 'offline';
+  posting: boolean;
+  stopping: boolean;
+  replyingTo: GroupMessage | null;
+  annotations: readonly GroupMessageAnnotation[];
+  error: Error | null;
+  clearError(): void;
+  replyTo(message: GroupMessage): void;
+  addAnnotation(message: GroupMessage, excerpt: string): void;
   updateAnnotationComment(
     annotation: GroupMessageAnnotation,
-    comment: string
-  ): void
-  removeAnnotation(annotation: GroupMessageAnnotation): void
-  cancelReply(): void
-  postMessage(content: string): Promise<void>
-  stop(): Promise<void>
+    comment: string,
+  ): void;
+  removeAnnotation(annotation: GroupMessageAnnotation): void;
+  cancelReply(): void;
+  postMessage(content: string): Promise<void>;
+  stop(): Promise<void>;
 }
 
-const GroupChatContext = createContext<GroupChat | null>(null)
+const GroupChatContext = createContext<GroupChat | null>(null);
 
 export function useGroupChat() {
-  const chat = useContext(GroupChatContext)
-  if (!chat) throw new Error("Group chat is missing")
-  return chat
+  const chat = useContext(GroupChatContext);
+  if (!chat) throw new Error('Group chat is missing');
+  return chat;
 }
 
 interface GroupChatProviderProps extends PropsWithChildren {
-  chatId: string
-  apiStatus: "ready" | "offline"
-  initialState: GroupChatState
-  streamPath: string | null
+  chatId: string;
+  apiStatus: 'ready' | 'offline';
+  initialState: GroupChatState;
+  streamPath: string | null;
 }
 
 export function GroupChatProvider({
@@ -67,111 +67,111 @@ export function GroupChatProvider({
   streamPath,
   children,
 }: GroupChatProviderProps) {
-  const [initialReferences] = useState(() => readChatReferenceDraft(chatId))
-  const [chat, setChat] = useState(initialState)
-  const [posting, setPosting] = useState(false)
-  const [stopping, setStopping] = useState(false)
+  const [initialReferences] = useState(() => readChatReferenceDraft(chatId));
+  const [chat, setChat] = useState(initialState);
+  const [posting, setPosting] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [replyingTo, setReplyingTo] = useState<GroupMessage | null>(() =>
     initialReferences.replyToMessageId
       ? (initialState.messages.find(
-          ({ id }) => id === initialReferences.replyToMessageId
+          ({ id }) => id === initialReferences.replyToMessageId,
         ) ?? null)
-      : null
-  )
+      : null,
+  );
   const [annotations, setAnnotations] = useState<
     readonly GroupMessageAnnotation[]
   >(() =>
     initialReferences.annotations.filter((annotation) => {
       const target = initialState.messages.find(
-        ({ id }) => id === annotation.messageId
-      )
-      return target?.content.includes(annotation.excerpt)
-    })
-  )
-  const [error, setError] = useState<Error | null>(null)
+        ({ id }) => id === annotation.messageId,
+      );
+      return target?.content.includes(annotation.excerpt);
+    }),
+  );
+  const [error, setError] = useState<Error | null>(null);
 
   useEffect(() => {
-    if (!streamPath) return
+    if (!streamPath) return;
     const source = new EventSource(`${apiUrl}${streamPath}`, {
       withCredentials: true,
-    })
+    });
     const receive = ({ data }: MessageEvent<string>) => {
       try {
-        const event = groupChatEventFromStreamPart(JSON.parse(data))
+        const event = groupChatEventFromStreamPart(JSON.parse(data));
         if (event) {
-          setChat((current) => reduceGroupChat(current, event))
+          setChat((current) => reduceGroupChat(current, event));
         }
       } catch {
         // A malformed event cannot advance the cursor.
       }
-    }
-    source.addEventListener("message", receive)
-    return () => source.close()
-  }, [streamPath])
+    };
+    source.addEventListener('message', receive);
+    return () => source.close();
+  }, [streamPath]);
 
   async function postMessage(content: string) {
-    if (apiStatus === "offline") throw new Error("The group is unavailable.")
+    if (apiStatus === 'offline') throw new Error('The group is unavailable.');
     if (chat.participants.length === 0) {
-      throw new Error("Add an agent before sending a message.")
+      throw new Error('Add an agent before sending a message.');
     }
 
-    setPosting(true)
-    setError(null)
+    setPosting(true);
+    setError(null);
     try {
-      const body: unknown = await api.request("POST /chat/{chatId}/messages", {
+      const body: unknown = await api.request('POST /chat/{chatId}/messages', {
         chatId,
         id: crypto.randomUUID(),
         content,
         ...(replyingTo ? { replyToMessageId: replyingTo.id } : {}),
         ...(annotations.length > 0 ? { annotations: [...annotations] } : {}),
-      })
+      });
       const message =
-        isRecord(body) && isGroupMessage(body.message) ? body.message : null
+        isRecord(body) && isGroupMessage(body.message) ? body.message : null;
       if (!message) {
-        throw new Error("The group could not receive your message.")
+        throw new Error('The group could not receive your message.');
       }
       setChat((current) => ({
         ...current,
         messages: addGroupMessage(current.messages, message),
-      }))
-      setReplyingTo(null)
-      setAnnotations([])
+      }));
+      setReplyingTo(null);
+      setAnnotations([]);
       writeChatReferenceDraft(chatId, {
         replyToMessageId: null,
         annotations: [],
-      })
+      });
     } catch (cause) {
       const nextError =
         cause instanceof Error
           ? cause
-          : new Error("The group could not receive your message.")
-      setError(nextError)
-      throw nextError
+          : new Error('The group could not receive your message.');
+      setError(nextError);
+      throw nextError;
     } finally {
-      setPosting(false)
+      setPosting(false);
     }
   }
 
   async function stop() {
-    setStopping(true)
-    setError(null)
+    setStopping(true);
+    setError(null);
     try {
-      const state: unknown = await api.request("POST /chat/{chatId}/stop", {
+      const state: unknown = await api.request('POST /chat/{chatId}/stop', {
         chatId,
-      })
+      });
       if (!isGroupChatState(state)) {
-        throw new Error("The group could not be stopped.")
+        throw new Error('The group could not be stopped.');
       }
-      setChat(state)
+      setChat(state);
     } catch (cause) {
       const nextError =
         cause instanceof Error
           ? cause
-          : new Error("The group could not be stopped.")
-      setError(nextError)
-      throw nextError
+          : new Error('The group could not be stopped.');
+      setError(nextError);
+      throw nextError;
     } finally {
-      setStopping(false)
+      setStopping(false);
     }
   }
 
@@ -188,56 +188,56 @@ export function GroupChatProvider({
         error,
         clearError: () => setError(null),
         replyTo: (message) => {
-          setReplyingTo(message)
+          setReplyingTo(message);
           writeChatReferenceDraft(chatId, {
             replyToMessageId: message.id,
             annotations: [...annotations],
-          })
+          });
         },
         addAnnotation: (message, excerpt) =>
           setAnnotations((current) => {
             const next = addGroupMessageAnnotation(current, {
               messageId: message.id,
               excerpt,
-            })
+            });
             writeChatReferenceDraft(chatId, {
               replyToMessageId: replyingTo?.id ?? null,
               annotations: [...next],
-            })
-            return next
+            });
+            return next;
           }),
         updateAnnotationComment: (annotation, comment) =>
           setAnnotations((current) => {
             const next = updateGroupMessageAnnotationComment(
               current,
               annotation,
-              comment
-            )
+              comment,
+            );
             writeChatReferenceDraft(chatId, {
               replyToMessageId: replyingTo?.id ?? null,
               annotations: next,
-            })
-            return next
+            });
+            return next;
           }),
         removeAnnotation: (annotation) =>
           setAnnotations((current) => {
             const next = current.filter(
               ({ messageId, excerpt }) =>
                 messageId !== annotation.messageId ||
-                excerpt !== annotation.excerpt
-            )
+                excerpt !== annotation.excerpt,
+            );
             writeChatReferenceDraft(chatId, {
               replyToMessageId: replyingTo?.id ?? null,
               annotations: [...next],
-            })
-            return next
+            });
+            return next;
           }),
         cancelReply: () => {
-          setReplyingTo(null)
+          setReplyingTo(null);
           writeChatReferenceDraft(chatId, {
             replyToMessageId: null,
             annotations: [...annotations],
-          })
+          });
         },
         postMessage,
         stop,
@@ -245,9 +245,9 @@ export function GroupChatProvider({
     >
       {children}
     </GroupChatContext.Provider>
-  )
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
+  return typeof value === 'object' && value !== null;
 }

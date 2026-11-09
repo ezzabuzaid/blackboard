@@ -1,20 +1,20 @@
-import type { ReactNode } from "react"
+import type { ReactNode } from 'react';
 
 import {
   type UseVoiceTranscriptionParams,
   useVoiceTranscription,
-} from "./use-voice-transcription"
+} from './use-voice-transcription';
 
 export interface VoiceRecordButtonRenderProps {
-  icon: ReactNode
-  label: string
-  isRecording: boolean
-  disabled: boolean
-  onClick: () => void
+  icon: ReactNode;
+  label: string;
+  isRecording: boolean;
+  disabled: boolean;
+  onClick: () => void;
 }
 
 export interface VoiceRecordButtonProps extends UseVoiceTranscriptionParams {
-  renderButton: (props: VoiceRecordButtonRenderProps) => ReactNode
+  renderButton: (props: VoiceRecordButtonRenderProps) => ReactNode;
 }
 
 export function VoiceRecordButton({
@@ -39,10 +39,10 @@ export function VoiceRecordButton({
     transcribe,
     isTranscribing,
     onTranscription,
-  })
+  });
 
-  const isBusy = isRecording || isTranscribing
-  if (!enabled && !isBusy) return null
+  const isBusy = isRecording || isTranscribing;
+  if (!enabled && !isBusy) return null;
 
   return (
     <>
@@ -52,11 +52,11 @@ export function VoiceRecordButton({
         <span
           role="status"
           aria-live="polite"
-          className="max-w-48 truncate text-xs text-destructive"
+          className="text-destructive max-w-48 truncate text-xs"
         >
           {error}
         </span>
       )}
     </>
-  )
+  );
 }

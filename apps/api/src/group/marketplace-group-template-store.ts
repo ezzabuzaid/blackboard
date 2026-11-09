@@ -1,53 +1,53 @@
-import { randomUUID } from "node:crypto"
-import { DatabaseSync } from "node:sqlite"
-import { pathToFileURL } from "node:url"
+import { randomUUID } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 
-import { Declaration } from "@zukhruf/sqlite-drift"
+import { Declaration } from '@zukhruf/sqlite-drift';
 
-import type { GroupTemplate } from "./group-template-catalog.js"
+import type { GroupTemplate } from './group-template-catalog.js';
 
-export type MarketplaceGroupTemplateInput = Omit<GroupTemplate, "id">
+export type MarketplaceGroupTemplateInput = Omit<GroupTemplate, 'id'>;
 
 export interface MarketplaceGroupTemplate {
-  id: string
-  sourceGroupId: string | null
-  publisherName: string
-  name: string
-  category: string
-  outcome: string
-  agents: readonly { agentId: string; responsibility: string }[]
-  published: boolean
+  id: string;
+  sourceGroupId: string | null;
+  publisherName: string;
+  name: string;
+  category: string;
+  outcome: string;
+  agents: readonly { agentId: string; responsibility: string }[];
+  published: boolean;
 }
 
 type MarketplaceGroupTemplateRow = {
-  id: string
-  source_group_id: string | null
-  publisher_name: string
-  name: string
-  category: string
-  outcome: string
-  agents: string
-  published: number
-}
+  id: string;
+  source_group_id: string | null;
+  publisher_name: string;
+  name: string;
+  category: string;
+  outcome: string;
+  agents: string;
+  published: number;
+};
 
 export class MarketplaceGroupTemplateInputError extends Error {
   constructor(message: string) {
-    super(message)
-    this.name = "MarketplaceGroupTemplateInputError"
+    super(message);
+    this.name = 'MarketplaceGroupTemplateInputError';
   }
 }
 
 export class MarketplaceGroupTemplateStore implements Disposable {
-  readonly #database: DatabaseSync
-  readonly #agentIds: ReadonlySet<string>
+  readonly #database: DatabaseSync;
+  readonly #agentIds: ReadonlySet<string>;
 
   constructor(
     databasePath: string,
     authDatabasePath: string,
-    agentIds: Iterable<string>
+    agentIds: Iterable<string>,
   ) {
-    this.#database = new DatabaseSync(databasePath)
-    this.#agentIds = new Set(agentIds)
+    this.#database = new DatabaseSync(databasePath);
+    this.#agentIds = new Set(agentIds);
     const templates = new Declaration(
       [
         `CREATE TABLE marketplace_group_templates (
@@ -65,58 +65,58 @@ export class MarketplaceGroupTemplateStore implements Disposable {
       ON marketplace_group_templates (publisher_id, source_group_id)
       WHERE source_group_id IS NOT NULL`,
       ],
-      { rows: "keep" }
-    )
-    if (templates.drift(this.#database) === "stale") {
+      { rows: 'keep' },
+    );
+    if (templates.drift(this.#database) === 'stale') {
       // Tables made before publisher_name was NOT NULL hold rows without it.
       // Each takes its publisher's name from better-auth; a template whose
       // publisher has no user left is deleted.
       this.#database
-        .prepare("ATTACH DATABASE ? AS auth")
-        .run(`${pathToFileURL(authDatabasePath).href}?mode=ro`)
+        .prepare('ATTACH DATABASE ? AS auth')
+        .run(`${pathToFileURL(authDatabasePath).href}?mode=ro`);
       try {
         const hasPublisherName = this.#database
           .prepare(
-            "SELECT 1 FROM pragma_table_info('marketplace_group_templates') WHERE name = 'publisher_name'"
+            "SELECT 1 FROM pragma_table_info('marketplace_group_templates') WHERE name = 'publisher_name'",
           )
-          .get()
+          .get();
         if (!hasPublisherName) {
           this.#database.exec(
-            "ALTER TABLE marketplace_group_templates ADD COLUMN publisher_name TEXT"
-          )
+            'ALTER TABLE marketplace_group_templates ADD COLUMN publisher_name TEXT',
+          );
         }
         this.#database.exec(`
           UPDATE marketplace_group_templates
           SET publisher_name = (SELECT name FROM auth.user WHERE id = publisher_id)
           WHERE publisher_name IS NULL;
           DELETE FROM marketplace_group_templates WHERE publisher_name IS NULL;
-        `)
+        `);
       } finally {
-        this.#database.exec("DETACH DATABASE auth")
+        this.#database.exec('DETACH DATABASE auth');
       }
     }
-    templates.apply(this.#database)
+    templates.apply(this.#database);
   }
 
   create(
     publisherId: string,
     publisherName: string,
     input: MarketplaceGroupTemplateInput,
-    sourceGroupId: string | null = null
+    sourceGroupId: string | null = null,
   ): MarketplaceGroupTemplate {
-    const definition = this.#normalize(input)
+    const definition = this.#normalize(input);
     const template = {
       id: randomUUID(),
       sourceGroupId,
       publisherName,
       ...definition,
       published: false,
-    }
+    };
     this.#database
       .prepare(
         `INSERT INTO marketplace_group_templates
            (id, publisher_id, publisher_name, source_group_id, name, category, outcome, agents, published)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`,
       )
       .run(
         template.id,
@@ -126,22 +126,22 @@ export class MarketplaceGroupTemplateStore implements Disposable {
         template.name,
         template.category,
         template.outcome,
-        JSON.stringify(template.agents)
-      )
-    return template
+        JSON.stringify(template.agents),
+      );
+    return template;
   }
 
   update(
     publisherId: string,
     id: string,
-    input: MarketplaceGroupTemplateInput
+    input: MarketplaceGroupTemplateInput,
   ): MarketplaceGroupTemplate | null {
-    const template = this.#normalize(input)
+    const template = this.#normalize(input);
     const result = this.#database
       .prepare(
         `UPDATE marketplace_group_templates
          SET name = ?, category = ?, outcome = ?, agents = ?
-         WHERE publisher_id = ? AND id = ?`
+         WHERE publisher_id = ? AND id = ?`,
       )
       .run(
         template.name,
@@ -149,9 +149,9 @@ export class MarketplaceGroupTemplateStore implements Disposable {
         template.outcome,
         JSON.stringify(template.agents),
         publisherId,
-        id
-      )
-    return result.changes ? this.#get(publisherId, id) : null
+        id,
+      );
+    return result.changes ? this.#get(publisherId, id) : null;
   }
 
   published(): readonly MarketplaceGroupTemplate[] {
@@ -160,10 +160,10 @@ export class MarketplaceGroupTemplateStore implements Disposable {
         `SELECT id, source_group_id, publisher_name, name, category, outcome, agents, published
          FROM marketplace_group_templates
          WHERE published = 1
-         ORDER BY rowid`
+         ORDER BY rowid`,
       )
-      .all() as MarketplaceGroupTemplateRow[]
-    return rows.map(toMarketplaceGroupTemplate)
+      .all() as MarketplaceGroupTemplateRow[];
+    return rows.map(toMarketplaceGroupTemplate);
   }
 
   owns(publisherId: string, id: string) {
@@ -172,10 +172,10 @@ export class MarketplaceGroupTemplateStore implements Disposable {
         .prepare(
           `SELECT 1
            FROM marketplace_group_templates
-           WHERE publisher_id = ? AND id = ?`
+           WHERE publisher_id = ? AND id = ?`,
         )
-        .get(publisherId, id)
-    )
+        .get(publisherId, id),
+    );
   }
 
   findPublished(id: string): MarketplaceGroupTemplate | null {
@@ -183,33 +183,33 @@ export class MarketplaceGroupTemplateStore implements Disposable {
       .prepare(
         `SELECT id, source_group_id, publisher_name, name, category, outcome, agents, published
          FROM marketplace_group_templates
-         WHERE id = ? AND published = 1`
+         WHERE id = ? AND published = 1`,
       )
-      .get(id) as MarketplaceGroupTemplateRow | undefined
-    return row ? toMarketplaceGroupTemplate(row) : null
+      .get(id) as MarketplaceGroupTemplateRow | undefined;
+    return row ? toMarketplaceGroupTemplate(row) : null;
   }
 
   findBySourceGroup(
     publisherId: string,
-    sourceGroupId: string
+    sourceGroupId: string,
   ): MarketplaceGroupTemplate | null {
     const row = this.#database
       .prepare(
         `SELECT id, source_group_id, publisher_name, name, category, outcome, agents, published
          FROM marketplace_group_templates
-         WHERE publisher_id = ? AND source_group_id = ?`
+         WHERE publisher_id = ? AND source_group_id = ?`,
       )
       .get(publisherId, sourceGroupId) as
-      MarketplaceGroupTemplateRow | undefined
-    return row ? toMarketplaceGroupTemplate(row) : null
+      MarketplaceGroupTemplateRow | undefined;
+    return row ? toMarketplaceGroupTemplate(row) : null;
   }
 
   publish(publisherId: string, id: string): MarketplaceGroupTemplate | null {
-    return this.#setPublished(publisherId, id, true)
+    return this.#setPublished(publisherId, id, true);
   }
 
   unpublish(publisherId: string, id: string): MarketplaceGroupTemplate | null {
-    return this.#setPublished(publisherId, id, false)
+    return this.#setPublished(publisherId, id, false);
   }
 
   removeSourceGroup(publisherId: string, sourceGroupId: string) {
@@ -217,19 +217,19 @@ export class MarketplaceGroupTemplateStore implements Disposable {
       .prepare(
         `SELECT published
          FROM marketplace_group_templates
-         WHERE publisher_id = ? AND source_group_id = ?`
+         WHERE publisher_id = ? AND source_group_id = ?`,
       )
-      .get(publisherId, sourceGroupId) as { published: number } | undefined
-    if (!row) return false
+      .get(publisherId, sourceGroupId) as { published: number } | undefined;
+    if (!row) return false;
 
     const statement = row.published
       ? `UPDATE marketplace_group_templates
          SET source_group_id = NULL
          WHERE publisher_id = ? AND source_group_id = ?`
       : `DELETE FROM marketplace_group_templates
-         WHERE publisher_id = ? AND source_group_id = ?`
-    this.#database.prepare(statement).run(publisherId, sourceGroupId)
-    return true
+         WHERE publisher_id = ? AND source_group_id = ?`;
+    this.#database.prepare(statement).run(publisherId, sourceGroupId);
+    return true;
   }
 
   delete(publisherId: string, id: string) {
@@ -237,25 +237,25 @@ export class MarketplaceGroupTemplateStore implements Disposable {
       this.#database
         .prepare(
           `DELETE FROM marketplace_group_templates
-           WHERE publisher_id = ? AND id = ? AND source_group_id IS NULL`
+           WHERE publisher_id = ? AND id = ? AND source_group_id IS NULL`,
         )
         .run(publisherId, id).changes > 0
-    )
+    );
   }
 
   #setPublished(
     publisherId: string,
     id: string,
-    published: boolean
+    published: boolean,
   ): MarketplaceGroupTemplate | null {
     const result = this.#database
       .prepare(
         `UPDATE marketplace_group_templates
          SET published = ?
-         WHERE publisher_id = ? AND id = ?`
+         WHERE publisher_id = ? AND id = ?`,
       )
-      .run(Number(published), publisherId, id)
-    return result.changes ? this.#get(publisherId, id) : null
+      .run(Number(published), publisherId, id);
+    return result.changes ? this.#get(publisherId, id) : null;
   }
 
   #get(publisherId: string, id: string): MarketplaceGroupTemplate | null {
@@ -263,72 +263,72 @@ export class MarketplaceGroupTemplateStore implements Disposable {
       .prepare(
         `SELECT id, source_group_id, publisher_name, name, category, outcome, agents, published
          FROM marketplace_group_templates
-         WHERE publisher_id = ? AND id = ?`
+         WHERE publisher_id = ? AND id = ?`,
       )
-      .get(publisherId, id) as MarketplaceGroupTemplateRow | undefined
+      .get(publisherId, id) as MarketplaceGroupTemplateRow | undefined;
 
-    return row ? toMarketplaceGroupTemplate(row) : null
+    return row ? toMarketplaceGroupTemplate(row) : null;
   }
 
   #normalize(
-    input: MarketplaceGroupTemplateInput
+    input: MarketplaceGroupTemplateInput,
   ): MarketplaceGroupTemplateInput {
-    const name = input.name.trim()
+    const name = input.name.trim();
     if (!name || name.length > 100) {
       throw new MarketplaceGroupTemplateInputError(
-        "Template name must contain between 1 and 100 characters"
-      )
+        'Template name must contain between 1 and 100 characters',
+      );
     }
 
-    const category = input.category.trim()
+    const category = input.category.trim();
     if (!category) {
       throw new MarketplaceGroupTemplateInputError(
-        "Template category is required"
-      )
+        'Template category is required',
+      );
     }
-    const outcome = input.outcome.trim()
+    const outcome = input.outcome.trim();
     if (!outcome) {
       throw new MarketplaceGroupTemplateInputError(
-        "Template outcome is required"
-      )
+        'Template outcome is required',
+      );
     }
 
     const agents = input.agents.map(({ agentId, responsibility }) => ({
       agentId,
       responsibility: responsibility.trim(),
-    }))
+    }));
     if (agents.length < 1 || agents.length > 8) {
       throw new MarketplaceGroupTemplateInputError(
-        "Templates require between 1 and 8 agents"
-      )
+        'Templates require between 1 and 8 agents',
+      );
     }
     if (new Set(agents.map(({ agentId }) => agentId)).size !== agents.length) {
       throw new MarketplaceGroupTemplateInputError(
-        "Template agent IDs must be unique"
-      )
+        'Template agent IDs must be unique',
+      );
     }
-    const unknown = agents.find(({ agentId }) => !this.#agentIds.has(agentId))
+    const unknown = agents.find(({ agentId }) => !this.#agentIds.has(agentId));
     if (unknown) {
       throw new MarketplaceGroupTemplateInputError(
-        `Unknown agent ID "${unknown.agentId}"`
-      )
+        `Unknown agent ID "${unknown.agentId}"`,
+      );
     }
     if (agents.some(({ responsibility }) => !responsibility)) {
       throw new MarketplaceGroupTemplateInputError(
-        "Template agent responsibilities are required"
-      )
+        'Template agent responsibilities are required',
+      );
     }
 
-    return { name, category, outcome, agents }
+    return { name, category, outcome, agents };
   }
 
   [Symbol.dispose]() {
-    this.#database.close()
+    this.#database.close();
   }
 }
 
 function toMarketplaceGroupTemplate(
-  row: MarketplaceGroupTemplateRow
+  row: MarketplaceGroupTemplateRow,
 ): MarketplaceGroupTemplate {
   return {
     id: row.id,
@@ -339,5 +339,5 @@ function toMarketplaceGroupTemplate(
     outcome: row.outcome,
     agents: JSON.parse(row.agents),
     published: Boolean(row.published),
-  }
+  };
 }
