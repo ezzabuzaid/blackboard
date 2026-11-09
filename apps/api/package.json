@@ -21,6 +21,7 @@
     "@opentelemetry/api": "1.9.1",
     "@sdk-it/hono": "0.46.1",
     "@zukhruf/async": "^0.8.10",
+    "@zukhruf/docker": "^0.8.10",
     "@zukhruf/fs": "^0.8.10",
     "@zukhruf/sqlite-drift": "^0.3.46",
     "@zukhruf/sqlite-open": "^0.8.10",

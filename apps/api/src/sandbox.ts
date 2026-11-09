@@ -11,6 +11,7 @@ import {
   type ConversationId,
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
+import { Docker } from '@zukhruf/docker';
 import { isErrno } from '@zukhruf/fs';
 import pMemoize from 'p-memoize';
 
@@ -18,6 +19,7 @@ import type { ParticipantMount } from './group/participants/index.js';
 
 const COMMAND_TIMEOUT_MS = 300_000;
 const SANDBOX_IMAGE = 'node:24-bookworm-slim';
+const SANDBOX_LABEL = 'baseera.sandbox';
 
 interface GroupSandboxesOptions {
   dataDirectory: string;
@@ -82,8 +84,10 @@ export class GroupSandboxes implements AsyncDisposable {
         name,
         image: SANDBOX_IMAGE,
         network: { mode: 'none' },
+        labels: { [SANDBOX_LABEL]: name },
       }))
     ).dispose();
+    await this.#containersGone(name);
     await rm(root, { recursive: true, force: true });
   }
 
@@ -98,6 +102,24 @@ export class GroupSandboxes implements AsyncDisposable {
           () => undefined,
         ),
       ),
+    );
+  }
+
+  // dispose() of @deepagents/context 7.5.2 stops a --rm container and resolves
+  // before the engine removes it (backlog #4098). Until then Docker Desktop's VM
+  // holds the bind mount points, and rmdir of one on macOS fails with EACCES.
+  // Delete this wait when the package waits for the removal.
+  async #containersGone(name: string) {
+    await using docker = await Docker.connect({ clock: globalThis });
+    const containers = await docker.containers.list({
+      all: true,
+      filters: { label: [`${SANDBOX_LABEL}=${name}`] },
+    });
+    await Promise.all(
+      containers.map(async ({ Id }) => {
+        const container = await docker.containers.find(Id);
+        await container?.remove({ force: true });
+      }),
     );
   }
 
@@ -161,6 +183,7 @@ export class GroupSandboxes implements AsyncDisposable {
       image: SANDBOX_IMAGE,
       commandTimeout: COMMAND_TIMEOUT_MS,
       network: { mode: 'none' },
+      labels: { [SANDBOX_LABEL]: name },
       security:
         process.getuid && process.getgid
           ? { user: `${process.getuid()}:${process.getgid()}` }
