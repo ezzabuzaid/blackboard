@@ -6,8 +6,8 @@ import { createGroupDeletion } from './delete-group.js';
 test('group deletion is ordered, joined, and retryable', async () => {
   const calls: string[] = [];
   let clearAttempts = 0;
-  let releaseClear!: () => void;
   const clearStarted = Promise.withResolvers<void>();
+  const clearReleased = Promise.withResolvers<void>();
   const deletion = createGroupDeletion({
     exists: (userId, groupId) => userId === 'user-1' && groupId === 'group-1',
     clearRuntime: async () => {
@@ -15,9 +15,7 @@ test('group deletion is ordered, joined, and retryable', async () => {
       clearAttempts++;
       if (clearAttempts === 1) {
         clearStarted.resolve();
-        await new Promise<void>((resolve) => {
-          releaseClear = resolve;
-        });
+        await clearReleased.promise;
         throw new Error('clear failed');
       }
     },
@@ -42,7 +40,7 @@ test('group deletion is ordered, joined, and retryable', async () => {
   assert.equal(deletion.hasGroup('group-1'), true);
   const duplicate = deletion.delete('user-1', 'group-1');
   assert.strictEqual(duplicate, first);
-  releaseClear();
+  clearReleased.resolve();
   await assert.rejects(first, /clear failed/);
   await assert.rejects(duplicate, /clear failed/);
   assert.equal(deletion.has('user-1', 'group-1'), false);

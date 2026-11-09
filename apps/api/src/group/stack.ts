@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 
 import {
@@ -72,6 +72,6 @@ function queueSlug(name: string) {
     .toLocaleLowerCase('en')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  const digest = createHash('sha256').update(name).digest('hex').slice(0, 8);
+  const digest = hash('sha256', name).slice(0, 8);
   return base ? `${base}-${digest}` : digest;
 }

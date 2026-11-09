@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { hash } from 'node:crypto';
 import { mkdirSync, readdirSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -233,7 +233,7 @@ function directoryNames(directory: string) {
 }
 
 function userNamespace(userId: string) {
-  return createHash('sha256').update(userId).digest('hex');
+  return hash('sha256', userId);
 }
 
 function isIdentity(value: unknown): value is { name: string } {

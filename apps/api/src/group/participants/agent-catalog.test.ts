@@ -52,7 +52,7 @@ test('catalog entries cannot share a display name', async () => {
   assert.throws(
     () => loadAgentCatalog(root.path),
     (error: unknown) =>
-      error instanceof Error &&
+      Error.isError(error) &&
       /share the display name/.test(error.message) &&
       error.message.includes('"paul-graham"') &&
       error.message.includes('"paul-graham-essays"'),
