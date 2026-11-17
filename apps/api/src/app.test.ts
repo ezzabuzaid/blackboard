@@ -2368,64 +2368,68 @@ test('development CORS accepts a local fallback port', async () => {
   );
 });
 
-test('publishes a group reply before slower members finish', async () => {
-  const releaseSlowMember = Promise.withResolvers<void>();
-  const fastMemberContinued = Promise.withResolvers<void>();
+test(
+  'publishes a group reply before slower members finish',
+  { timeout: 30_000 },
+  async () => {
+    const releaseSlowMember = Promise.withResolvers<void>();
+    const fastMemberContinued = Promise.withResolvers<void>();
 
-  let fastCalls = 0;
-  const fast = new MockLanguageModelV4({
-    doStream: async () => {
-      fastCalls++;
-      if (fastCalls === 1) {
-        return groupToolResponse('reply_to_group', 'fast-reply', {
-          message: 'I can answer this now.',
-        });
-      }
-      fastMemberContinued.resolve();
-      return groupTextResponse('Reply posted.');
-    },
-  });
+    let fastCalls = 0;
+    const fast = new MockLanguageModelV4({
+      doStream: async () => {
+        fastCalls++;
+        if (fastCalls === 1) {
+          return groupToolResponse('reply_to_group', 'fast-reply', {
+            message: 'I can answer this now.',
+          });
+        }
+        fastMemberContinued.resolve();
+        return groupTextResponse('Reply posted.');
+      },
+    });
 
-  let slowCalls = 0;
-  const slow = new MockLanguageModelV4({
-    doStream: async () => {
-      slowCalls++;
-      if (slowCalls === 1) await releaseSlowMember.promise;
-      return groupTextResponse('I have nothing useful to add.');
-    },
-  });
+    let slowCalls = 0;
+    const slow = new MockLanguageModelV4({
+      doStream: async () => {
+        slowCalls++;
+        if (slowCalls === 1) await releaseSlowMember.promise;
+        return groupTextResponse('I have nothing useful to add.');
+      },
+    });
 
-  await using resources = new AsyncDisposableStack();
-  const group = resources.use(
-    await WhatsAppGroup.create({
-      ...testGroupDependencies(resources),
-      conversation: testGroupConversation,
-      sandbox: testGroupSandbox,
-      participants: [
-        { name: 'fast', model: fast },
-        { name: 'slow', model: slow },
-      ],
-    }),
-  );
+    await using resources = new AsyncDisposableStack();
+    const group = resources.use(
+      await WhatsAppGroup.create({
+        ...testGroupDependencies(resources),
+        conversation: testGroupConversation,
+        sandbox: testGroupSandbox,
+        participants: [
+          { name: 'fast', model: fast },
+          { name: 'slow', model: slow },
+        ],
+      }),
+    );
 
-  const published: { author: string; content: string }[] = [];
-  const sending = group.send('Can anyone answer?', ({ author, content }) => {
-    published.push({ author, content });
-  });
-  await fastMemberContinued.promise;
-  const replyWasAlreadyPublic = published.some(
-    ({ author }) => author === 'fast',
-  );
+    const published: { author: string; content: string }[] = [];
+    const sending = group.send('Can anyone answer?', ({ author, content }) => {
+      published.push({ author, content });
+    });
+    await fastMemberContinued.promise;
+    const replyWasAlreadyPublic = published.some(
+      ({ author }) => author === 'fast',
+    );
 
-  releaseSlowMember.resolve();
-  await sending;
+    releaseSlowMember.resolve();
+    await sending;
 
-  assert.equal(
-    replyWasAlreadyPublic,
-    true,
-    'the fast reply waited for the slower member',
-  );
-});
+    assert.equal(
+      replyWasAlreadyPublic,
+      true,
+      'the fast reply waited for the slower member',
+    );
+  },
+);
 
 test('reconsiders a stale first-wave reply before publishing it', async () => {
   const bothMembersStarted = Promise.withResolvers<void>();
@@ -2836,76 +2840,85 @@ test('each group member uses its own telemetry', async () => {
   assert.doesNotMatch(JSON.stringify(secondStarts), /parent-chat:first/);
 });
 
-test('coalesces human interventions posted while a batch is running', async () => {
-  const firstNotificationStarted = Promise.withResolvers<void>();
-  const releaseFirstNotification = Promise.withResolvers<void>();
-  const prompts: unknown[] = [];
-  let calls = 0;
-  const member = new MockLanguageModelV4({
-    doStream: async ({ prompt }) => {
-      calls++;
-      prompts.push(prompt);
-      if (calls === 1) {
-        firstNotificationStarted.resolve();
-        await releaseFirstNotification.promise;
-      }
-      return groupTextResponse('I have nothing useful to add.');
-    },
-  });
+test(
+  'coalesces human interventions posted while a batch is running',
+  { timeout: 30_000 },
+  async () => {
+    const firstNotificationStarted = Promise.withResolvers<void>();
+    const releaseFirstNotification = Promise.withResolvers<void>();
+    const prompts: unknown[] = [];
+    let calls = 0;
+    const member = new MockLanguageModelV4({
+      doStream: async ({ prompt }) => {
+        calls++;
+        prompts.push(prompt);
+        if (calls === 1) {
+          firstNotificationStarted.resolve();
+          await releaseFirstNotification.promise;
+        }
+        return groupTextResponse('I have nothing useful to add.');
+      },
+    });
 
-  await using resources = new AsyncDisposableStack();
-  const group = resources.use(
-    await WhatsAppGroup.create({
-      ...testGroupDependencies(resources),
-      conversation: testGroupConversation,
-      sandbox: testGroupSandbox,
-      participants: [{ name: 'member', model: member }],
-    }),
-  );
-
-  const published: { author: string; content: string }[] = [];
-  const sending = group.send(
-    'Review the launch plan.',
-    ({ author, content }) => {
-      published.push({ author, content });
-    },
-  );
-  await firstNotificationStarted.promise;
-
-  await Promise.all([
-    group.post('Also consider accessibility.'),
-    group.post('Also consider offline use.'),
-  ]);
-  const interventionsWereAlreadyPublic = [
-    'Also consider accessibility.',
-    'Also consider offline use.',
-  ].every((expected) =>
-    published.some(
-      ({ author, content }) => author === 'user' && content === expected,
-    ),
-  );
-
-  releaseFirstNotification.resolve();
-  await sending;
-
-  assert.equal(
-    interventionsWereAlreadyPublic,
-    true,
-    'the interventions waited for the active member',
-  );
-  assert.equal(calls, 2, 'overlapping interventions created multiple batches');
-  for (const intervention of [
-    'Also consider accessibility.',
-    'Also consider offline use.',
-  ]) {
-    assert.equal(
-      prompts.filter((prompt) => JSON.stringify(prompt).includes(intervention))
-        .length,
-      1,
-      `"${intervention}" was not delivered exactly once`,
+    await using resources = new AsyncDisposableStack();
+    const group = resources.use(
+      await WhatsAppGroup.create({
+        ...testGroupDependencies(resources),
+        conversation: testGroupConversation,
+        sandbox: testGroupSandbox,
+        participants: [{ name: 'member', model: member }],
+      }),
     );
-  }
-});
+
+    const published: { author: string; content: string }[] = [];
+    const sending = group.send(
+      'Review the launch plan.',
+      ({ author, content }) => {
+        published.push({ author, content });
+      },
+    );
+    await firstNotificationStarted.promise;
+
+    await Promise.all([
+      group.post('Also consider accessibility.'),
+      group.post('Also consider offline use.'),
+    ]);
+    const interventionsWereAlreadyPublic = [
+      'Also consider accessibility.',
+      'Also consider offline use.',
+    ].every((expected) =>
+      published.some(
+        ({ author, content }) => author === 'user' && content === expected,
+      ),
+    );
+
+    releaseFirstNotification.resolve();
+    await sending;
+
+    assert.equal(
+      interventionsWereAlreadyPublic,
+      true,
+      'the interventions waited for the active member',
+    );
+    assert.equal(
+      calls,
+      2,
+      'overlapping interventions created multiple batches',
+    );
+    for (const intervention of [
+      'Also consider accessibility.',
+      'Also consider offline use.',
+    ]) {
+      assert.equal(
+        prompts.filter((prompt) =>
+          JSON.stringify(prompt).includes(intervention),
+        ).length,
+        1,
+        `"${intervention}" was not delivered exactly once`,
+      );
+    }
+  },
+);
 
 test('each logical participant consumes every group message once', async () => {
   const prompts = new Map<string, unknown[]>();
