@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS build
+FROM node:lts-bookworm-slim AS build
 
 WORKDIR /app
 
@@ -22,7 +22,7 @@ RUN npx nx run api:build \
 
 FROM docker:29.7.2-cli AS docker-cli
 
-FROM node:24-bookworm-slim AS app
+FROM node:lts-bookworm-slim AS app
 
 ENV NODE_ENV=production \
   PORT=3001 \
