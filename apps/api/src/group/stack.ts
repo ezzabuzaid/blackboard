@@ -61,6 +61,7 @@ export function createStack(
         conversationSchedulingCapabilities.timezone.bind(
           Intl.DateTimeFormat().resolvedOptions().timeZone,
         ),
+        conversationSchedulingCapabilities.clock.bind(globalThis),
       ],
     };
   });

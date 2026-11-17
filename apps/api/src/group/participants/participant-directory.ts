@@ -210,7 +210,10 @@ export class ParticipantDirectory {
         {
           name: 'baseera-file-telemetry',
           create() {
-            const telemetry = createFileTelemetry({ path: tracePath });
+            const telemetry = createFileTelemetry({
+              path: tracePath,
+              clock: globalThis,
+            });
             return { telemetry: () => telemetry };
           },
         },

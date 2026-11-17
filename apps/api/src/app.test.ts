@@ -1994,21 +1994,21 @@ test('Docker shares group work and isolates chats and users', async () => {
     userId: firstChat.userId,
   });
   assert.equal(
-    await first.sandbox.readFile(
-      '/workspace/participants/factory/identity.json',
-    ),
+    await first.sandbox.readTextFile({
+      path: '/workspace/participants/factory/identity.json',
+    }),
     JSON.stringify({ name: 'Factory' }),
   );
 
-  const created = await first.sandbox.executeCommand(
-    [
+  const created = await first.sandbox.run({
+    command: [
       'mkdir -p /workspace/participants/maya',
       `printf '%s' '{"name":"Maya"}' > /workspace/participants/maya/identity.json`,
       `printf '%s' 'Be candid and concise.' > /workspace/participants/maya/SOUL.md`,
       `printf '%s' 'Own the business profile.' > /workspace/participants/maya/AGENTS.md`,
       `printf '%s' 'No durable knowledge yet.' > /workspace/participants/maya/MEMORY.md`,
     ].join(' && '),
-  );
+  });
   assert.equal(created.exitCode, 0);
   assert.deepEqual(
     (await participants.participants(firstChat.userId)).map(({ name }) => name),
@@ -2017,16 +2017,20 @@ test('Docker shares group work and isolates chats and users', async () => {
 
   assert.equal(
     (
-      await firstPeer.sandbox.executeCommand(
-        `printf '%s' 'The user prefers concise answers.' > /workspace/participants/maya/MEMORY.md`,
-      )
+      await firstPeer.sandbox.run({
+        command: `printf '%s' 'The user prefers concise answers.' > /workspace/participants/maya/MEMORY.md`,
+      })
     ).exitCode,
     0,
   );
-  await first.sandbox.writeFiles([
-    { path: '/workspace/private.txt', content: 'first chat' },
-    { path: '/workspace/output/sample.txt', content: 'artifact' },
-  ]);
+  await first.sandbox.writeTextFile({
+    path: '/workspace/private.txt',
+    content: 'first chat',
+  });
+  await first.sandbox.writeTextFile({
+    path: '/workspace/output/sample.txt',
+    content: 'artifact',
+  });
 
   const sandboxApp = testApp({
     openArtifact: (conversation, path) =>
@@ -2061,11 +2065,13 @@ test('Docker shares group work and isolates chats and users', async () => {
     userId: secondChat.userId,
   });
   assert.equal(
-    await second.sandbox.readFile('/workspace/participants/maya/MEMORY.md'),
+    await second.sandbox.readTextFile({
+      path: '/workspace/participants/maya/MEMORY.md',
+    }),
     'The user prefers concise answers.',
   );
   assert.equal(
-    (await second.sandbox.executeCommand('cat /workspace/private.txt'))
+    (await second.sandbox.run({ command: 'cat /workspace/private.txt' }))
       .exitCode,
     1,
   );
@@ -2077,14 +2083,14 @@ test('Docker shares group work and isolates chats and users', async () => {
   });
   assert.equal(
     (
-      await otherUser.sandbox.executeCommand(
-        'cat /workspace/participants/maya/MEMORY.md',
-      )
+      await otherUser.sandbox.run({
+        command: 'cat /workspace/participants/maya/MEMORY.md',
+      })
     ).exitCode,
     1,
   );
   assert.equal(
-    (await otherUser.sandbox.executeCommand('cat /workspace/private.txt'))
+    (await otherUser.sandbox.run({ command: 'cat /workspace/private.txt' }))
       .exitCode,
     1,
   );
