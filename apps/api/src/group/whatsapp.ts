@@ -17,9 +17,8 @@ import {
   createInterAgentCommunication,
   defineAgent,
 } from '@deepagents/experimental/zukhruf';
-import { Latch } from '@zukhruf/async';
+import { Future, Lock } from '@zukhruf/async';
 import type { ToolSet } from 'ai';
-import PQueue from 'p-queue';
 
 import { baseeraGroupChatAgent } from '../agent/group-chat-agent.js';
 import {
@@ -208,7 +207,7 @@ interface GroupSubscriber extends Pick<
   WhatsAppGroupOptions,
   'onMessage' | 'onActivity' | 'onEvent'
 > {
-  deliveries: PQueue;
+  deliveries: Lock;
 }
 
 type StopReason = 'user' | 'limit' | 'interrupted';
@@ -218,10 +217,7 @@ type GroupState =
   | { type: 'stopping'; reason: StopReason }
   | { type: 'closed' };
 
-type PumpOutcome = { type: 'completed' } | { type: 'failed'; cause: unknown };
-
-type PumpState =
-  { type: 'idle' } | { type: 'running'; finished: Latch<PumpOutcome> };
+type PumpState = { type: 'idle' } | { type: 'running'; finished: Future<void> };
 
 export class WhatsAppGroup implements AsyncDisposable {
   readonly #resources: AsyncDisposableStack;
@@ -293,7 +289,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         onMessage: options.onMessage,
         onActivity: options.onActivity,
         onEvent: options.onEvent,
-        deliveries: new PQueue({ concurrency: 1 }),
+        deliveries: new Lock(),
       });
     }
   }
@@ -439,7 +435,9 @@ export class WhatsAppGroup implements AsyncDisposable {
             .cancel(participant.turnId),
         ),
     );
-    if (this.#pump.type === 'running') await this.#pump.finished.wait();
+    if (this.#pump.type === 'running') {
+      await Promise.allSettled([this.#pump.finished.wait()]);
+    }
     await this.#emitStopped(reason);
     return this.snapshot();
   }
@@ -465,7 +463,7 @@ export class WhatsAppGroup implements AsyncDisposable {
       onMessage,
       onActivity,
       onEvent,
-      deliveries: new PQueue({ concurrency: 1 }),
+      deliveries: new Lock(),
     };
     this.#subscribers.add(subscriber);
     for (const event of this.#events) {
@@ -612,7 +610,7 @@ export class WhatsAppGroup implements AsyncDisposable {
 
   #ensurePump() {
     if (this.#pump.type === 'running') return;
-    const finished = new Latch<PumpOutcome>();
+    const finished = new Future<void>();
     this.#pump = { type: 'running', finished };
     void Promise.resolve()
       .then(() => this.#runPump())
@@ -622,15 +620,15 @@ export class WhatsAppGroup implements AsyncDisposable {
       );
   }
 
-  #finishPump(finished: Latch<PumpOutcome>) {
+  #finishPump(finished: Future<void>) {
     this.#pump = { type: 'idle' };
-    finished.open({ type: 'completed' });
+    finished.resolve();
     if (this.#pending.length > 0) this.#ensurePump();
   }
 
-  async #abandonPump(finished: Latch<PumpOutcome>, cause: unknown) {
+  async #abandonPump(finished: Future<void>, cause: unknown) {
     this.#pump = { type: 'idle' };
-    finished.open({ type: 'failed', cause });
+    finished.reject(cause);
     this.#pending.length = 0;
     console.error('[group pump failed]', cause);
     try {
@@ -894,8 +892,7 @@ export class WhatsAppGroup implements AsyncDisposable {
 
   async #whenSettled() {
     while (this.#pump.type === 'running') {
-      const outcome = await this.#pump.finished.wait();
-      if (outcome.type === 'failed') throw outcome.cause;
+      await this.#pump.finished.wait();
     }
   }
 
@@ -952,10 +949,13 @@ export class WhatsAppGroup implements AsyncDisposable {
     event: WhatsAppChatEvent,
     legacyCallback?: () => void | Promise<void>,
   ) {
-    return subscriber.deliveries.add(async () => {
-      await subscriber.onEvent?.(event);
-      await legacyCallback?.();
-    });
+    return subscriber.deliveries.run(
+      async () => {
+        await subscriber.onEvent?.(event);
+        await legacyCallback?.();
+      },
+      { signal: undefined },
+    );
   }
 
   #notification(messages: WhatsAppMessage[], reminder?: string) {
