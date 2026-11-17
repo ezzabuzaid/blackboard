@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import test from 'node:test';
 
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 
 import { groupTemplates } from '../group-template-catalog.js';
 import { loadAgentCatalog } from './agent-catalog.js';

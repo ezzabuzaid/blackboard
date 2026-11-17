@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path';
 import test from 'node:test';
 
 import { fragment } from '@deepagents/context';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { MockLanguageModelV4 } from 'ai/test';
 
 import { ParticipantDirectory } from './participant-directory.js';

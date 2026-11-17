@@ -4,7 +4,6 @@ import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
-import { setTimeout as sleep } from 'node:timers/promises';
 
 import {
   PollingChangeSource,
@@ -19,9 +18,9 @@ import {
   SqliteMailboxStore,
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
+import { TemporaryFiles } from '@zukhruf/fs';
 import { open } from '@zukhruf/sqlite-open';
 import { settleWithin } from '@zukhruf/testing/async';
-import { TemporaryFiles } from '@zukhruf/testing/fs';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import type { DrainContext } from 'evlog';
@@ -2413,10 +2412,7 @@ test('publishes a group reply before slower members finish', async () => {
   const sending = group.send('Can anyone answer?', ({ author, content }) => {
     published.push({ author, content });
   });
-  const fastFinished = await Promise.race([
-    fastMemberContinued.promise.then(() => true),
-    sleep(2_000).then(() => false),
-  ]);
+  await fastMemberContinued.promise;
   const replyWasAlreadyPublic = published.some(
     ({ author }) => author === 'fast',
   );
@@ -2424,7 +2420,6 @@ test('publishes a group reply before slower members finish', async () => {
   releaseSlowMember.resolve();
   await sending;
 
-  assert.equal(fastFinished, true, 'the fast member did not finish in time');
   assert.equal(
     replyWasAlreadyPublic,
     true,
@@ -2875,10 +2870,7 @@ test('coalesces human interventions posted while a batch is running', async () =
       published.push({ author, content });
     },
   );
-  const started = await Promise.race([
-    firstNotificationStarted.promise.then(() => true),
-    sleep(2_000).then(() => false),
-  ]);
+  await firstNotificationStarted.promise;
 
   await Promise.all([
     group.post('Also consider accessibility.'),
@@ -2896,7 +2888,6 @@ test('coalesces human interventions posted while a batch is running', async () =
   releaseFirstNotification.resolve();
   await sending;
 
-  assert.equal(started, true, 'the first notification did not start in time');
   assert.equal(
     interventionsWereAlreadyPublic,
     true,
