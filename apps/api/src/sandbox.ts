@@ -83,8 +83,10 @@ export class GroupSandboxes implements AsyncDisposable {
       (await createDockerSandbox({
         name,
         image: SANDBOX_IMAGE,
-        network: { mode: 'none' },
-        labels: { [SANDBOX_LABEL]: name },
+        container: {
+          Labels: { [SANDBOX_LABEL]: name },
+          HostConfig: { NetworkMode: 'none' },
+        },
       }))
     ).dispose();
     await this.#containersGone(name);
@@ -182,12 +184,13 @@ export class GroupSandboxes implements AsyncDisposable {
       name,
       image: SANDBOX_IMAGE,
       commandTimeout: COMMAND_TIMEOUT_MS,
-      network: { mode: 'none' },
-      labels: { [SANDBOX_LABEL]: name },
-      security:
-        process.getuid && process.getgid
-          ? { user: `${process.getuid()}:${process.getgid()}` }
-          : undefined,
+      container: {
+        Labels: { [SANDBOX_LABEL]: name },
+        ...(process.getuid && process.getgid
+          ? { User: `${process.getuid()}:${process.getgid()}` }
+          : {}),
+        HostConfig: { NetworkMode: 'none' },
+      },
       volumes: [
         {
           type: 'bind',

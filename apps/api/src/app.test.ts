@@ -18,9 +18,10 @@ import {
   SqliteMailboxStore,
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
+import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
 import { open } from '@zukhruf/sqlite-open';
-import { settleWithin } from '@zukhruf/testing/async';
+import { waitFor } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
 import type { DrainContext } from 'evlog';
@@ -2131,11 +2132,7 @@ test('chat message POST returns before active participants settle', async (t) =>
           content: 'What should we do first?',
         }),
       });
-    const response = await settleWithin(
-      request(),
-      'the message POST, which must not wait for the participant',
-      2_000,
-    );
+    const response = await untilAborted(request(), t.signal);
 
     assert.equal(response.status, 201);
     const posted = postedMessage.parse(await response.json());
@@ -2976,7 +2973,7 @@ test('each logical participant consumes every group message once', async () => {
   );
 });
 
-test('every group member answers a greeting addressed to the whole group', async () => {
+test('every group member answers a greeting addressed to the whole group', async (t) => {
   const wholeGroupGreetingRule =
     'When the human greets or addresses the whole group, every participant must reply once with a brief, natural acknowledgment, even if another participant has already acknowledged.';
   const firstNotificationStarted = Promise.withResolvers<void>();
@@ -2992,11 +2989,7 @@ test('every group member answers a greeting addressed to the whole group', async
       activeParticipationChecks,
     );
     if (firstParticipants.size === 2) firstNotificationStarted.resolve();
-    await settleWithin(
-      firstNotificationStarted.promise,
-      'every member to receive the notification concurrently',
-      2_000,
-    );
+    await untilAborted(firstNotificationStarted.promise, t.signal);
     activeParticipationChecks--;
   };
 
@@ -3863,13 +3856,13 @@ function waitForChat(
   conversation: { chatId: string; userId: string },
   phase: 'settled' | 'stopped',
 ) {
-  return t.waitFor(
+  return waitFor(
     async () => {
       const snapshot = await runtime.snapshot(conversation);
       assert.equal(snapshot.activity.phase, phase);
       return snapshot;
     },
-    { interval: 10, timeout: 10_000 },
+    { signal: t.signal, interval: 10 },
   );
 }
 
