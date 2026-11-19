@@ -16,6 +16,7 @@
     "@genui/input": "*",
     "@genui/voice": "*",
     "@sdk-it/client": "*",
+    "@zukhruf/authentication": "0.8.36",
     "@zukhruf/shadcn": "^0.8.30",
     "better-auth": "^1.6.25",
     "cn": "^0.4.0",
