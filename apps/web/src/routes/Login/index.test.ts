@@ -71,11 +71,7 @@ test('a signed-in visitor with a backslash return path stays on the origin', asy
   );
 
   try {
-    await assert.rejects(loader(loaderArgs(request)), (error: unknown) => {
-      assert.ok(error instanceof Response);
-      assert.equal(error.headers.get('location'), '/\\evil.example');
-      return true;
-    });
+    assert.equal(await loader(loaderArgs(request)), null);
   } finally {
     globalThis.fetch = originalFetch;
   }
