@@ -80,6 +80,30 @@ test('anonymous visitors can load the public marketplace catalog', async () => {
   }
 });
 
+test('signed-in visitors load the catalog as signed in', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.endsWith('/api/auth/get-session')) {
+      return Response.json({ user: { id: 'user-1' } });
+    }
+    if (url.endsWith('/api/group-templates')) {
+      return Response.json({ templates: [] });
+    }
+    if (url.endsWith('/api/agents')) return Response.json({ agents: [] });
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    const result = await loader(
+      loaderArgs(new Request('http://localhost/groups/new')),
+    );
+    assert.equal(result.signedIn, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('starting a public template returns through login to that template', () => {
   assert.equal(
     loginPathForTemplate('founder-board'),

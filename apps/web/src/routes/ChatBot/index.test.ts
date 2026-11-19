@@ -161,9 +161,36 @@ test('loader sends unauthenticated users to login', async () => {
       );
       assert.equal(location.pathname, '/login');
       assert.equal(location.searchParams.get('redirect'), '/?source=test');
+      assert.equal(error.headers.get('X-Remix-Replace'), 'true');
       return true;
     });
     assert.deepEqual(requests, ['http://localhost:3001/api/auth/get-session']);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('loader does not send users to login when the session cannot be read', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.endsWith('/api/auth/get-session')) {
+      return new Response(null, { status: 503 });
+    }
+    if (url.endsWith('/api/groups')) {
+      return Response.json({ groups: [groupSummary] });
+    }
+    return new Response(null, { status: 404 });
+  };
+
+  try {
+    await assert.rejects(
+      loader(loaderArgs(new Request('http://localhost/?source=test'))),
+      (error: unknown) => {
+        assert.ok(!(error instanceof Response));
+        return true;
+      },
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
