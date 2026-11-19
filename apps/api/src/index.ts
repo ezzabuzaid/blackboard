@@ -196,11 +196,6 @@ const app = createApp({
   auth: {
     handler: authentication.auth.handler,
     getSession: (headers) => authentication.auth.api.getSession({ headers }),
-    getSessionResponse: (request) =>
-      authentication.auth.api.getSession({
-        headers: request.headers,
-        asResponse: true,
-      }),
   },
   runtime,
   transcribeAudio,

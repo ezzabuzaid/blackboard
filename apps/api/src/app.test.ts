@@ -264,8 +264,6 @@ const authenticatedAuth: AppDependencies['auth'] = {
   getSession: async () => ({
     user: { id: 'local-user', name: 'Local User' },
   }),
-  getSessionResponse: async () =>
-    Response.json({ user: { id: 'local-user', name: 'Local User' } }),
 };
 
 function testApp({
@@ -1412,17 +1410,19 @@ test('permanently deleting a group is owner-scoped', async () => {
   assert.deepEqual(await missing.json(), { error: 'Group not found.' });
 });
 
-test('SDK auth routes preserve Better Auth response headers', async () => {
+test('auth routes preserve Better Auth response headers', async () => {
   const response = await testApp({
     auth: {
       ...authenticatedAuth,
-      getSessionResponse: async () =>
-        Response.json(null, {
-          headers: {
-            'Set-Cookie': 'session=test-session; HttpOnly; Path=/',
-            'X-Auth-Result': 'checked',
-          },
-        }),
+      handler: async (request) =>
+        new URL(request.url).pathname === '/api/auth/get-session'
+          ? Response.json(null, {
+              headers: {
+                'Set-Cookie': 'session=test-session; HttpOnly; Path=/',
+                'X-Auth-Result': 'checked',
+              },
+            })
+          : new Response(null, { status: 404 }),
     },
   }).request('/api/auth/get-session');
 
