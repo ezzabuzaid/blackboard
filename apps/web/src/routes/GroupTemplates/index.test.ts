@@ -3,12 +3,23 @@ import test from 'node:test';
 
 import { type LoaderFunctionArgs, RouterContextProvider } from 'react-router';
 
-import { loader } from './loader.ts';
 import {
   loginPathForTemplate,
   matchesTemplateFilter,
   toggleAgentSelection,
 } from './selection.ts';
+
+// better-auth's client keeps the fetch that it finds when its module loads,
+// so it gets one that calls the fetch each test puts in place.
+const networkFetch = globalThis.fetch;
+const currentFetch: typeof fetch = (input, init) =>
+  (globalThis.fetch === currentFetch ? networkFetch : globalThis.fetch)(
+    input,
+    init,
+  );
+globalThis.fetch = currentFetch;
+
+const { loader } = await import('./loader.ts');
 
 function loaderArgs(request: Request): LoaderFunctionArgs {
   return {
@@ -107,7 +118,7 @@ test('signed-in visitors load the catalog as signed in', async () => {
 test('starting a public template returns through login to that template', () => {
   assert.equal(
     loginPathForTemplate('founder-board'),
-    '/login?redirect=%2Fgroups%2Fnew%3Ftemplate%3Dfounder-board',
+    '/login?redirectTo=%2Fgroups%2Fnew%3Ftemplate%3Dfounder-board',
   );
 });
 

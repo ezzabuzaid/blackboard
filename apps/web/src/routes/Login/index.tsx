@@ -1,3 +1,7 @@
+import {
+  REDIRECT_TO,
+  safeRedirect,
+} from '@zukhruf/authentication/react-router';
 import { Button, Input, Label } from '@zukhruf/shadcn';
 import { KeyRound, LoaderCircle, MessageCircle } from 'lucide-react';
 import { type SubmitEvent, useState } from 'react';
@@ -10,17 +14,14 @@ import {
 } from 'react-router';
 
 import { authClient } from '../../auth-client.ts';
-import { hasIdentity, redirectDestination } from '../../auth.ts';
-import { api } from '../ChatBot/api.ts';
 
 export async function loader({ request }: LoaderFunctionArgs) {
   try {
-    const session: unknown = await api.request(
-      'GET /auth/get-session',
-      {},
-      { signal: request.signal },
-    );
-    if (hasIdentity(session)) throw replace(redirectDestination(request.url));
+    const { data } = await authClient.getSession({
+      fetchOptions: { signal: request.signal },
+    });
+    const url = new URL(request.url);
+    if (data !== null) throw replace(returnPath(url.search, url.origin));
   } catch (error) {
     if (error instanceof Response || request.signal.aborted) throw error;
   }
@@ -57,7 +58,9 @@ export default function Login() {
         );
       }
 
-      await navigate(redirectDestination(location.search), { replace: true });
+      await navigate(returnPath(location.search, globalThis.location.origin), {
+        replace: true,
+      });
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -189,4 +192,11 @@ export default function Login() {
       </div>
     </main>
   );
+}
+
+function returnPath(search: string, origin: string) {
+  return safeRedirect(new URLSearchParams(search).get(REDIRECT_TO), {
+    origin,
+    fallback: '/',
+  });
 }

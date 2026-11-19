@@ -1,6 +1,6 @@
 import type { LoaderFunctionArgs } from 'react-router';
 
-import { hasIdentity } from '../../auth.ts';
+import { authClient } from '../../auth-client.ts';
 import { api } from '../ChatBot/api.ts';
 
 export interface GroupAgent {
@@ -48,7 +48,9 @@ const buildOwnTemplate: GroupTemplate = {
 
 export async function loader(args: LoaderFunctionArgs) {
   const [session, { templates }, catalog] = await Promise.all([
-    api.request('GET /auth/get-session', {}, { signal: args.request.signal }),
+    authClient.getSession({
+      fetchOptions: { signal: args.request.signal, throw: true },
+    }),
     api.request('GET /group-templates', {}, { signal: args.request.signal }),
     api.request('GET /agents', {}, { signal: args.request.signal }),
   ]);
@@ -61,7 +63,7 @@ export async function loader(args: LoaderFunctionArgs) {
     'template',
   );
   return {
-    signedIn: hasIdentity(session),
+    signedIn: session !== null,
     initialSelectedId: groupTemplates.some(
       ({ id }) => id === requestedTemplateId,
     )

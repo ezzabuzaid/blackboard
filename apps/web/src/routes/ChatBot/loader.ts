@@ -1,6 +1,7 @@
+import { requireSession } from '@zukhruf/authentication/react-router';
 import { type LoaderFunctionArgs, redirect } from 'react-router';
 
-import { requireIdentity } from '../../auth.ts';
+import { authClient } from '../../auth-client.ts';
 import { api } from './api.ts';
 import { initialGroupActivity } from './groupActivity.ts';
 import { isGroupChatState } from './groupMessages.ts';
@@ -20,9 +21,9 @@ export interface GroupSummary {
 }
 
 export async function loader(args: LoaderFunctionArgs) {
-  await requireIdentity(args);
-
   const { request } = args;
+  await requireSession(authClient, request, { signIn: '/login' });
+
   const url = new URL(request.url);
   const groups = await loadGroups(request.signal);
   const chatId = url.searchParams.get('chatId');

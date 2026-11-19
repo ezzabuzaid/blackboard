@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { serializeMentionPromptLink } from '@genui/input';
+import { AuthenticationUnavailableError } from '@zukhruf/authentication/react-router';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { type LoaderFunctionArgs, RouterContextProvider } from 'react-router';
@@ -27,10 +28,21 @@ import {
   reduceGroupChat,
   updateGroupMessageAnnotationComment,
 } from './groupMessages.ts';
-import { loader } from './loader.ts';
 import { messageDisplayText, messageSegments } from './mentions.ts';
 import { messageComponents, messageRemarkPlugins } from './messageMarkdown.tsx';
 import { traceItems } from './traces/agentTrace.ts';
+
+// better-auth's client keeps the fetch that it finds when its module loads,
+// so it gets one that calls the fetch each test puts in place.
+const networkFetch = globalThis.fetch;
+const currentFetch: typeof fetch = (input, init) =>
+  (globalThis.fetch === currentFetch ? networkFetch : globalThis.fetch)(
+    input,
+    init,
+  );
+globalThis.fetch = currentFetch;
+
+const { loader } = await import('./loader.ts');
 
 const sentAt = '2026-07-31T12:00:00.000Z';
 const groupSummary = {
@@ -160,7 +172,7 @@ test('loader sends unauthenticated users to login', async () => {
         request.url,
       );
       assert.equal(location.pathname, '/login');
-      assert.equal(location.searchParams.get('redirect'), '/?source=test');
+      assert.equal(location.searchParams.get('redirectTo'), '/?source=test');
       assert.equal(error.headers.get('X-Remix-Replace'), 'true');
       return true;
     });
@@ -172,8 +184,10 @@ test('loader sends unauthenticated users to login', async () => {
 
 test('loader does not send users to login when the session cannot be read', async () => {
   const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
   globalThis.fetch = async (input) => {
     const url = input instanceof Request ? input.url : String(input);
+    requests.push(new URL(url).pathname);
     if (url.endsWith('/api/auth/get-session')) {
       return new Response(null, { status: 503 });
     }
@@ -187,10 +201,11 @@ test('loader does not send users to login when the session cannot be read', asyn
     await assert.rejects(
       loader(loaderArgs(new Request('http://localhost/?source=test'))),
       (error: unknown) => {
-        assert.ok(!(error instanceof Response));
+        assert.ok(error instanceof AuthenticationUnavailableError);
         return true;
       },
     );
+    assert.deepEqual(requests, ['/api/auth/get-session']);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -293,7 +308,11 @@ test('loader hydrates the selected chat and reports API state', async () => {
       },
     });
     online = false;
-    await assert.rejects(loader(args), /offline/);
+    await assert.rejects(loader(args), (error: unknown) => {
+      assert.ok(error instanceof AuthenticationUnavailableError);
+      assert.match(String(error.cause), /offline/);
+      return true;
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
