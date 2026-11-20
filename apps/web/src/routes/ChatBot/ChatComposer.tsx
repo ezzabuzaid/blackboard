@@ -341,6 +341,42 @@ function dictationErrorMessage(error: DictationError) {
 }
 
 function SendButton() {
+  const { apiStatus } = useGroupChat();
+  return apiStatus === 'ready' ? (
+    <DictationAwareSendButton />
+  ) : (
+    <SendControl mode="draft" />
+  );
+}
+
+function DictationAwareSendButton() {
+  const { state } = useComposerDictation('SendButton');
+  return <SendControl mode={sendMode(state)} />;
+}
+
+type SendMode = 'draft' | 'dictation' | 'dictation-sending';
+
+function sendMode(state: DictationState): SendMode {
+  switch (state.status) {
+    case 'starting':
+    case 'recording':
+      return 'dictation';
+    case 'finishing':
+      return state.end === 'send' ? 'dictation-sending' : 'dictation';
+    case 'unavailable':
+    case 'idle':
+    case 'failed':
+      return 'draft';
+  }
+}
+
+function sendLabel(posting: boolean, mode: SendMode) {
+  if (posting) return 'Sending';
+  if (mode === 'draft') return 'Send';
+  return 'Transcribe and send';
+}
+
+function SendControl({ mode }: { mode: SendMode }) {
   const { annotations, posting } = useGroupChat();
   const { state, meta } = useComposer('SendButton');
   const empty =
@@ -348,7 +384,11 @@ function SendButton() {
     state.imageAttachments.length === 0 &&
     state.remoteImages.length === 0 &&
     state.pendingPastes.length === 0;
-  const sendDisabled = meta.disabled || (empty && annotations.length === 0);
+  const sendDisabled =
+    meta.disabled ||
+    mode === 'dictation-sending' ||
+    (mode === 'draft' && empty && annotations.length === 0);
+  const label = sendLabel(posting, mode);
 
   return (
     <Composer.Submit
@@ -357,7 +397,7 @@ function SendButton() {
         <InputGroupButton
           variant="default"
           size="icon-sm"
-          aria-label={posting ? 'Sending' : 'Send'}
+          aria-label={label}
           className="size-10 rounded-full"
         />
       }
