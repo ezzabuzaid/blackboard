@@ -141,12 +141,9 @@ export function GroupChatProvider({
         annotations: [],
       });
     } catch (cause) {
-      const nextError =
-        cause instanceof Error
-          ? cause
-          : new Error('The group could not receive your message.');
-      setError(nextError);
-      throw nextError;
+      throw cause instanceof Error
+        ? cause
+        : new Error('The group could not receive your message.');
     } finally {
       setPosting(false);
     }

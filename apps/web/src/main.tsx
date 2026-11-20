@@ -1,4 +1,5 @@
 import '@genui/annotation/styles.css';
+import { ClockProvider } from '@zukhruf/ui';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
@@ -11,6 +12,8 @@ if (!root) throw new Error('Root element is missing');
 
 createRoot(root).render(
   <StrictMode>
-    <RouterProvider router={router} />
+    <ClockProvider clock={globalThis}>
+      <RouterProvider router={router} />
+    </ClockProvider>
   </StrictMode>,
 );

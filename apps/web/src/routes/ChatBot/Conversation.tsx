@@ -1,5 +1,5 @@
+import { reconstructPersistedPromptSelection } from '@deepagents/react-input/browser';
 import { Annotation } from '@genui/annotation';
-import { reconstructPersistedPromptSelection } from '@genui/input/browser';
 import {
   Bubble,
   BubbleContent,

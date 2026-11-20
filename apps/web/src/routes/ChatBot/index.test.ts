@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { serializeMentionPromptLink } from '@genui/input';
+import { serializeMentionPromptLink } from '@deepagents/react-input';
 import { AuthenticationUnavailableError } from '@zukhruf/authentication/react-router';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';

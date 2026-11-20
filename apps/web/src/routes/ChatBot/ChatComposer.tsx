@@ -1,11 +1,11 @@
-import { Annotation } from '@genui/annotation';
 import {
   Composer,
   type ComposerItemEntry,
   type ComposerSubmission,
   serializeMentionPromptLink,
   useComposer,
-} from '@genui/input/browser';
+} from '@deepagents/react-input/browser';
+import { Annotation } from '@genui/annotation';
 import { VoiceRecordButton } from '@genui/voice';
 import { Field, FieldError, InputGroupButton } from '@zukhruf/shadcn';
 import { CircleStop, SendIcon, X } from 'lucide-react';
@@ -273,7 +273,7 @@ function SendButton() {
   const { state, meta } = useComposer('SendButton');
   const empty =
     !state.text.trim() &&
-    state.localImages.length === 0 &&
+    state.imageAttachments.length === 0 &&
     state.remoteImages.length === 0 &&
     state.pendingPastes.length === 0;
   const sendDisabled = meta.disabled || (empty && annotations.length === 0);
@@ -343,7 +343,11 @@ function isStopSubmission(submission: ComposerSubmission) {
 
 function validateSubmission(event: ComposerSubmission) {
   const hasImage = event.items.some(
-    ({ type }) => type === 'local_image' || type === 'remote_image',
+    ({ type }) =>
+      type === 'image' ||
+      type === 'video' ||
+      type === 'audio' ||
+      type === 'remote_image',
   );
   return hasImage ? "Image attachments aren't supported yet." : null;
 }

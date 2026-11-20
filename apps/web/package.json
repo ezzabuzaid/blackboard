@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@better-auth/passkey": "^1.6.25",
+    "@deepagents/react-input": "7.8.2",
     "@genui/annotation": "*",
-    "@genui/input": "*",
     "@genui/voice": "*",
     "@sdk-it/client": "*",
     "@zukhruf/authentication": "^0.8.43",

@@ -1,10 +1,10 @@
-import { tokenizePersistedPrompt } from "@genui/input"
+import { tokenizePersistedPrompt } from '@deepagents/react-input';
 
 interface MessageSegment {
-  text: string
+  text: string;
   /** Persisted source text, when it differs from what is displayed. */
-  source?: string
-  mention: boolean
+  source?: string;
+  mention: boolean;
 }
 
 /**
@@ -13,10 +13,10 @@ interface MessageSegment {
  */
 export function messageSegments(content: string): MessageSegment[] {
   return tokenizePersistedPrompt(content).map((token) =>
-    token.kind === "mention"
+    token.kind === 'mention'
       ? { text: token.label, source: token.source, mention: true }
-      : { text: token.source, mention: false }
-  )
+      : { text: token.source, mention: false },
+  );
 }
 
 /**
@@ -26,5 +26,5 @@ export function messageSegments(content: string): MessageSegment[] {
 export function messageDisplayText(content: string) {
   return messageSegments(content)
     .map(({ text }) => text)
-    .join("")
+    .join('');
 }

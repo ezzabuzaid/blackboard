@@ -1,12 +1,12 @@
-@import "@genui/input/styles.css";
+@import "@deepagents/react-input/styles.css";
 @import "tailwindcss";
 @import "@zukhruf/shadcn/styles.css";
 @import "streamdown/styles.css";
 @source "../../../node_modules/streamdown/dist/*.js";
+@source "../../../node_modules/@deepagents/react-input/dist";
 
 /* nx-tailwind-sources:start */
 @source "../../../packages/annotation";
-@source "../../../packages/input";
 @source "../../../packages/voice";
 @source "../../api";
 /* nx-tailwind-sources:end */
