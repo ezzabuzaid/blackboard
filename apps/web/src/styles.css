@@ -7,7 +7,6 @@
 
 /* nx-tailwind-sources:start */
 @source "../../../packages/annotation";
-@source "../../../packages/voice";
 @source "../../api";
 /* nx-tailwind-sources:end */
 

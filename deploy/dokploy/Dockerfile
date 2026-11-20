@@ -8,7 +8,6 @@ COPY package.json package-lock.json nx.json tsconfig*.json .npmrc ./
 COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 COPY packages/annotation/package.json packages/annotation/package.json
-COPY packages/voice/package.json packages/voice/package.json
 RUN npm ci
 
 COPY apps apps

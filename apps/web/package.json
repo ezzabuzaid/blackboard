@@ -14,7 +14,6 @@
     "@better-auth/passkey": "^1.6.25",
     "@deepagents/react-input": "7.9.0",
     "@genui/annotation": "*",
-    "@genui/voice": "*",
     "@sdk-it/client": "*",
     "@zukhruf/authentication": "^0.8.43",
     "@zukhruf/shadcn": "^0.8.43",

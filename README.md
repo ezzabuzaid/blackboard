@@ -139,7 +139,7 @@ All application state stays under `ZUKHRUF_DATA_DIR`:
 | ---------------- | ---------------------------------------------------------------------- |
 | `apps/web`       | React Router interface, live group chat, templates, shares, and traces |
 | `apps/api`       | Hono API, authentication, group runtime, persistence, and sandboxes    |
-| `packages`       | Shared annotation, input, voice, and UI packages                       |
+| `packages`       | The shared annotation package                                          |
 | `participants`   | Built-in participant definitions, including Factory                    |
 | `catalog/agents` | Read-only specialist catalog and workspace templates                   |
 | `deploy/dokploy` | Production image, Compose service, smoke test, and deployment script   |

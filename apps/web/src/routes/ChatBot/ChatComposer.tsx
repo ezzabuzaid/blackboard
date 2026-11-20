@@ -2,14 +2,16 @@ import {
   Composer,
   type ComposerItemEntry,
   type ComposerSubmission,
+  type DictationError,
+  type DictationState,
   serializeMentionPromptLink,
   useComposer,
+  useComposerDictation,
 } from '@deepagents/react-input/browser';
 import { Annotation } from '@genui/annotation';
-import { VoiceRecordButton } from '@genui/voice';
 import { Field, FieldError, InputGroupButton } from '@zukhruf/shadcn';
-import { CircleStop, SendIcon, X } from 'lucide-react';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { CircleStop, Loader2, Mic, SendIcon, Square, X } from 'lucide-react';
+import { type ReactNode, useMemo } from 'react';
 
 import { useGroupChat } from './GroupChat.tsx';
 import { api } from './api.ts';
@@ -65,6 +67,18 @@ export function ChatComposer() {
             editorAriaLabel="Message"
             validateSubmission={validateSubmission}
             onSubmit={handleSubmit}
+            dictation={
+              apiStatus === 'ready'
+                ? {
+                    transcribe: (audio, { signal }) =>
+                      api.request(
+                        'POST /chat/{chatId}/transcription',
+                        { chatId, audio },
+                        { signal },
+                      ),
+                  }
+                : undefined
+            }
             className="border-0 bg-transparent"
           >
             <Composer.Trigger trigger="/">
@@ -83,7 +97,7 @@ export function ChatComposer() {
               <div className="flex min-h-13 items-center">
                 <MessageEditor />
                 <div className="me-[-0.3rem] flex items-center gap-2 self-end p-1">
-                  <ChatVoiceButton />
+                  {apiStatus === 'ready' && <ChatVoiceButton />}
                   <SendButton />
                 </div>
               </div>
@@ -209,63 +223,121 @@ function MessageEditor() {
 }
 
 function ChatVoiceButton() {
-  const { apiStatus, chatId } = useGroupChat();
-  const { state, actions, meta } = useComposer('ChatVoiceButton');
-  const [transcribing, setTranscribing] = useState(false);
-  const [transcript, setTranscript] = useState<string | null>(null);
-
-  // insertText is a no-op while the composer is disabled (e.g. during a send),
-  // so hold the transcript until the composer can actually receive it.
-  useEffect(() => {
-    if (transcript === null || meta.disabled) return;
-    const beforeCursor = state.text.slice(0, state.cursor);
-    actions.insertText(
-      beforeCursor && !/\s$/.test(beforeCursor) ? ` ${transcript}` : transcript,
-    );
-    setTranscript(null);
-  }, [transcript, meta.disabled, state, actions]);
+  const { state } = useComposerDictation('ChatVoiceButton');
+  const label = voiceLabel(state);
+  const failure = voiceFailure(state);
 
   return (
-    <VoiceRecordButton
-      enabled={apiStatus === 'ready'}
-      disabled={meta.disabled}
-      isTranscribing={transcribing}
-      transcribe={async (audio) => {
-        setTranscribing(true);
-        try {
-          return await api.request('POST /chat/{chatId}/transcription', {
-            chatId,
-            audio,
-          });
-        } finally {
-          setTranscribing(false);
+    <>
+      <Composer.Dictate
+        render={
+          <InputGroupButton
+            size="icon-sm"
+            aria-label={label}
+            title={label}
+            className="size-10 rounded-full"
+          />
         }
-      }}
-      onTranscription={(text) =>
-        setTranscript((pending) => (pending ? `${pending} ${text}` : text))
-      }
-      renderButton={({
-        icon,
-        label,
-        isRecording,
-        disabled: voiceDisabled,
-        onClick,
-      }) => (
-        <InputGroupButton
-          type="button"
-          size="icon-sm"
-          disabled={voiceDisabled}
-          aria-label={label}
-          aria-pressed={isRecording}
-          title={label}
-          onClick={onClick}
-          className="size-10 rounded-full"
+      >
+        {voiceIcon(state)}
+      </Composer.Dictate>
+      {(state.status === 'starting' ||
+        state.status === 'recording' ||
+        state.status === 'finishing') && (
+        <Composer.CancelDictation
+          render={
+            <InputGroupButton
+              size="icon-sm"
+              aria-label="Cancel voice input"
+              title="Cancel voice input"
+              className="size-10 rounded-full"
+            />
+          }
         >
-          {icon}
-        </InputGroupButton>
+          <X className="size-4" />
+        </Composer.CancelDictation>
       )}
-    />
+      {failure && (
+        <span
+          role="status"
+          aria-live="polite"
+          className="text-destructive max-w-48 truncate text-xs"
+        >
+          {failure}
+        </span>
+      )}
+    </>
   );
+}
+
+function voiceLabel(state: DictationState) {
+  switch (state.status) {
+    case 'starting':
+      return 'Starting voice input';
+    case 'recording':
+      return 'Stop recording';
+    case 'finishing':
+      return 'Transcribing voice input';
+    case 'unavailable':
+    case 'idle':
+    case 'failed':
+      return 'Start voice input';
+  }
+}
+
+function voiceIcon(state: DictationState) {
+  switch (state.status) {
+    case 'starting':
+    case 'finishing':
+      return <Loader2 className="size-4 animate-spin" />;
+    case 'recording':
+      return (
+        <span className="relative inline-flex">
+          <Square className="size-4 fill-current" />
+          <span
+            aria-hidden="true"
+            className="bg-destructive absolute -top-0.5 -right-0.5 size-1.5 rounded-full motion-safe:animate-pulse"
+          />
+        </span>
+      );
+    case 'unavailable':
+    case 'idle':
+    case 'failed':
+      return <Mic className="size-4" />;
+  }
+}
+
+function voiceFailure(state: DictationState) {
+  switch (state.status) {
+    case 'unavailable':
+      return state.reason === 'blocked'
+        ? 'Microphone blocked — enable it in your browser site settings'
+        : 'Voice recording is unavailable in this browser';
+    case 'failed':
+      return dictationErrorMessage(state.error);
+    case 'idle':
+    case 'starting':
+    case 'recording':
+    case 'finishing':
+      return null;
+  }
+}
+
+function dictationErrorMessage(error: DictationError) {
+  switch (error.code) {
+    case 'permission-denied':
+      return 'Microphone permission denied';
+    case 'no-microphone':
+      return 'No microphone found';
+    case 'microphone-in-use':
+      return 'Microphone is in use';
+    case 'interrupted':
+      return 'Recording was interrupted';
+    case 'transcription-failed':
+      return error.cause instanceof Error
+        ? error.cause.message
+        : 'Transcription failed';
+  }
 }
 
 function SendButton() {
