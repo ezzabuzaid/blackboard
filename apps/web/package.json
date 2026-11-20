@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@better-auth/passkey": "^1.6.25",
-    "@deepagents/react-input": "7.8.2",
+    "@deepagents/react-input": "7.9.0",
     "@genui/annotation": "*",
     "@genui/voice": "*",
     "@sdk-it/client": "*",

@@ -1,9 +1,9 @@
 import { hash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 import {
-  type AgentStack,
-  PgBossTurnQueue,
+  type AgentPluginBinding,
+  EmbeddedAgentStorage,
   defineStack,
 } from '@deepagents/experimental/zukhruf';
 import {
@@ -11,52 +11,32 @@ import {
   type SchedulingWake,
   conversationSchedulingCapabilities,
 } from '@deepagents/experimental/zukhruf/conversation-scheduling';
-import { PGlite } from '@electric-sql/pglite';
-import { PgBoss, fromPglite } from 'pg-boss';
 
-export async function createGroupQueue(
-  resources: AsyncDisposableStack,
-  queuePath: string | undefined,
+/** Each participant runs on its own storage, whose turns and wakes only its runtime consumes. */
+export function openParticipantStorage(
+  groupDirectory: string,
+  participantName: string,
 ) {
-  if (queuePath) mkdirSync(queuePath, { recursive: true });
-  const database = resources.use(new PGlite(queuePath));
-  const boss = new PgBoss({ db: fromPglite(database), backend: 'pglite' });
-  boss.on('error', (error) => console.error('[queue error]', error));
-  resources.defer(() => boss.stop({ close: false, graceful: true }));
-  await boss.start();
-  return boss;
+  return EmbeddedAgentStorage.open({
+    directory: join(groupDirectory, storageSlug(participantName)),
+  });
 }
 
 export function createStack(
-  boss: PgBoss,
-  participantName: string,
-  options: Required<
-    Pick<
-      Awaited<ReturnType<AgentStack>>,
-      'store' | 'streams' | 'mailboxStore' | 'bindings'
-    >
-  >,
+  storage: EmbeddedAgentStorage,
+  bindings: readonly AgentPluginBinding[],
 ) {
-  const participantSlug = queueSlug(participantName);
   return defineStack(async () => {
-    const queue = await PgBossTurnQueue.create(boss, {
-      queue: `zukhruf-whatsapp-${participantSlug}`,
-      schema: 'pgboss',
-      pollingIntervalSeconds: 0.5,
-    });
-    const wakes = new PgBossWakeScheduler<SchedulingWake>(boss, {
-      queue: `zukhruf-whatsapp-wakes-${participantSlug}`,
+    const wakes = new PgBossWakeScheduler<SchedulingWake>(storage.boss, {
+      queue: 'zukhruf-whatsapp-wakes',
       pollingIntervalSeconds: 0.5,
     });
     await wakes.initialize();
 
     return {
-      store: options.store,
-      streams: options.streams,
-      queue,
-      mailboxStore: options.mailboxStore,
+      storage,
       bindings: [
-        ...options.bindings,
+        ...bindings,
         conversationSchedulingCapabilities.scheduler.bind(wakes),
         conversationSchedulingCapabilities.timezone.bind(
           Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -67,8 +47,8 @@ export function createStack(
   });
 }
 
-/** Queue names must be stable per participant identity: with a durable queue database, drifting names would hand one participant another's pending turns and wakes. */
-function queueSlug(name: string) {
+/** Storage directories must be stable per participant identity: drifting names would hand one participant another's conversations, pending turns and wakes. */
+function storageSlug(name: string) {
   const base = name
     .toLocaleLowerCase('en')
     .replace(/[^a-z0-9]+/g, '-')

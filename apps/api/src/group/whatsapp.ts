@@ -1,18 +1,13 @@
 import { randomUUID } from 'node:crypto';
 
-import {
-  type AgentModel,
-  type ContextFragment,
-  type ContextStore,
-  type StreamManager,
-} from '@deepagents/context';
+import { type AgentModel, type ContextFragment } from '@deepagents/context';
 import {
   type AgentDeclaration,
   type AgentHost,
   type AgentPluginDefinition,
   AgentRuntime,
   type ConversationId,
-  type MailboxStore,
+  type EmbeddedAgentStorage,
   MessageDeliveryModes,
   createInterAgentCommunication,
   defineAgent,
@@ -26,8 +21,11 @@ import {
   type GroupChatReplyResult,
   groupChatCapabilities,
 } from '../agent/plugins/group-chat.js';
-import { recordAgentExecutionModel } from './agent-executions.js';
-import { createGroupQueue, createStack } from './stack.js';
+import {
+  readAgentExecutions,
+  recordAgentExecutionModel,
+} from './agent-executions.js';
+import { createStack, openParticipantStorage } from './stack.js';
 
 export interface WhatsAppParticipant {
   name: string;
@@ -154,13 +152,10 @@ export interface WhatsAppGroupOptions {
   participants: readonly WhatsAppParticipant[];
   loadParticipants?: () => Promise<readonly WhatsAppParticipant[]>;
   sandbox: AgentDeclaration['sandbox'];
-  store: ContextStore;
-  streams: StreamManager;
-  mailboxStore: MailboxStore;
   events: WhatsAppChatEvent[];
   limits: WhatsAppGroupLimits;
-  /** Directory for the durable turn/wake queue database. Omitted: in-memory, so pending schedules die with the process. */
-  queuePath?: string;
+  /** Directory of the participants' storages: their conversations, mail, pending turns and wakes. */
+  storageDirectory: string;
   persist: (event: WhatsAppChatEvent) => void | Promise<void>;
   onMessage?: (
     message: WhatsAppMessage,
@@ -188,6 +183,7 @@ interface RunningParticipant {
   name: string;
   modelId: string;
   conversation: ConversationId;
+  storage: EmbeddedAgentStorage;
   runtime: AgentHost;
   active: boolean;
   seenThroughSequence: number;
@@ -235,7 +231,6 @@ export class WhatsAppGroup implements AsyncDisposable {
   readonly #replyCounts = new Map<string, number>();
   readonly #limits: WhatsAppGroupLimits;
   readonly #persist: WhatsAppGroupOptions['persist'];
-  readonly #store: ContextStore;
   #activity: WhatsAppGroupActivityState = {
     phase: 'idle',
     notification: 0,
@@ -265,7 +260,6 @@ export class WhatsAppGroup implements AsyncDisposable {
     this.#profiles = options.participants.map(({ name }) => ({ name }));
     this.#limits = options.limits;
     this.#persist = options.persist;
-    this.#store = options.store;
     for (const event of structuredClone(options.events)) {
       this.#cursor = event.cursor;
       this.#events.push(event);
@@ -297,29 +291,28 @@ export class WhatsAppGroup implements AsyncDisposable {
   static async create(options: WhatsAppGroupOptions) {
     WhatsAppGroup.#validate(options);
 
-    await using resources = new AsyncDisposableStack();
-    const boss = await createGroupQueue(resources, options.queuePath);
     const participants: RunningParticipant[] = [];
 
-    const disposables = resources.move();
+    const disposables = new AsyncDisposableStack();
     try {
       const startParticipant: StartParticipant = async (
         participant,
         joining,
       ) => {
-        const stack = createStack(boss, participant.name, {
-          store: options.store,
-          streams: options.streams,
-          mailboxStore: options.mailboxStore,
-          bindings: [
-            groupChatCapabilities.primaryParticipantName.bind(
-              options.participants[0]!.name,
-            ),
-            groupChatCapabilities.publishReply.bind((...reply) =>
-              group.#postParticipant(...reply),
-            ),
-          ],
-        });
+        const storage = disposables.use(
+          await openParticipantStorage(
+            options.storageDirectory,
+            participant.name,
+          ),
+        );
+        const stack = createStack(storage, [
+          groupChatCapabilities.primaryParticipantName.bind(
+            options.participants[0]!.name,
+          ),
+          groupChatCapabilities.publishReply.bind((...reply) =>
+            group.#postParticipant(...reply),
+          ),
+        ]);
 
         const participantRuntime = new AgentRuntime(
           defineAgent({
@@ -347,6 +340,7 @@ export class WhatsAppGroup implements AsyncDisposable {
             chatId: `${options.conversation.chatId}:participant:${encodeURIComponent(participant.name)}`,
             userId: options.conversation.userId,
           },
+          storage,
           runtime,
           active: false,
           seenThroughSequence: 0,
@@ -413,6 +407,22 @@ export class WhatsAppGroup implements AsyncDisposable {
       participants: [...this.#profiles],
       activity: structuredClone(this.#activity),
       cursor: this.#cursor,
+    };
+  }
+
+  async traces(participantName: string) {
+    const participant = this.#participants.find(
+      ({ name }) => name === participantName,
+    );
+    if (!participant) return null;
+    return {
+      agent: participant.name,
+      turns: await readAgentExecutions(
+        participant.storage.store,
+        participant.storage.streams.store,
+        participant.conversation,
+        participant.modelId,
+      ),
     };
   }
 
@@ -840,7 +850,7 @@ export class WhatsAppGroup implements AsyncDisposable {
         );
       } finally {
         await recordAgentExecutionModel(
-          this.#store,
+          participant.storage.store,
           participant.conversation,
           turn.id,
           participant.modelId,

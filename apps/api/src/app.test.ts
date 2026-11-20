@@ -5,22 +5,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 
-import {
-  PollingChangeSource,
-  SqliteContextStore,
-  SqliteStreamStore,
-  StreamManager,
-  createVirtualSandbox,
-} from '@deepagents/context';
+import { createVirtualSandbox } from '@deepagents/context';
 import { codex } from '@deepagents/experimental/providers/codex';
 import {
   type ConversationStatusEvent,
-  SqliteMailboxStore,
   defineSandbox,
 } from '@deepagents/experimental/zukhruf';
 import { untilAborted } from '@zukhruf/async';
 import { TemporaryFiles } from '@zukhruf/fs';
-import { open } from '@zukhruf/sqlite-open';
 import { waitFor } from '@zukhruf/testing/async';
 import { simulateReadableStream } from 'ai';
 import { MockLanguageModelV4 } from 'ai/test';
@@ -104,35 +96,30 @@ function testGroupRecord(
 }
 
 function testGroupDependencies(resources: AsyncDisposableStack) {
-  const database = open(':memory:');
-  resources.defer(() => database.close());
-  const streamStore = new SqliteStreamStore(database);
+  const directory = resources.use(
+    new TemporaryFiles().directorySync('whatsapp-group-'),
+  );
   return {
-    store: new SqliteContextStore(database),
-    streams: new StreamManager({
-      store: streamStore,
-      changeSource: new PollingChangeSource({ reads: streamStore }),
-    }),
-    mailboxStore: resources.use(new SqliteMailboxStore(':memory:')),
+    storageDirectory: directory.path,
     events: [],
     limits: testGroupLimits,
     persist: async () => {},
   };
 }
 
-// Only the stores are in memory. Each chat that opens under queueDirectory writes
-// a full PGlite data directory of about 39 MB (#1018), so a test owns the folder.
+// Only the group stream store is in memory. Each participant of a chat that opens
+// under storageDirectory writes a full PGlite data directory of about 39 MB (#1018),
+// so a test owns the folder.
 function memoryRuntime(
   participants: WhatsAppParticipant[],
-  queueDirectory: string,
+  storageDirectory: string,
 ) {
   return new WhatsAppChatRuntime({
     loadParticipants: async () => participants,
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
-    mailboxPath: ':memory:',
-    queueDirectory,
+    storageDirectory,
   });
 }
 
@@ -145,8 +132,7 @@ function durableRuntime(
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: join(directory, 'group.sqlite'),
-    mailboxPath: join(directory, 'mailbox.sqlite'),
-    queueDirectory: join(directory, 'queues'),
+    storageDirectory: join(directory, 'agents'),
   });
 }
 
@@ -385,7 +371,7 @@ test('history does not initialize an unopened group runtime', async () => {
   await using directory = await new TemporaryFiles().directory(
     'zukhruf-history-',
   );
-  const queueDirectory = join(directory.path, 'queues');
+  const storageDirectory = join(directory.path, 'agents');
   let participantLoads = 0;
   await using runtime = new WhatsAppChatRuntime({
     loadParticipants: async () => {
@@ -395,8 +381,7 @@ test('history does not initialize an unopened group runtime', async () => {
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: join(directory.path, 'group.sqlite'),
-    mailboxPath: join(directory.path, 'mailbox.sqlite'),
-    queueDirectory,
+    storageDirectory,
   });
   const group = testGroupRecord('unopened-group', 'Unopened group', []);
   const app = testApp({ listGroups: async () => [group], runtime });
@@ -406,7 +391,7 @@ test('history does not initialize an unopened group runtime', async () => {
   assert.equal(response.status, 200);
   assert.equal(participantLoads, 0);
   assert.equal(
-    existsSync(join(queueDirectory, encodeURIComponent(group.id))),
+    existsSync(join(storageDirectory, encodeURIComponent(group.id))),
     false,
   );
   assert.deepEqual(await response.json(), [
@@ -1663,8 +1648,7 @@ test('chat runtime reports new messages to the group summary sink', async () => 
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
-    mailboxPath: ':memory:',
-    queueDirectory: queues.path,
+    storageDirectory: queues.path,
   });
 
   const message = await runtime.post(testGroupConversation, {
@@ -1769,8 +1753,7 @@ test('chat runtime rebuilds message projections from the durable log', async (t)
       limits: testGroupLimits,
       sandboxForChat: () => testGroupSandbox,
       databasePath: join(directory.path, 'group.sqlite'),
-      mailboxPath: join(directory.path, 'mailbox.sqlite'),
-      queueDirectory: join(directory.path, 'queues'),
+      storageDirectory: join(directory.path, 'agents'),
     });
 
   let message: Awaited<ReturnType<WhatsAppChatRuntime['post']>>;
@@ -1800,8 +1783,7 @@ test('snapshots reuse the active chat roster', async () => {
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
-    mailboxPath: ':memory:',
-    queueDirectory: queues.path,
+    storageDirectory: queues.path,
   });
 
   await runtime.snapshot({ userId: 'user-1', chatId: 'chat-1' });
@@ -1854,8 +1836,7 @@ test('new participants join an active chat, read its transcript, and greet once'
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
-    mailboxPath: ':memory:',
-    queueDirectory: queues.path,
+    storageDirectory: queues.path,
   });
 
   await runtime.post(conversation, {
@@ -1923,8 +1904,7 @@ test('a chat stops instead of freezing when the pump throws', async (t) => {
     limits: testGroupLimits,
     sandboxForChat: () => testGroupSandbox,
     databasePath: ':memory:',
-    mailboxPath: ':memory:',
-    queueDirectory: queues.path,
+    storageDirectory: queues.path,
   });
 
   await runtime.post(conversation, { id: 'message-1', content: 'Hello.' });
@@ -3729,14 +3709,16 @@ test('agent inspector reads durable chat executions without telemetry', async (t
     }),
   };
 
-  await using runtime = durableRuntime([participant], directory.path);
-  await runtime.post(conversation, {
-    id: 'message-1',
-    content: 'Review this plan.',
-  });
-  await waitForChat(t, runtime, conversation, 'settled');
-
-  const inspector = await runtime.traces(conversation, participant.name);
+  // A participant's storage opens in one runtime at a time, so the writer closes before the reader opens.
+  const inspector = await (async () => {
+    await using runtime = durableRuntime([participant], directory.path);
+    await runtime.post(conversation, {
+      id: 'message-1',
+      content: 'Review this plan.',
+    });
+    await waitForChat(t, runtime, conversation, 'settled');
+    return await runtime.traces(conversation, participant.name);
+  })();
   assert.equal(inspector?.agent, participant.name);
   assert.equal(inspector?.turns.length, 1);
   assert.equal(inspector?.turns[0]?.modelId, participant.model.modelId);
@@ -3753,25 +3735,23 @@ test('agent inspector reads durable chat executions without telemetry', async (t
     text: 'Nothing useful to add.',
   });
 
-  {
-    await using reader = durableRuntime(
-      [
-        {
-          ...participant,
-          model: new MockLanguageModelV4({ modelId: 'model-v2' }),
-        },
-      ],
-      directory.path,
-    );
-    assert.deepEqual(
-      await reader.traces(conversation, participant.name),
-      inspector,
-    );
-  }
-
-  await runtime.clear(conversation);
+  await using reader = durableRuntime(
+    [
+      {
+        ...participant,
+        model: new MockLanguageModelV4({ modelId: 'model-v2' }),
+      },
+    ],
+    directory.path,
+  );
   assert.deepEqual(
-    (await runtime.traces(conversation, participant.name))?.turns,
+    await reader.traces(conversation, participant.name),
+    inspector,
+  );
+
+  await reader.clear(conversation);
+  assert.deepEqual(
+    (await reader.traces(conversation, participant.name))?.turns,
     [],
   );
 });

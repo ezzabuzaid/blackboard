@@ -140,8 +140,7 @@ const runtime = resources.use(
     },
     sandboxForChat: (conversation) => sandboxes.sandboxFor(conversation),
     databasePath: resolve(dataDirectory, 'group.sqlite'),
-    mailboxPath: resolve(dataDirectory, 'mailbox.sqlite'),
-    queueDirectory: resolve(dataDirectory, 'queues'),
+    storageDirectory: resolve(dataDirectory, 'agents'),
   }),
 );
 

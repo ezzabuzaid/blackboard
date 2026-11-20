@@ -13,9 +13,8 @@
   "dependencies": {
     "@ai-sdk/openai": "4.0.121",
     "@better-auth/passkey": "^1.6.25",
-    "@deepagents/context": "7.7.0",
-    "@deepagents/experimental": "7.7.0",
-    "@electric-sql/pglite": "0.5.4",
+    "@deepagents/context": "7.9.0",
+    "@deepagents/experimental": "7.9.0",
     "@godaddy/terminus": "^4.12.1",
     "@hono/node-server": "2.0.12",
     "@opentelemetry/api": "1.9.1",
@@ -30,7 +29,6 @@
     "evlog": "2.24.0",
     "hono": "4.13.2",
     "p-memoize": "^9.0.0",
-    "pg-boss": "12.36.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

@@ -124,14 +124,14 @@ route. The API rejects paths outside that directory.
 
 All application state stays under `ZUKHRUF_DATA_DIR`:
 
-| Data                                         | Storage                                      |
-| -------------------------------------------- | -------------------------------------------- |
-| Users, passkeys, and sessions                | `auth.sqlite`                                |
-| Groups, messages, context, and event streams | `group.sqlite`                               |
-| Agent mailboxes and scheduled turns          | `mailbox.sqlite` and `queues/`               |
-| Marketplace templates and share links        | `group-templates.sqlite` and `shares.sqlite` |
-| Custom agents and execution traces           | `participants/` and `group-telemetry/`       |
-| Group files and published artifacts          | `sandboxes/`                                 |
+| Data                                          | Storage                                      |
+| --------------------------------------------- | -------------------------------------------- |
+| Users, passkeys, and sessions                 | `auth.sqlite`                                |
+| Groups, messages, and event streams           | `group.sqlite`                               |
+| Agent context, mailboxes, and scheduled turns | `agents/`                                    |
+| Marketplace templates and share links         | `group-templates.sqlite` and `shares.sqlite` |
+| Custom agents and execution traces            | `participants/` and `group-telemetry/`       |
+| Group files and published artifacts           | `sandboxes/`                                 |
 
 ## Repository map
 
