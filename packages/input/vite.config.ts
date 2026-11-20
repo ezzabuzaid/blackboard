@@ -51,7 +51,6 @@ export default defineConfig(() => ({
   test: {
     name: 'genui-input',
     watch: false,
-    globals: true,
     environment: 'happy-dom',
     pool: 'forks',
     execArgv: ['--no-experimental-webstorage'],
